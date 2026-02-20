@@ -11,6 +11,7 @@ from typing import List, Dict, Optional, Tuple
 from models import Note, KeyEvent, MusicalSection, KeyState
 from core import TempoMap, KeyMapper
 from analysis import Humanizer, PedalGenerator
+import RobloxMidiConnect_encoder as rmc_encoder
 
 class Player(QObject):
     status_updated = Signal(str)
@@ -22,6 +23,7 @@ class Player(QObject):
     def __init__(self, config: Dict, notes: List[Note], sections: List[MusicalSection], tempo_map: TempoMap):
         super().__init__()
         self.config = config
+        self.output_mode = self.config.get('output_mode', 'key')
         self.notes = notes
         self.sections = sections
         self.tempo_map = tempo_map
@@ -165,16 +167,16 @@ class Player(QObject):
                     key_data = self.mapper.get_key_data(mistake_pitch)
                     if key_data:
                         mk_char = key_data['key']
-                        heapq.heappush(temp_heap, KeyEvent(note.start_time, 2, 'press', mk_char, pitch=mistake_pitch))
-                        heapq.heappush(temp_heap, KeyEvent(note.start_time + note.duration, 4, 'release', mk_char, pitch=mistake_pitch))
+                        heapq.heappush(temp_heap, KeyEvent(note.start_time, 2, 'press', mk_char, pitch=mistake_pitch, velocity=note.velocity))
+                        heapq.heappush(temp_heap, KeyEvent(note.start_time + note.duration, 4, 'release', mk_char, pitch=mistake_pitch, velocity=0))
                         mistake_scheduled = True
 
             if not mistake_scheduled:
                 key_data = self.mapper.get_key_data(note.pitch)
                 if key_data:
                     key_char = key_data['key']
-                    heapq.heappush(temp_heap, KeyEvent(note.start_time, 2, 'press', key_char, pitch=note.pitch))
-                    heapq.heappush(temp_heap, KeyEvent(note.end_time, 4, 'release', key_char, pitch=note.pitch))
+                    heapq.heappush(temp_heap, KeyEvent(note.start_time, 2, 'press', key_char, pitch=note.pitch, velocity=note.velocity))
+                    heapq.heappush(temp_heap, KeyEvent(note.end_time, 4, 'release', key_char, pitch=note.pitch, velocity=0))
                     if key_char not in self.key_states: self.key_states[key_char] = KeyState(key_char)
             
             played_pitches_in_section.add(note.pitch)
@@ -259,7 +261,7 @@ class Player(QObject):
         release_events = [e for e in events if e.action == 'release']
         pedal_events = [e for e in events if e.action == 'pedal']
 
-        for event in pedal_events: 
+        for event in pedal_events:
             self._log_debug(f"[ACT] {playback_time:.4f}s | PEDAL {event.key_char.upper()} (Delta: {playback_time - event.time:+.4f}s)")
             self._handle_pedal_event(event)
 
@@ -267,34 +269,48 @@ class Player(QObject):
             self._log_debug(f"[ACT] {playback_time:.4f}s | RELEASE | {event.key_char} (Delta: {playback_time - event.time:+.4f}s)")
             if event.pitch is not None:
                 self.visualizer_updated.emit(event.pitch, False)
-                
+
+            if self.output_mode == 'midi_numpad':
+                if event.pitch is not None:
+                    rmc_encoder.send_note_message(event.pitch, velocity=0, is_note_off=True)
+                continue
+
             key_char = event.key_char
             state = self.key_states.get(key_char)
-            if not state: continue
-            
+            if not state: 
+                continue
+
             base_key = key_char
-            if key_char in self.mapper.SYMBOL_MAP: base_key = self.mapper.SYMBOL_MAP[key_char]
-            
-            state.release() 
-            try: 
+            if key_char in self.mapper.SYMBOL_MAP:
+                base_key = self.mapper.SYMBOL_MAP[key_char]
+
+            state.release()
+            try:
                 self.keyboard.release(base_key)
                 self._log_debug(f"      [PHYSICAL] Releasing Key '{base_key}'")
-            except: pass
+            except Exception:
+                pass
 
         for event in press_events:
             self._log_debug(f"[ACT] {playback_time:.4f}s | PRESS   | {event.key_char} (Delta: {playback_time - event.time:+.4f}s)")
             if event.pitch is not None:
                 self.visualizer_updated.emit(event.pitch, True)
-                
+
+            if self.output_mode == 'midi_numpad':
+                if event.pitch is not None:
+                    rmc_encoder.send_note_message(event.pitch, velocity=event.velocity, is_note_off=False)
+                continue
+
             state = self.key_states.get(event.key_char)
-            if not state or event.pitch is None: continue
-            
+            if not state or event.pitch is None:
+                continue
+
             modifiers, base_key = self._get_press_info_from_event(event)
-            
+
             was_physically_down = state.is_physically_down
             is_sustained_only = state.is_sustained and not state.is_active
             state.press()
-            
+
             try:
                 with self.keyboard.pressed(*modifiers):
                     if is_sustained_only:
@@ -305,22 +321,30 @@ class Player(QObject):
                     elif not was_physically_down:
                         self.keyboard.press(base_key)
                         self._log_debug(f"      [PHYSICAL] Pressing Key '{base_key}' with modifiers {modifiers}")
-            except Exception: pass
+            except Exception:
+                pass
 
     def _handle_pedal_event(self, event: KeyEvent):
         if self.stop_event.is_set(): return
+        if self.output_mode == 'midi_numpad':
+            value = 127 if event.key_char == 'down' else 0
+            rmc_encoder.send_pedal(value)
+            return
+
         if event.key_char == 'down' and not self.pedal_is_down:
             self.pedal_is_down = True
-            try: 
+            try:
                 self.keyboard.press(Key.space)
                 self._log_debug("      [PHYSICAL] Pressing Space (Pedal)")
-            except Exception: pass
+            except Exception:
+                pass
         elif event.key_char == 'up' and self.pedal_is_down:
             self.pedal_is_down = False
-            try: 
+            try:
                 self.keyboard.release(Key.space)
                 self._log_debug("      [PHYSICAL] Releasing Space (Pedal)")
-            except Exception: pass
+            except Exception:
+                pass
 
     def shutdown(self):
         self.status_updated.emit("Releasing all keys...")

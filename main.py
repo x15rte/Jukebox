@@ -3,23 +3,26 @@ import sys
 import os
 import json
 import copy
+import threading
 from pathlib import Path
 from pynput import keyboard
 from pynput.keyboard import Key
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QCheckBox, QSlider, QLabel, QFileDialog,
-                             QGroupBox, QTabWidget, QTextEdit, QComboBox, QDoubleSpinBox, 
-                             QMessageBox, QGridLayout, QStatusBar, QDialog, QTableWidget, 
-                             QTableWidgetItem, QHeaderView, QAbstractItemView, QDialogButtonBox, 
-                             QSizePolicy, QScrollArea)
+                             QGroupBox, QTabWidget, QTextEdit, QComboBox, QDoubleSpinBox,
+                             QMessageBox, QGridLayout, QStatusBar, QDialog, QTableWidget,
+                             QTableWidgetItem, QHeaderView, QAbstractItemView, QDialogButtonBox,
+                             QSizePolicy, QScrollArea, QRadioButton)
 from PyQt6.QtCore import QObject, QThread, pyqtSignal as Signal, Qt
 from PyQt6.QtGui import QFont
+import mido
 
 from models import Note, MidiTrack
-from core import MidiParser
+from core import MidiParser, KeyMapper
 from analysis import SectionAnalyzer, FingeringEngine
 from visualizer import PianoWidget, TimelineWidget
 from player import Player
+import RobloxMidiConnect_encoder as rmc_encoder
 
 class HotkeyManager(QObject):
     toggle_requested = Signal()
@@ -114,6 +117,9 @@ class MainWindow(QMainWindow):
         self.setMinimumWidth(800)
         self.player_thread = None
         self.player = None
+        self.midi_input_thread = None
+        self.midi_input_worker = None
+        self.midi_input_active = False
         self.config_dir = Path.home() / ".midi2key"
         self.config_path = self.config_dir / "config.json"
         self.config_dir.mkdir(exist_ok=True)
@@ -136,6 +142,11 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._load_config()
+        self.live_keyboard = keyboard.Controller()
+        self._live_pressed_keys = set()
+        self._live_pedal_down = False
+        self._live_mapper = KeyMapper(use_88_key_layout=self.use_88_key_check.isChecked())
+        self.use_88_key_check.toggled.connect(self._rebuild_live_mapper)
 
     def _setup_ui(self):
         main_widget = QWidget()
@@ -358,23 +369,283 @@ class MainWindow(QMainWindow):
         return slider, spinbox
 
     def _create_file_group(self):
-        group = QGroupBox("MIDI")
+        group = QGroupBox("Input")
         layout = QVBoxLayout(group)
+
+        mode_layout = QHBoxLayout()
+        mode_label = QLabel("Input Mode:")
+        self.input_mode_file_radio = QRadioButton("File (MIDI)")
+        self.input_mode_piano_radio = QRadioButton("Piano (MIDI In)")
+        self.input_mode_file_radio.setChecked(True)
+        self.input_mode_file_radio.toggled.connect(self._on_input_mode_changed)
+        self.input_mode_piano_radio.toggled.connect(self._on_input_mode_changed)
+        mode_layout.addWidget(mode_label)
+        mode_layout.addWidget(self.input_mode_file_radio)
+        mode_layout.addWidget(self.input_mode_piano_radio)
+        mode_layout.addStretch(1)
+        layout.addLayout(mode_layout)
+
+        self.file_input_widget = QWidget()
+        file_layout = QVBoxLayout(self.file_input_widget)
         self.file_path_label = QLabel("No file selected.")
         self.file_path_label.setStyleSheet("font-style: italic; color: grey;")
         browse_button = QPushButton("Browse for MIDI File")
         browse_button.clicked.connect(self.select_file)
-        layout.addWidget(self.file_path_label)
-        layout.addWidget(browse_button)
+        file_layout.addWidget(self.file_path_label)
+        file_layout.addWidget(browse_button)
+        layout.addWidget(self.file_input_widget)
+
+        self.piano_input_widget = QWidget()
+        piano_layout = QVBoxLayout(self.piano_input_widget)
+        device_row = QHBoxLayout()
+        device_label = QLabel("MIDI Input Device:")
+        self.midi_input_combo = QComboBox()
+        self.midi_input_refresh_btn = QPushButton("Refresh")
+        self.midi_input_refresh_btn.clicked.connect(self._refresh_midi_inputs)
+        device_row.addWidget(device_label)
+        device_row.addWidget(self.midi_input_combo)
+        device_row.addWidget(self.midi_input_refresh_btn)
+        piano_layout.addLayout(device_row)
+
+        control_row = QHBoxLayout()
+        self.midi_input_connect_btn = QPushButton("Connect")
+        self.midi_input_disconnect_btn = QPushButton("Disconnect")
+        self.midi_input_disconnect_btn.setEnabled(False)
+        self.midi_input_connect_btn.clicked.connect(self._connect_midi_input)
+        self.midi_input_disconnect_btn.clicked.connect(self._disconnect_midi_input)
+        control_row.addWidget(self.midi_input_connect_btn)
+        control_row.addWidget(self.midi_input_disconnect_btn)
+        control_row.addStretch(1)
+        piano_layout.addLayout(control_row)
+
+        self.midi_input_status_label = QLabel("Piano input disabled.")
+        self.midi_input_status_label.setStyleSheet("font-style: italic; color: grey;")
+        piano_layout.addWidget(self.midi_input_status_label)
+
+        layout.addWidget(self.piano_input_widget)
+        self.piano_input_widget.hide()
+
         return group
+
+    def _on_input_mode_changed(self):
+        use_piano = self.input_mode_piano_radio.isChecked()
+        self.file_input_widget.setVisible(not use_piano)
+        self.piano_input_widget.setVisible(use_piano)
+
+        if use_piano:
+            self._refresh_midi_inputs()
+        else:
+            if self.midi_input_active:
+                self._disconnect_midi_input()
+
+    def _refresh_midi_inputs(self):
+        try:
+            names = mido.get_input_names()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to list MIDI input devices:\n{e}")
+            return
+        self.midi_input_combo.clear()
+        self.midi_input_combo.addItems(names)
+
+    def _connect_midi_input(self):
+        if self.midi_input_active:
+            return
+
+        if self.player_thread and self.player_thread.isRunning():
+            self.handle_stop()
+
+        port_name = self.midi_input_combo.currentText()
+        if not port_name:
+            QMessageBox.warning(self, "No Device", "No MIDI input device selected.")
+            return
+
+        class MidiInputWorker(QObject):
+            message_received = Signal(object)
+            connected = Signal()
+            connection_error = Signal(str)
+            finished = Signal()
+
+            def __init__(self, port):
+                super().__init__()
+                self._port = port
+                self._inport = None
+                self._stop_event = threading.Event()
+
+            def stop(self):
+                self._stop_event.set()
+                port = self._inport
+                if port is not None:
+                    try:
+                        port.close()
+                    except Exception:
+                        pass
+
+            def run(self):
+                try:
+                    self._inport = mido.open_input(self._port)
+                except Exception as e:
+                    self.connection_error.emit(str(e))
+                    self.finished.emit()
+                    return
+                self.connected.emit()
+                try:
+                    while not self._stop_event.is_set():
+                        for msg in self._inport.iter_pending():
+                            if self._stop_event.is_set():
+                                break
+                            self.message_received.emit(msg)
+                        self._stop_event.wait(0.005)
+                except Exception:
+                    pass
+                finally:
+                    if self._inport is not None:
+                        try:
+                            self._inport.close()
+                        except Exception:
+                            pass
+                        self._inport = None
+                self.finished.emit()
+
+        self.midi_input_thread = QThread()
+        self.midi_input_worker = MidiInputWorker(port_name)
+        self.midi_input_worker.moveToThread(self.midi_input_thread)
+        self.midi_input_thread.started.connect(self.midi_input_worker.run)
+        self.midi_input_worker.message_received.connect(self._handle_live_midi_message)
+        self.midi_input_worker.connected.connect(lambda: self._on_midi_input_connected(port_name))
+        self.midi_input_worker.connection_error.connect(self._on_midi_input_error)
+        self.midi_input_worker.finished.connect(self.midi_input_thread.quit)
+        self.midi_input_worker.finished.connect(self._on_midi_input_finished)
+
+        self.midi_input_thread.start()
+        self.midi_input_active = True
+        self.midi_input_connect_btn.setEnabled(False)
+        self.midi_input_disconnect_btn.setEnabled(True)
+        self.midi_input_status_label.setText(f"Connecting to: {port_name}...")
+
+    def _on_midi_input_connected(self, port_name):
+        self.midi_input_status_label.setText(f"Connected to: {port_name}")
+        self.add_log_message(f"Connected to MIDI input: {port_name}")
+
+    def _on_midi_input_error(self, error_msg):
+        self.add_log_message(f"MIDI input connection failed: {error_msg}")
+        QMessageBox.critical(self, "Connection Failed",
+                             f"Failed to open MIDI input device:\n{error_msg}")
+
+    def _release_all_live_keys(self):
+        for key in list(self._live_pressed_keys):
+            try:
+                self.live_keyboard.release(key)
+            except Exception:
+                pass
+        self._live_pressed_keys.clear()
+        if self._live_pedal_down:
+            try:
+                self.live_keyboard.release(Key.space)
+            except Exception:
+                pass
+            self._live_pedal_down = False
+
+    def _disconnect_midi_input(self):
+        if not self.midi_input_active:
+            return
+        self._release_all_live_keys()
+        if self.midi_input_worker is not None:
+            try:
+                self.midi_input_worker.stop()
+            except Exception:
+                pass
+        if self.midi_input_thread is not None:
+            self.midi_input_thread.quit()
+            self.midi_input_thread.wait(2000)
+
+    def _on_midi_input_finished(self):
+        self.midi_input_active = False
+        self.midi_input_thread = None
+        self.midi_input_worker = None
+        self.midi_input_connect_btn.setEnabled(True)
+        self.midi_input_disconnect_btn.setEnabled(False)
+        self.midi_input_status_label.setText("Piano input disconnected.")
+        self.add_log_message("MIDI input disconnected.")
+
+    def _current_output_mode(self) -> str:
+        if hasattr(self, "output_mode_combo"):
+            data = self.output_mode_combo.currentData()
+            if data:
+                return data
+        return "key"
+
+    def _on_output_mode_changed(self):
+        self._release_all_live_keys()
+
+    def _rebuild_live_mapper(self, checked: bool):
+        self._live_mapper = KeyMapper(use_88_key_layout=checked)
+
+    def _handle_live_midi_message(self, msg):
+        mode = self._current_output_mode()
+
+        if mode == "midi_numpad":
+            rmc_encoder.process_mido_message(msg)
+            return
+
+        msg_type = getattr(msg, "type", None)
+        if msg_type not in ("note_on", "note_off", "control_change"):
+            return
+
+        if msg_type in ("note_on", "note_off"):
+            note = getattr(msg, "note", None)
+            velocity = getattr(msg, "velocity", 0)
+            if note is None:
+                return
+
+            is_off = msg_type == "note_off" or (msg_type == "note_on" and velocity == 0)
+            key_data = self._live_mapper.get_key_data(note)
+            if not key_data:
+                return
+
+            base_key = key_data["key"]
+            modifiers = key_data["modifiers"]
+            try:
+                if is_off:
+                    self.live_keyboard.release(base_key)
+                    self._live_pressed_keys.discard(base_key)
+                else:
+                    with self.live_keyboard.pressed(*modifiers):
+                        self.live_keyboard.press(base_key)
+                    self._live_pressed_keys.add(base_key)
+            except Exception:
+                pass
+            return
+
+        if msg_type == "control_change":
+            control = getattr(msg, "control", None)
+            value = getattr(msg, "value", 0)
+            if control == 64:
+                try:
+                    if value >= 64:
+                        self.live_keyboard.press(Key.space)
+                        self._live_pedal_down = True
+                    else:
+                        self.live_keyboard.release(Key.space)
+                        self._live_pedal_down = False
+                except Exception:
+                    pass
 
     def _create_playback_group(self):
         group = QGroupBox("Playback")
         grid = QGridLayout(group)
         tempo_label = QLabel("Tempo")
         self.tempo_slider, self.tempo_spinbox = self._create_slider_and_spinbox(10.0, 200.0, 100.0, "%", factor=10.0, decimals=1)
-        grid.addWidget(tempo_label, 0, 0); 
-        grid.addWidget(self.tempo_slider, 0, 2); grid.addWidget(self.tempo_spinbox, 0, 3)
+        grid.addWidget(tempo_label, 0, 0)
+        grid.addWidget(self.tempo_slider, 0, 2)
+        grid.addWidget(self.tempo_spinbox, 0, 3)
+
+        output_label = QLabel("Output Mode")
+        self.output_mode_combo = QComboBox()
+        self.output_mode_combo.addItem("KEY Mode", userData="key")
+        self.output_mode_combo.addItem("MIDI Numpad Mode", userData="midi_numpad")
+        self.output_mode_combo.currentIndexChanged.connect(self._on_output_mode_changed)
+        grid.addWidget(output_label, 1, 0)
+        grid.addWidget(self.output_mode_combo, 1, 2, 1, 2)
 
         pedal_label = QLabel("Pedal Style")
         self.pedal_style_combo = QComboBox()
@@ -384,14 +655,14 @@ class MainWindow(QMainWindow):
         self.pedal_style_combo.setItemData(2, "Presses pedal only while keys are held down.", Qt.ItemDataRole.ToolTipRole)
         self.pedal_style_combo.setItemData(3, "Disables auto-pedal entirely.", Qt.ItemDataRole.ToolTipRole)
 
-        grid.addWidget(pedal_label, 1, 0)
-        grid.addWidget(self.pedal_style_combo, 1, 2, 1, 2)
+        grid.addWidget(pedal_label, 2, 0)
+        grid.addWidget(self.pedal_style_combo, 2, 2, 1, 2)
         self.use_88_key_check = QCheckBox("Use 88-Key Extended Layout")
-        grid.addWidget(self.use_88_key_check, 2, 0, 1, 4)
+        grid.addWidget(self.use_88_key_check, 3, 0, 1, 4)
         self.countdown_check = QCheckBox("3 second countdown")
         self.debug_check = QCheckBox("Enable debug output")
-        grid.addWidget(self.countdown_check, 3, 0, 1, 4)
-        grid.addWidget(self.debug_check, 4, 0, 1, 4)
+        grid.addWidget(self.countdown_check, 4, 0, 1, 4)
+        grid.addWidget(self.debug_check, 5, 0, 1, 4)
         grid.setColumnStretch(2, 1)
         self._reset_playback_group_to_default()
         return group
@@ -490,6 +761,7 @@ class MainWindow(QMainWindow):
         internal_style = self.pedal_mapping.get(display_text, 'hybrid')
         config = {
             'tempo': self.tempo_spinbox.value(),
+            'output_mode': self._current_output_mode(),
             'pedal_style': internal_style,
             'use_88_key_layout': self.use_88_key_check.isChecked(),
             'countdown': self.countdown_check.isChecked(),
@@ -528,6 +800,11 @@ class MainWindow(QMainWindow):
         try:
             with open(self.config_path, 'r') as f: config = json.load(f)
             self.tempo_spinbox.setValue(config.get('tempo', 100.0))
+            saved_output_mode = config.get('output_mode', 'key')
+            for i in range(self.output_mode_combo.count()):
+                if self.output_mode_combo.itemData(i) == saved_output_mode:
+                    self.output_mode_combo.setCurrentIndex(i)
+                    break
             internal_style = config.get('pedal_style', 'hybrid')
             display_text = self.pedal_mapping_inv.get(internal_style, "Automatic (Default)")
             self.pedal_style_combo.setCurrentText(display_text)
@@ -565,6 +842,7 @@ class MainWindow(QMainWindow):
             'use_88_key_layout': self.use_88_key_check.isChecked(),
             'pedal_style': internal_style, 
             'debug_mode': self.debug_check.isChecked(),
+            'output_mode': self._current_output_mode(),
             'simulate_hands': self.all_humanization_checks['simulate_hands'].isChecked(),
             'vary_velocity': False,
             'enable_chord_roll': self.all_humanization_checks['enable_chord_roll'].isChecked(),
@@ -694,6 +972,9 @@ class MainWindow(QMainWindow):
         self.player_thread = None
 
     def closeEvent(self, event):
+        if self.midi_input_active:
+            self._disconnect_midi_input()
+        self._release_all_live_keys()
         if self.player and self.player_thread and self.player_thread.isRunning():
             self.player.stop()
             self.player_thread.wait(1000)
