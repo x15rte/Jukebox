@@ -117,6 +117,7 @@ class TimelineWidget(QWidget):
         new_width = int(self.total_duration * self.pixels_per_second)
         new_width = max(new_width, 800)
         self.setFixedWidth(new_width)
+        self.current_time = 0.0
         self.update()
 
     def set_position(self, time: float):

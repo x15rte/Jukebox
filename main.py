@@ -326,8 +326,10 @@ class MainWindow(QMainWindow):
         button_layout = QHBoxLayout()
         self.play_button = QPushButton("Play") 
         self.stop_button = QPushButton("Stop")
+        self.reset_button = QPushButton("Reset")
         button_layout.addWidget(self.play_button)
         button_layout.addWidget(self.stop_button)
+        button_layout.addWidget(self.reset_button)
         button_layout.addStretch()
         
         main_layout.addLayout(media_layout)
@@ -339,8 +341,10 @@ class MainWindow(QMainWindow):
 
         self.play_button.clicked.connect(self.handle_play)
         self.stop_button.clicked.connect(self.handle_stop)
+        self.reset_button.clicked.connect(self.handle_reset)
         self.play_button.setEnabled(False) 
         self.stop_button.setEnabled(False)
+        self.reset_button.setEnabled(False)
 
     def _toggle_always_on_top(self, checked):
         flags = self.windowFlags()
@@ -1005,6 +1009,7 @@ class MainWindow(QMainWindow):
             self.parsed_tempo_map = tempo_map 
             self.add_log_message(f"Tracks selected: {len(self.selected_tracks_info)}")
             self.play_button.setEnabled(True)
+            self.reset_button.setEnabled(True)
 
             preview_notes = []
             for track, role in self.selected_tracks_info:
@@ -1019,12 +1024,15 @@ class MainWindow(QMainWindow):
             total_dur = max(n.end_time for n in preview_notes) if preview_notes else 1.0
             self.total_song_duration_sec = total_dur
             self.timeline_widget.set_data(preview_notes, total_dur, tempo_map)
+            self.timeline_widget.set_position(0)
+            self._on_visual_scrub(0)
             self._update_time_label(0, total_dur)
             self.tabs.setCurrentIndex(1)
         else:
             self.add_log_message("Track selection cancelled.")
             self.selected_tracks_info = None
             self.play_button.setEnabled(False)
+            self.reset_button.setEnabled(False)
 
     def handle_play(self):
         if self.player_thread and self.player_thread.isRunning(): 
@@ -1107,6 +1115,14 @@ class MainWindow(QMainWindow):
 
     def handle_stop(self):
         if self.player: self.player.stop()
+
+    def handle_reset(self):
+        """Reset song progress to 0: update timeline, time label, piano highlight; if playing, seek to start."""
+        self.timeline_widget.set_position(0)
+        self._update_time_label(0, self.total_song_duration_sec)
+        self._on_visual_scrub(0)
+        if self.player and self.player_thread and self.player_thread.isRunning():
+            self.player.seek(0)
 
     def on_playback_finished(self):
         self.add_log_message("Playback process finished.\n" + "="*50 + "\n")
