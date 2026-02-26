@@ -7,6 +7,7 @@ import re
 import json
 import copy
 import threading
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from pynput import keyboard
@@ -16,7 +17,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGroupBox, QTabWidget, QTextEdit, QComboBox, QDoubleSpinBox,
                              QMessageBox, QGridLayout, QStatusBar, QDialog, QTableWidget,
                              QTableWidgetItem, QHeaderView, QAbstractItemView, QDialogButtonBox,
-                             QSizePolicy, QScrollArea, QRadioButton)
+                             QSizePolicy, QScrollArea, QRadioButton, QLineEdit)
 from PyQt6.QtCore import QObject, QThread, QByteArray, pyqtSignal as Signal, Qt
 from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import QTextBrowser
@@ -40,7 +41,6 @@ LOG_FILENAME = "log.txt"
 def _get_git_version() -> str:
     """Return short git rev (HEAD) for display; empty if not a repo or on error."""
     try:
-        import subprocess
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=5,
@@ -48,8 +48,9 @@ def _get_git_version() -> str:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError):
+        # Not a git repository or git is unavailable; omit version suffix.
+        return ""
     return ""
 
 
@@ -68,7 +69,7 @@ def _parse_hotkey_string(s: str):
         try:
             return KeyCode.from_char(s)
         except Exception:
-            pass
+            return Key.f6
     return Key.f6
 
 
@@ -172,6 +173,7 @@ class MidiInputWorker(QObject):
     message_received = Signal(object)
     connected = Signal()
     connection_error = Signal(str)
+    warning = Signal(str)
     finished = Signal()
 
     def __init__(self, port):
@@ -186,8 +188,8 @@ class MidiInputWorker(QObject):
         if port is not None:
             try:
                 port.close()
-            except Exception:
-                pass
+            except OSError as e:
+                self.warning.emit(f"Failed to close MIDI input port: {e}")
 
     def run(self):
         try:
@@ -204,14 +206,14 @@ class MidiInputWorker(QObject):
                         break
                     self.message_received.emit(msg)
                 self._stop_event.wait(0.005)
-        except Exception:
-            pass
+        except Exception as e:
+            self.connection_error.emit(str(e))
         finally:
             if self._inport is not None:
                 try:
                     self._inport.close()
-                except Exception:
-                    pass
+                except OSError as e:
+                    self.warning.emit(f"Failed to close MIDI input port during cleanup: {e}")
                 self._inport = None
         self.finished.emit()
 
@@ -235,7 +237,8 @@ class MainWindow(QMainWindow):
         self.parsed_tempo_map = None
         self.current_notes = [] 
         self.total_song_duration_sec = 1.0
-        
+        self._log_entries = []
+
         self.hotkey_manager = HotkeyManager()
         self.hotkey_manager.toggle_requested.connect(self.toggle_playback_state)
         self.hotkey_manager.bound_updated.connect(self._on_hotkey_bound)
@@ -310,6 +313,7 @@ class MainWindow(QMainWindow):
         log_layout = QVBoxLayout(log_tab)
         log_layout.addWidget(self.log_output)
         
+        # Top row: log actions and persistence
         log_btn_layout = QHBoxLayout()
         clear_btn = QPushButton("Clear")
         copy_btn = QPushButton("Copy to Clipboard")
@@ -323,6 +327,17 @@ class MainWindow(QMainWindow):
         log_btn_layout.addWidget(self.log_save_to_file_check)
         log_btn_layout.addStretch()
         log_layout.addLayout(log_btn_layout)
+
+        # Second row: text filter for log contents (separated from persistence controls)
+        filter_layout = QHBoxLayout()
+        filter_label = QLabel("Filter:")
+        self.log_filter_edit = QLineEdit()
+        self.log_filter_edit.setPlaceholderText("Filter log text...")
+        self.log_filter_edit.textChanged.connect(self._apply_log_filter)
+        filter_layout.addWidget(filter_label)
+        filter_layout.addWidget(self.log_filter_edit)
+        filter_layout.addStretch()
+        log_layout.addLayout(filter_layout)
 
         # Bottom: time display, Play/Stop, Reset.
         media_layout = QHBoxLayout()
@@ -559,8 +574,9 @@ class MainWindow(QMainWindow):
         try:
             names = mido.get_input_names()
         except Exception as e:
-            self.add_log_message(f"Failed to list MIDI input devices: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to list MIDI input devices:\n{e}")
+            self._log_error(f"Failed to list MIDI input devices: {e}",
+                            show_dialog=True,
+                            dialog_title="Error")
             return
         self.midi_input_combo.clear()
         self.midi_input_combo.addItems(names)
@@ -574,7 +590,7 @@ class MainWindow(QMainWindow):
 
         port_name = self.midi_input_combo.currentText()
         if not port_name:
-            self.add_log_message("MIDI connect skipped: no device selected.")
+            self._log_warning("MIDI connect skipped: no device selected.")
             QMessageBox.warning(self, "No Device", "No MIDI input device selected.")
             return
 
@@ -590,6 +606,7 @@ class MainWindow(QMainWindow):
         self.midi_input_worker.message_received.connect(self._handle_live_midi_message)
         self.midi_input_worker.connected.connect(lambda: self._on_midi_input_connected(port_name))
         self.midi_input_worker.connection_error.connect(self._on_midi_input_error)
+        self.midi_input_worker.warning.connect(self._on_midi_input_warning)
         self.midi_input_worker.finished.connect(self.midi_input_thread.quit)
         self.midi_input_worker.finished.connect(self._on_midi_input_finished)
 
@@ -604,9 +621,12 @@ class MainWindow(QMainWindow):
         self.add_log_message(f"Connected to MIDI input: {port_name}")
 
     def _on_midi_input_error(self, error_msg):
-        self.add_log_message(f"MIDI input connection failed: {error_msg}")
-        QMessageBox.critical(self, "Connection Failed",
-                             f"Failed to open MIDI input device:\n{error_msg}")
+        self._log_error(f"MIDI input connection failed: {error_msg}",
+                        show_dialog=True,
+                        dialog_title="Connection Failed")
+
+    def _on_midi_input_warning(self, warning_msg: str):
+        self._log_warning(f"MIDI input worker: {warning_msg}")
 
     def _release_all_live_keys(self):
         if self.live_backend:
@@ -619,8 +639,8 @@ class MainWindow(QMainWindow):
         if self.midi_input_worker is not None:
             try:
                 self.midi_input_worker.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                self.add_log_message(f"Error stopping MIDI input worker: {e}")
         if self.midi_input_thread is not None:
             self.midi_input_thread.quit()
             self.midi_input_thread.wait(2000)
@@ -844,8 +864,23 @@ class MainWindow(QMainWindow):
             import html
             text = html.unescape(text)
         except Exception:
-            pass
+            return text.strip()
         return text.strip()
+
+    def _log_warning(self, message: str) -> None:
+        """Log a warning-level message to the Output tab."""
+        self._append_log("WARNING", message)
+
+    def _log_error(
+        self,
+        message: str,
+        show_dialog: bool = False,
+        dialog_title: str = "Error",
+    ) -> None:
+        """Log an error-level message; optionally also show a modal dialog."""
+        self._append_log("ERROR", message)
+        if show_dialog:
+            QMessageBox.critical(self, dialog_title, message)
 
     def _on_log_save_to_file_toggled(self, checked: bool):
         if checked:
@@ -855,17 +890,55 @@ class MainWindow(QMainWindow):
 
     def add_log_message(self, message):
         """Append to log widget; optionally append plain text to log.txt in config dir."""
+        self._append_log("INFO", message)
+
+    def _append_log(self, level: str, message: str) -> None:
+        """Internal helper to append a colored, level-tagged log entry."""
+        if not hasattr(self, "_log_entries"):
+            self._log_entries = []
+
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        stamped = f"[{timestamp}] {message}"
-        self.log_output.append(stamped)
+        if level in ("WARNING", "ERROR"):
+            body = f"[{level}] {message}"
+        else:
+            body = message
+        plain = f"[{timestamp}] {body}"
+
+        if level == "ERROR":
+            color = "#F56C6C"
+        elif level == "WARNING":
+            color = "#E6A23C"
+        else:
+            color = "#CCCCCC"
+
+        html = f'<span style="color:{color}">{plain}</span>'
+        self._log_entries.append({"level": level, "plain": plain, "html": html})
+
+        # Update visible log according to current filter
+        self._apply_log_filter()
+
+        # Persist plain text (no HTML) if file logging is enabled.
         if self.log_save_to_file_check.isChecked():
             path = self._get_log_file_path()
             try:
                 self.config_dir.mkdir(parents=True, exist_ok=True)
                 with open(path, "a", encoding="utf-8") as f:
-                    f.write(self._log_message_to_plain(stamped) + "\n")
-            except Exception:
-                pass
+                    f.write(self._log_message_to_plain(plain) + "\n")
+            except OSError:
+                return
+
+    def _apply_log_filter(self) -> None:
+        """Rebuild the log view based on the current text filter."""
+        query = ""
+        if hasattr(self, "log_filter_edit"):
+            query = self.log_filter_edit.text().strip().lower()
+
+        self.log_output.clear()
+        for entry in getattr(self, "_log_entries", []):
+            plain = entry.get("plain", "")
+            if query and query not in plain.lower():
+                continue
+            self.log_output.append(entry["html"])
 
     def set_controls_enabled(self, enabled):
         for groupbox in self.findChildren(QGroupBox): groupbox.setEnabled(enabled)
@@ -904,7 +977,10 @@ class MainWindow(QMainWindow):
         }
         try:
             with open(self.config_path, 'w') as f: json.dump(config, f, indent=4)
-        except Exception as e: print(f"Error saving config: {e}")
+        except Exception as e:
+            self._log_error(f"Error saving config: {e}",
+                            show_dialog=True,
+                            dialog_title="Error Saving Config")
 
     def _update_enabled_states(self):
         for key, check in self.all_humanization_checks.items():
@@ -967,12 +1043,16 @@ class MainWindow(QMainWindow):
             self.log_save_to_file_check.setChecked(config.get('save_log_to_file', False))
             if self.log_save_to_file_check.isChecked():
                 self.add_log_message(f"Log is being saved to: {self._get_log_file_path()}")
-        except Exception: self._reset_controls_to_default()
+        except Exception as e:
+            self._log_error(f"Error loading config: {e}")
+            self._reset_controls_to_default()
         finally: self._update_enabled_states()
 
     def gather_config(self):
         if not self.selected_tracks_info:
-             self.add_log_message("Play aborted: no MIDI file or tracks selected.")
+             self._log_error("Play aborted: no MIDI file or tracks selected.",
+                             show_dialog=True,
+                             dialog_title="No Tracks")
              QMessageBox.warning(self, "No Tracks", "Please select a MIDI file and choose tracks first."); return None
         display_text = self.pedal_style_combo.currentText()
         internal_style = self.pedal_mapping.get(display_text, 'hybrid')
@@ -1014,8 +1094,9 @@ class MainWindow(QMainWindow):
         try:
             tracks, tempo_map = MidiParser.parse_structure(filepath, 1.0)
         except Exception as e:
-            self.add_log_message(f"Failed to parse MIDI: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to parse MIDI:\n{e}")
+            self._log_error(f"Failed to parse MIDI: {e}",
+                            show_dialog=True,
+                            dialog_title="Error")
             return
         dialog = TrackSelectionDialog(tracks, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -1076,8 +1157,9 @@ class MainWindow(QMainWindow):
              raw_pedal_events.sort(key=lambda pe: pe[0])
              config['raw_pedal_events'] = raw_pedal_events
         except Exception as e:
-             self.add_log_message(f"Error preparing playback: {e}")
-             QMessageBox.critical(self, "Error", f"Error preparing playback:\n{e}")
+             self._log_error(f"Error preparing playback: {e}",
+                             show_dialog=True,
+                             dialog_title="Error")
              return
 
         final_notes.sort(key=lambda n: n.start_time)

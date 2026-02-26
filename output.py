@@ -44,16 +44,22 @@ class OutputBackend(ABC):
 class KeyboardBackend(OutputBackend):
     """Translates note/pedal events into pynput keyboard actions."""
 
-    def __init__(self, use_88_key_layout: bool = False):
+    def __init__(self, use_88_key_layout: bool = False,
+                 log_message: Optional[Callable[[str], None]] = None):
         self._kb = Controller()
         self._mapper = KeyMapper(use_88_key_layout=use_88_key_layout)
         self._states: Dict[str, KeyState] = {}
         self._pedal_down = False
+        self._log = log_message
 
     def _state_for(self, key_char: str) -> KeyState:
         if key_char not in self._states:
             self._states[key_char] = KeyState(key_char)
         return self._states[key_char]
+
+    def _log_exception(self, context: str, exc: Exception) -> None:
+        if self._log is not None:
+            self._log(f"{context}: {exc}")
 
     # -- notes --
 
@@ -77,8 +83,8 @@ class KeyboardBackend(OutputBackend):
                     self._kb.press(base_key)
                 elif not was_down:
                     self._kb.press(base_key)
-        except Exception:
-            pass
+        except Exception as e:
+            self._log_exception("KeyboardBackend note_on error", e)
 
     def note_off(self, pitch: int) -> None:
         data = self._mapper.get_key_data(pitch)
@@ -91,8 +97,8 @@ class KeyboardBackend(OutputBackend):
         state.release()
         try:
             self._kb.release(base_key)
-        except Exception:
-            pass
+        except Exception as e:
+            self._log_exception("KeyboardBackend note_off error", e)
 
     # -- pedal --
 
@@ -101,16 +107,16 @@ class KeyboardBackend(OutputBackend):
             self._pedal_down = True
             try:
                 self._kb.press(Key.space)
-            except Exception:
-                pass
+            except Exception as e:
+                self._log_exception("KeyboardBackend pedal_on error", e)
 
     def pedal_off(self) -> None:
         if self._pedal_down:
             self._pedal_down = False
             try:
                 self._kb.release(Key.space)
-            except Exception:
-                pass
+            except Exception as e:
+                self._log_exception("KeyboardBackend pedal_off error", e)
 
     # -- shutdown --
 
@@ -119,22 +125,22 @@ class KeyboardBackend(OutputBackend):
             if state.is_active or state.is_sustained:
                 try:
                     self._kb.release(key_char)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log_exception("KeyboardBackend shutdown note release error", e)
                 state.release()
 
         if self._pedal_down:
             self._pedal_down = False
             try:
                 self._kb.release(Key.space)
-            except Exception:
-                pass
+            except Exception as e:
+                self._log_exception("KeyboardBackend shutdown pedal release error", e)
 
         for mod in (Key.shift, Key.ctrl, Key.alt):
             try:
                 self._kb.release(mod)
-            except Exception:
-                pass
+            except Exception as e:
+                self._log_exception("KeyboardBackend shutdown modifier release error", e)
 
 
 # ---------------------------------------------------------------------------
@@ -144,10 +150,12 @@ class KeyboardBackend(OutputBackend):
 class NumpadBackend(OutputBackend):
     """Translates note/pedal events into Roblox MIDI Connect numpad messages."""
 
-    def __init__(self, inter_message_delay: float = 0.0):
+    def __init__(self, inter_message_delay: float = 0.0,
+                 log_message: Optional[Callable[[str], None]] = None):
         self._delay = inter_message_delay
         self._active_notes: Set[int] = set()
         self._pedal_down = False
+        self._log = log_message
 
     def _post_delay(self):
         if self._delay > 0:
@@ -203,5 +211,7 @@ def create_backend(output_mode: str, use_88_key_layout: bool = False,
     if output_mode == 'midi_numpad':
         if log_message and not rmc.is_using_pydirectinput():
             log_message("PyDirectInput is not in use; falling back to pynput for numpad input.")
-        return NumpadBackend(inter_message_delay=inter_message_delay)
-    return KeyboardBackend(use_88_key_layout=use_88_key_layout)
+        return NumpadBackend(inter_message_delay=inter_message_delay,
+                             log_message=log_message)
+    return KeyboardBackend(use_88_key_layout=use_88_key_layout,
+                           log_message=log_message)

@@ -89,7 +89,7 @@ if _platform == "Windows":
         _frame_sizeof = ctypes.sizeof(pydirectinput.Input)
         _use_batched_sendinput = True
     except Exception:
-        pass
+        _use_pydirectinput = False
 
 # pynput fallback (also used for NumLock detection)
 from pynput import keyboard as kb
@@ -139,7 +139,8 @@ def ensure_numlock_on() -> None:
         if not (ctypes.windll.user32.GetKeyState(0x90) & 1):
             _keyboard.tap(kb.Key.num_lock)
     except Exception:
-        pass
+        # Best-effort only; ignore failures.
+        return
 
 
 def _tap_key(name: str) -> None:
@@ -149,7 +150,7 @@ def _tap_key(name: str) -> None:
             pydirectinput.keyDown(name, _pause=False)
             pydirectinput.keyUp(name, _pause=False)
         except Exception:
-            pass
+            return
     else:
         kc = _precomputed_keys.get(name)
         if kc is not None:
@@ -157,7 +158,7 @@ def _tap_key(name: str) -> None:
                 _keyboard.press(kc)
                 _keyboard.release(kc)
             except Exception:
-                pass
+                return
 
 
 def _send_frame_batched(sc0, sc1, sc2, sc3, sc4) -> bool:
