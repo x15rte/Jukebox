@@ -45,7 +45,7 @@ def _get_git_version() -> str:
         git_path = shutil.which("git")
         if not git_path:
             return ""
-        result = subprocess.run(  # nosec B603,B607: fixed args, absolute git path from shutil.which
+        result = subprocess.run(  # nosec: fixed args, absolute git path from shutil.which; not user-controlled
             [git_path, "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=5,
             cwd=os.path.dirname(os.path.abspath(__file__)),
