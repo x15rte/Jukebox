@@ -27,8 +27,9 @@ if sys.platform == "win32":
     try:
         import ctypes
         _winmm = ctypes.windll.winmm
-    except Exception:
-        pass
+    except (OSError, AttributeError, ImportError):
+        # Fall back to standard timer APIs if high-resolution timer is unavailable.
+        _winmm = None
 
 
 def _set_timer_resolution(ms: int = 1):
@@ -105,7 +106,7 @@ class EventCompiler:
 
             if (use_mistakes
                     and pitch not in played_in_section
-                    and random.random() < mistake_chance):
+                    and random.random() < mistake_chance):  # nosec B311: non-crypto randomness for musical mistakes only
                 mp = EventCompiler._mistake_pitch(pitch)
                 if mp is not None:
                     heapq.heappush(heap, KeyEvent(
@@ -138,11 +139,11 @@ class EventCompiler:
     @staticmethod
     def _mistake_pitch(original: int) -> Optional[int]:
         if KeyMapper.is_black_key(original):
-            return original + random.choice([-2, -1, 1, 2])
+            return original + random.choice([-2, -1, 1, 2])  # nosec B311: non-crypto randomness for musical mistakes only
         candidates = [p for p in (original - 2, original - 1,
                                   original + 1, original + 2)
                       if not KeyMapper.is_black_key(p)]
-        return random.choice(candidates) if candidates else None
+        return random.choice(candidates) if candidates else None  # nosec B311: non-crypto randomness for musical mistakes only
 
 
 # ---------------------------------------------------------------------------

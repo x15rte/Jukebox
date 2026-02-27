@@ -30,14 +30,14 @@ class Humanizer:
                 else: self.right_hand_drift *= self.config.get('drift_decay_factor')
             
             group_timing_offset = 0.0
-            if self.config.get('vary_timing'):
-                sigma = self.config.get('timing_variance')
-                group_timing_offset = random.gauss(0, sigma)
+                if self.config.get('vary_timing'):
+                    sigma = self.config.get('timing_variance')
+                    group_timing_offset = random.gauss(0, sigma)  # nosec B311: non-crypto randomness for musical timing variance only
                 group_timing_offset = max(-3*sigma, min(3*sigma, group_timing_offset))
 
             group_articulation = self.config.get('articulation')
             if self.config.get('vary_articulation'):
-                group_articulation -= (random.random() * 0.1)
+                group_articulation -= (random.random() * 0.1)  # nosec B311: non-crypto randomness for musical articulation only
                 
             if self.config.get('enable_chord_roll') and len(group) > 1:
                 group.sort(key=lambda n: n.pitch)

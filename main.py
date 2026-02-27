@@ -7,7 +7,8 @@ import re
 import json
 import copy
 import threading
-import subprocess
+import shutil
+import subprocess  # nosec B404: used with fixed args to query local git only
 from datetime import datetime
 from pathlib import Path
 from pynput import keyboard
@@ -41,8 +42,11 @@ LOG_FILENAME = "log.txt"
 def _get_git_version() -> str:
     """Return short git rev (HEAD) for display; empty if not a repo or on error."""
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+        git_path = shutil.which("git")
+        if not git_path:
+            return ""
+        result = subprocess.run(  # nosec B603,B607: fixed args, absolute git path from shutil.which
+            [git_path, "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=5,
             cwd=os.path.dirname(os.path.abspath(__file__)),
         )
