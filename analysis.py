@@ -26,14 +26,16 @@ class Humanizer:
             is_resync_point = round(group[0].start_time, 2) in resync_points
 
             if self.config.get('enable_drift_correction') and is_resync_point:
-                if hand == 'left': self.left_hand_drift *= self.config.get('drift_decay_factor')
-                else: self.right_hand_drift *= self.config.get('drift_decay_factor')
-            
+                if hand == 'left':
+                    self.left_hand_drift *= self.config.get('drift_decay_factor')
+                else:
+                    self.right_hand_drift *= self.config.get('drift_decay_factor')
+
             group_timing_offset = 0.0
-                if self.config.get('vary_timing'):
-                    sigma = self.config.get('timing_variance')
-                    group_timing_offset = random.gauss(0, sigma)  # nosec B311: non-crypto randomness for musical timing variance only
-                group_timing_offset = max(-3*sigma, min(3*sigma, group_timing_offset))
+            if self.config.get('vary_timing'):
+                sigma = self.config.get('timing_variance')
+                group_timing_offset = random.gauss(0, sigma)  # nosec B311: non-crypto randomness for musical timing variance only
+                group_timing_offset = max(-3 * sigma, min(3 * sigma, group_timing_offset))
 
             group_articulation = self.config.get('articulation')
             if self.config.get('vary_articulation'):

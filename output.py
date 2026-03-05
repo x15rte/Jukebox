@@ -14,6 +14,7 @@ from pynput.keyboard import Key, Controller
 from models import KeyState
 from core import KeyMapper
 import RobloxMidiConnect_encoder as rmc
+from logger_core import jukebox_logger
 
 
 class OutputBackend(ABC):
@@ -50,7 +51,8 @@ class KeyboardBackend(OutputBackend):
         self._mapper = KeyMapper(use_88_key_layout=use_88_key_layout)
         self._states: Dict[str, KeyState] = {}
         self._pedal_down = False
-        self._log = log_message
+        # Fall back to central logger if no callback is provided.
+        self._log = log_message or jukebox_logger.info
 
     def _state_for(self, key_char: str) -> KeyState:
         if key_char not in self._states:
@@ -155,7 +157,8 @@ class NumpadBackend(OutputBackend):
         self._delay = inter_message_delay
         self._active_notes: Set[int] = set()
         self._pedal_down = False
-        self._log = log_message
+        # Fall back to central logger if no callback is provided.
+        self._log = log_message or jukebox_logger.info
 
     def _post_delay(self):
         if self._delay > 0:
@@ -208,10 +211,11 @@ def create_backend(output_mode: str, use_88_key_layout: bool = False,
                    inter_message_delay: float = 0.0,
                    log_message: Optional[Callable[[str], None]] = None) -> OutputBackend:
     """Return the appropriate backend for *output_mode* (``'key'`` or ``'midi_numpad'``)."""
+    effective_log = log_message or jukebox_logger.info
     if output_mode == 'midi_numpad':
-        if log_message and not rmc.is_using_pydirectinput():
-            log_message("PyDirectInput is not in use; falling back to pynput for numpad input.")
+        if not rmc.is_using_pydirectinput():
+            effective_log("PyDirectInput is not in use; falling back to pynput for numpad input.")
         return NumpadBackend(inter_message_delay=inter_message_delay,
-                             log_message=log_message)
+                             log_message=effective_log)
     return KeyboardBackend(use_88_key_layout=use_88_key_layout,
-                           log_message=log_message)
+                           log_message=effective_log)

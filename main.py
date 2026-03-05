@@ -30,6 +30,7 @@ from analysis import SectionAnalyzer, FingeringEngine
 from visualizer import PianoWidget, TimelineWidget
 from player import Player, EventCompiler
 from output import create_backend
+from logger_core import jukebox_logger
 
 APP_NAME = "Jukebox"
 APP_ID = "jukebox.piano"
@@ -37,6 +38,7 @@ APP_URL = "https://github.com/x15rte/Jukebox"
 CONFIG_DIR_NAME = ".jukebox_piano"
 CONFIG_FILENAME = "config.json"
 LOG_FILENAME = "log.txt"
+MAX_LOG_ENTRIES = 5000
 
 
 def _get_git_version() -> str:
@@ -225,6 +227,9 @@ class MidiInputWorker(QObject):
 class MainWindow(QMainWindow):
     """Tabs: Playback (file, tracks, humanization), Visualizer (timeline + piano), Settings (hotkey, overlay), Output (log). Saves/loads config.json; optional log to file."""
 
+    # (level: str, message: str) -> emitted from any thread, handled on GUI thread.
+    log_record_received = Signal(str, str)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} ({APP_VERSION})" if APP_VERSION else APP_NAME)
@@ -246,6 +251,18 @@ class MainWindow(QMainWindow):
         self.hotkey_manager = HotkeyManager()
         self.hotkey_manager.toggle_requested.connect(self.toggle_playback_state)
         self.hotkey_manager.bound_updated.connect(self._on_hotkey_bound)
+
+        # Bridge central logger into the GUI via a Qt signal so that all
+        # widget updates happen on the main thread.
+        self.log_record_received.connect(self._on_log_record)
+
+        def _gui_log_callback(level: str, message: str) -> None:
+            # This callback may be invoked from any thread; emitting a
+            # Qt signal ensures the actual UI work is performed safely
+            # on the main thread.
+            self.log_record_received.emit(level, message)
+
+        jukebox_logger.set_gui_callback(_gui_log_callback)
         
         self.pedal_mapping = {
             "Original (from MIDI)": "original",
@@ -872,8 +889,8 @@ class MainWindow(QMainWindow):
         return text.strip()
 
     def _log_warning(self, message: str) -> None:
-        """Log a warning-level message to the Output tab."""
-        self._append_log("WARNING", message)
+        """Log a warning-level message (delegates to central logger)."""
+        jukebox_logger.warning(message)
 
     def _log_error(
         self,
@@ -882,20 +899,24 @@ class MainWindow(QMainWindow):
         dialog_title: str = "Error",
     ) -> None:
         """Log an error-level message; optionally also show a modal dialog."""
-        self._append_log("ERROR", message)
+        jukebox_logger.error(message)
         if show_dialog:
             QMessageBox.critical(self, dialog_title, message)
 
     def _on_log_save_to_file_toggled(self, checked: bool):
+        path = self._get_log_file_path()
         if checked:
-            path = self._get_log_file_path()
             self.config_dir.mkdir(parents=True, exist_ok=True)
+            jukebox_logger.enable_file_logging(str(path))
             self.add_log_message(f"Log is being saved to: {path}")
+        else:
+            jukebox_logger.disable_file_logging()
+            self.add_log_message("Log file saving disabled.")
 
     def add_log_message(self, message):
-        """Append to log widget; optionally append plain text to log.txt in config dir."""
-        self._append_log("INFO", message)
-
+        """High-level INFO log entry; safe to call from any thread."""
+        jukebox_logger.info(message)
+    
     def _append_log(self, level: str, message: str) -> None:
         """Internal helper to append a colored, level-tagged log entry."""
         if not hasattr(self, "_log_entries"):
@@ -918,18 +939,12 @@ class MainWindow(QMainWindow):
         html = f'<span style="color:{color}">{plain}</span>'
         self._log_entries.append({"level": level, "plain": plain, "html": html})
 
+        # Keep the in-memory buffer bounded to avoid unbounded growth.
+        if len(self._log_entries) > MAX_LOG_ENTRIES:
+            self._log_entries = self._log_entries[-MAX_LOG_ENTRIES:]
+
         # Update visible log according to current filter
         self._apply_log_filter()
-
-        # Persist plain text (no HTML) if file logging is enabled.
-        if self.log_save_to_file_check.isChecked():
-            path = self._get_log_file_path()
-            try:
-                self.config_dir.mkdir(parents=True, exist_ok=True)
-                with open(path, "a", encoding="utf-8") as f:
-                    f.write(self._log_message_to_plain(plain) + "\n")
-            except OSError:
-                return
 
     def _apply_log_filter(self) -> None:
         """Rebuild the log view based on the current text filter."""
@@ -943,6 +958,10 @@ class MainWindow(QMainWindow):
             if query and query not in plain.lower():
                 continue
             self.log_output.append(entry["html"])
+
+    def _on_log_record(self, level: str, message: str) -> None:
+        """Qt slot invoked on the GUI thread for every log record."""
+        self._append_log(level, message)
 
     def set_controls_enabled(self, enabled):
         for groupbox in self.findChildren(QGroupBox): groupbox.setEnabled(enabled)
