@@ -117,6 +117,8 @@ CONFIG_UI_BINDINGS = [
     ("window_geometry", lambda w: _get_window_geometry(w), lambda w, v: _set_window_geometry(w, v)),
     ("save_log_to_file", lambda w: w.log_save_to_file_check.isChecked(),
      lambda w, v: _set_save_log_to_file(w, v)),
+    ("log_level", lambda w: w.log_level_combo.currentText(),
+     lambda w, v: _set_log_level(w, v)),
 ]
 
 
@@ -149,6 +151,19 @@ def _set_save_log_to_file(widget, value):
     widget.log_save_to_file_check.setChecked(value)
     if value:
         widget.add_log_message(f"Log is being saved to: {widget._get_log_file_path()}")
+
+
+def _set_log_level(widget, value):
+    if not value:
+        return
+    level = str(value).upper()
+    if level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
+        level = "INFO"
+    if widget.log_level_combo.currentText() != level:
+        widget.log_level_combo.blockSignals(True)
+        widget.log_level_combo.setCurrentText(level)
+        widget.log_level_combo.blockSignals(False)
+    jukebox_logger.set_level(level)
 
 
 class MainWindow(QMainWindow):
@@ -263,10 +278,16 @@ class MainWindow(QMainWindow):
         log_layout = QVBoxLayout(log_tab)
         log_layout.addWidget(self.log_output)
         
-        # Top row: log actions and persistence
+        # Top row: log actions, level, and persistence
         log_btn_layout = QHBoxLayout()
         clear_btn = QPushButton("Clear")
         copy_btn = QPushButton("Copy to Clipboard")
+        log_level_label = QLabel("Log level:")
+        self.log_level_combo = QComboBox()
+        self.log_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
+        self.log_level_combo.setCurrentText("INFO")
+        self.log_level_combo.setToolTip("Minimum level to show in console and log file.")
+        self.log_level_combo.currentTextChanged.connect(self._on_log_level_changed)
         self.log_save_to_file_check = QCheckBox("Save log to file")
         self.log_save_to_file_check.setChecked(False)
         self.log_save_to_file_check.toggled.connect(self._on_log_save_to_file_toggled)
@@ -274,6 +295,8 @@ class MainWindow(QMainWindow):
         copy_btn.clicked.connect(self._copy_log_to_clipboard)
         log_btn_layout.addWidget(clear_btn)
         log_btn_layout.addWidget(copy_btn)
+        log_btn_layout.addWidget(log_level_label)
+        log_btn_layout.addWidget(self.log_level_combo)
         log_btn_layout.addWidget(self.log_save_to_file_check)
         log_btn_layout.addStretch()
         log_layout.addLayout(log_btn_layout)
@@ -840,6 +863,12 @@ class MainWindow(QMainWindow):
         if show_dialog:
             QMessageBox.critical(self, dialog_title, message)
 
+    def _on_log_level_changed(self, level: str) -> None:
+        """Apply log level to central logger and persist to config."""
+        if level:
+            jukebox_logger.set_level(level)
+            self._save_config()
+
     def _on_log_save_to_file_toggled(self, checked: bool):
         path = self._get_log_file_path()
         if checked:
@@ -855,16 +884,12 @@ class MainWindow(QMainWindow):
         jukebox_logger.info(message)
     
     def _append_log(self, level: str, message: str) -> None:
-        """Internal helper to append a colored, level-tagged log entry. ERROR with newlines gets collapsible details."""
+        """Internal helper to append a colored log entry with timestamp and level. ERROR with newlines gets collapsible details."""
         if not hasattr(self, "_log_entries"):
             self._log_entries = []
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if level in ("WARNING", "ERROR"):
-            body = f"[{level}] {message}"
-        else:
-            body = message
-        plain = f"[{timestamp}] {body}"
+        plain = f"[{timestamp}] [{level}] {message}"
 
         if level == "ERROR":
             color = "#F56C6C"
@@ -873,8 +898,8 @@ class MainWindow(QMainWindow):
         else:
             color = "#CCCCCC"
 
+        import html as html_module
         if level == "ERROR" and "\n" in message:
-            import html as html_module
             first_line, _, rest = message.partition("\n")
             rest = rest.strip()
             if rest:
@@ -888,11 +913,10 @@ class MainWindow(QMainWindow):
                 html = f'<span style="color:{color}">[{timestamp}] [ERROR] {html_module.escape(message)}</span>'
         else:
             if level in ("WARNING", "ERROR"):
-                import html as html_module
-                body_escaped = html_module.escape(body)
+                line_content = f"[{timestamp}] [{level}] {html_module.escape(message)}"
             else:
-                body_escaped = body
-            html = f'<span style="color:{color}">{body_escaped}</span>'
+                line_content = f"[{timestamp}] [{level}] {message}"
+            html = f'<span style="color:{color}">{line_content}</span>'
         self._log_entries.append({"level": level, "plain": plain, "html": html})
 
         # Keep the in-memory buffer bounded to avoid unbounded growth.

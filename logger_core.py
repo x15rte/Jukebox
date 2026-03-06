@@ -98,8 +98,8 @@ class _JukeboxLogger:
                 self._logger.removeHandler(self._file_handler)
                 try:
                     self._file_handler.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._logger.debug("Error closing previous file handler: %s", e)
                 self._file_handler = None
 
             os.makedirs(os.path.dirname(abs_path), exist_ok=True)
@@ -120,8 +120,8 @@ class _JukeboxLogger:
             self._logger.removeHandler(self._file_handler)
             try:
                 self._file_handler.close()
-            except Exception:
-                pass
+            except Exception as e:
+                self._logger.debug("Error closing file handler: %s", e)
             self._file_handler = None
 
     # ------------------------------------------------------------------
@@ -141,13 +141,15 @@ class _JukeboxLogger:
             full_message = message + "\n" + traceback.format_exc()
         else:
             full_message = message
-        with self._lock:
-            callbacks = list(self._gui_callbacks)
-        for cb in callbacks:
-            try:
-                cb(lvl_name, full_message)
-            except Exception:
-                self._logger.debug("Error in GUI log callback", exc_info=True)
+        # Only push to GUI callbacks when this level is enabled (same as terminal/file).
+        if self._logger.isEnabledFor(lvl):
+            with self._lock:
+                callbacks = list(self._gui_callbacks)
+            for cb in callbacks:
+                try:
+                    cb(lvl_name, full_message)
+                except Exception:
+                    self._logger.debug("Error in GUI log callback", exc_info=True)
 
     def info(self, message: str) -> None:
         self.log("INFO", message)

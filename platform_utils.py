@@ -6,9 +6,12 @@ and reports capabilities at startup for logging/UI.
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from typing import Any, Dict
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Windows high-resolution timer (used by player)
@@ -28,8 +31,9 @@ def set_timer_resolution(ms: int = 1) -> None:
     if _winmm:
         try:
             _winmm.timeBeginPeriod(ms)
-        except Exception:
-            pass
+        except Exception as e:
+            # Best-effort: avoid breaking playback if timer API fails (e.g. driver issue).
+            _log.debug("timeBeginPeriod failed: %s", e)
 
 
 def restore_timer_resolution(ms: int = 1) -> None:
@@ -37,8 +41,9 @@ def restore_timer_resolution(ms: int = 1) -> None:
     if _winmm:
         try:
             _winmm.timeEndPeriod(ms)
-        except Exception:
-            pass
+        except Exception as e:
+            # Best-effort: avoid breaking playback if timer API fails.
+            _log.debug("timeEndPeriod failed: %s", e)
 
 
 def precise_sleep(seconds: float) -> None:

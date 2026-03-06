@@ -56,6 +56,7 @@ class Config:
 
     # Log
     save_log_to_file: bool = False
+    log_level: str = "INFO"
 
     def to_dict(self) -> Dict[str, Any]:
         """Export for JSON; omit None geometry so we don't store empty."""
