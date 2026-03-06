@@ -6,6 +6,7 @@ Two concrete backends share the same interface:
 """
 
 import time
+import traceback
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, Optional, Set
 
@@ -60,8 +61,9 @@ class KeyboardBackend(OutputBackend):
         return self._states[key_char]
 
     def _log_exception(self, context: str, exc: Exception) -> None:
+        """Log exception with traceback for easier diagnosis."""
         if self._log is not None:
-            self._log(f"{context}: {exc}")
+            self._log(f"{context}: {exc}\n{traceback.format_exc()}")
 
     # -- notes --
 

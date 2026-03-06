@@ -16,41 +16,7 @@ from models import Note, KeyEvent, MusicalSection
 from core import TempoMap, KeyMapper
 from analysis import Humanizer, PedalGenerator
 from output import OutputBackend
-
-
-# ---------------------------------------------------------------------------
-# Windows high-resolution timer helpers
-# ---------------------------------------------------------------------------
-
-_winmm = None
-if sys.platform == "win32":
-    try:
-        import ctypes
-        _winmm = ctypes.windll.winmm
-    except (OSError, AttributeError, ImportError):
-        # Fall back to standard timer APIs if high-resolution timer is unavailable.
-        _winmm = None
-
-
-def _set_timer_resolution(ms: int = 1):
-    if _winmm:
-        _winmm.timeBeginPeriod(ms)
-
-
-def _restore_timer_resolution(ms: int = 1):
-    if _winmm:
-        _winmm.timeEndPeriod(ms)
-
-
-def _precise_sleep(seconds: float):
-    """Busy-wait the last ~2 ms for sub-millisecond accuracy."""
-    if seconds <= 0:
-        return
-    deadline = time.perf_counter() + seconds
-    if seconds > 0.002:
-        time.sleep(seconds - 0.002)
-    while time.perf_counter() < deadline:
-        pass
+from platform_utils import set_timer_resolution, restore_timer_resolution, precise_sleep
 
 
 # ---------------------------------------------------------------------------
@@ -262,11 +228,11 @@ class Player(QObject):
         import sys
         _old_switch = sys.getswitchinterval()
         sys.setswitchinterval(0.0005)
-        _set_timer_resolution(1)
+        set_timer_resolution(1)
         try:
             self._loop_body()
         finally:
-            _restore_timer_resolution(1)
+            restore_timer_resolution(1)
             sys.setswitchinterval(_old_switch)
 
     def _loop_body(self):
@@ -296,7 +262,7 @@ class Player(QObject):
             wait = nxt.time - pt
 
             if wait > 0:
-                _precise_sleep(wait)
+                precise_sleep(wait)
 
             batch: List[KeyEvent] = []
             batch_time = nxt.time

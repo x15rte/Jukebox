@@ -3,8 +3,9 @@
 Provides:
 - A process-wide logger instance with standard Python `logging`.
 - Optional rotating file output (enabled/disabled by the GUI).
-- An optional GUI callback that will be invoked for every log entry
-  (level + message), intended to be bridged into Qt signals.
+- One or more GUI callbacks invoked for every log entry (level + message),
+  intended to be bridged into Qt signals.
+- Configurable log level (e.g. DEBUG, INFO, WARNING).
 
 This module is intentionally free of any Qt imports so it can be reused
 in headless / CLI contexts.
@@ -16,11 +17,14 @@ import logging
 import os
 import threading
 from logging.handlers import RotatingFileHandler
-from typing import Callable, Optional
+from typing import Callable, List, Optional
+
+# Callback signature: (level: str, message: str) -> None
+LogCallback = Callable[[str, str], None]
 
 
 class _JukeboxLogger:
-    """Thin wrapper around `logging.Logger` with GUI callback support."""
+    """Thin wrapper around `logging.Logger` with GUI callbacks and level control."""
 
     def __init__(self) -> None:
         self._logger = logging.getLogger("jukebox")
@@ -38,21 +42,33 @@ class _JukeboxLogger:
 
         self._lock = threading.Lock()
         self._file_handler: Optional[RotatingFileHandler] = None
-        # Callback signature: (level: str, message: str) -> None
-        self._gui_callback: Optional[Callable[[str, str], None]] = None
+        self._gui_callbacks: List[LogCallback] = []
 
     # ------------------------------------------------------------------
-    # GUI integration
+    # GUI integration (multi-callback)
     # ------------------------------------------------------------------
-    def set_gui_callback(self, callback: Optional[Callable[[str, str], None]]) -> None:
-        """Register a callback invoked for every log entry.
-
-        The callback is expected to be cheap and non-blocking; the GUI
-        should usually bridge this into a Qt signal so that any actual
-        widget updates run on the main thread.
-        """
+    def set_gui_callback(self, callback: Optional[LogCallback]) -> None:
+        """Set the single GUI callback (replaces any existing). For multiple listeners use add_gui_callback."""
         with self._lock:
-            self._gui_callback = callback
+            self._gui_callbacks = [callback] if callback else []
+
+    def add_gui_callback(self, callback: LogCallback) -> None:
+        """Register an additional callback for every log entry. Idempotent per callback identity."""
+        with self._lock:
+            if callback not in self._gui_callbacks:
+                self._gui_callbacks.append(callback)
+
+    def remove_gui_callback(self, callback: LogCallback) -> None:
+        """Unregister a previously added callback."""
+        with self._lock:
+            if callback in self._gui_callbacks:
+                self._gui_callbacks.remove(callback)
+
+    def set_level(self, level_name: str) -> None:
+        """Set the minimum log level (e.g. 'DEBUG', 'INFO', 'WARNING', 'ERROR')."""
+        name = level_name.upper()
+        level = getattr(logging, name, logging.INFO)
+        self._logger.setLevel(level)
 
     # ------------------------------------------------------------------
     # File logging (with rotation)
@@ -111,20 +127,26 @@ class _JukeboxLogger:
     # ------------------------------------------------------------------
     # Core logging API
     # ------------------------------------------------------------------
-    def log(self, level: str, message: str) -> None:
-        """Log *message* at the given *level* and notify GUI callback."""
+    def log(self, level: str, message: str, exc_info: bool = False) -> None:
+        """Log *message* at the given *level* and notify all GUI callbacks. If exc_info is True, append exception traceback."""
         lvl_name = level.upper()
         lvl = getattr(logging, lvl_name, logging.INFO)
-        self._logger.log(lvl, message)
+        if exc_info:
+            self._logger.exception(message)
+        else:
+            self._logger.log(lvl, message)
 
-        # Notify GUI (if any) without holding the lock during the callback.
+        if exc_info:
+            import traceback
+            full_message = message + "\n" + traceback.format_exc()
+        else:
+            full_message = message
         with self._lock:
-            callback = self._gui_callback
-        if callback is not None:
+            callbacks = list(self._gui_callbacks)
+        for cb in callbacks:
             try:
-                callback(lvl_name, message)
+                cb(lvl_name, full_message)
             except Exception:
-                # Avoid recursive logging here; swallow GUI callback errors.
                 self._logger.debug("Error in GUI log callback", exc_info=True)
 
     def info(self, message: str) -> None:
@@ -133,8 +155,11 @@ class _JukeboxLogger:
     def warning(self, message: str) -> None:
         self.log("WARNING", message)
 
-    def error(self, message: str) -> None:
-        self.log("ERROR", message)
+    def error(self, message: str, exc_info: bool = False) -> None:
+        self.log("ERROR", message, exc_info=exc_info)
+
+    def debug(self, message: str) -> None:
+        self.log("DEBUG", message)
 
 
 # Global singleton used throughout the project.
