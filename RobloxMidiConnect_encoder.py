@@ -42,6 +42,13 @@ _SCAN_CODES = {
 
 _platform = platform.system()
 _numlock_ensured = False
+_use_macos_cgevent = False
+
+
+def set_macos_cgevent(use_cgevent: bool) -> None:
+    """On macOS: when True, send numpad keys via CGEvent; when False, use pynput. No-op on other platforms."""
+    global _use_macos_cgevent
+    _use_macos_cgevent = bool(use_cgevent)
 
 # ---------------------------------------------------------------------------
 # pydirectinput setup (scan-code based input, matching original RMC project)
@@ -144,21 +151,31 @@ def ensure_numlock_on() -> None:
 
 
 def _tap_key(name: str) -> None:
-    """Press and release a single numpad key (pydirectinput or pynput)."""
+    """Press and release a single numpad key (pydirectinput, macOS CGEvent, or pynput)."""
     if _use_pydirectinput:
         try:
             pydirectinput.keyDown(name, _pause=False)
             pydirectinput.keyUp(name, _pause=False)
         except Exception:
             return
-    else:
-        kc = _precomputed_keys.get(name)
-        if kc is not None:
+        return
+    if _platform == "Darwin" and _use_macos_cgevent:
+        vk = _platform_map.get(name)
+        if vk is not None:
             try:
-                _keyboard.press(kc)
-                _keyboard.release(kc)
+                from platform_utils import post_macos_key_event
+                post_macos_key_event(vk, True, 0)
+                post_macos_key_event(vk, False, 0)
             except Exception:
                 return
+        return
+    kc = _precomputed_keys.get(name)
+    if kc is not None:
+        try:
+            _keyboard.press(kc)
+            _keyboard.release(kc)
+        except Exception:
+            return
 
 
 def _send_frame_batched(sc0, sc1, sc2, sc3, sc4) -> bool:

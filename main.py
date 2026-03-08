@@ -78,6 +78,7 @@ def _set_output_mode_combo(widget, value):
 CONFIG_UI_BINDINGS = [
     ("tempo", lambda w: w.tempo_spinbox.value(), lambda w, v: w.tempo_spinbox.setValue(v)),
     ("output_mode", lambda w: w._current_output_mode(), lambda w, v: _set_output_mode_combo(w, v)),
+    ("macos_use_pynput", lambda w: w.macos_use_pynput_check.isChecked(), lambda w, v: w.macos_use_pynput_check.setChecked(v)),
     ("pedal_style", lambda w: w.pedal_mapping.get(w.pedal_style_combo.currentText(), "hybrid"),
      lambda w, v: w.pedal_style_combo.setCurrentText(w.pedal_mapping_inv.get(v, "Original (from MIDI)"))),
     ("use_88_key_layout", lambda w: w.use_88_key_check.isChecked(), lambda w, v: w.use_88_key_check.setChecked(v)),
@@ -529,6 +530,11 @@ class MainWindow(QMainWindow):
         self.use_88_key_check = QCheckBox("Use 88-Key Extended Layout")
         layout.addWidget(self.use_88_key_check)
 
+        self.macos_use_pynput_check = QCheckBox("Use pynput for key output (Mac)")
+        self.macos_use_pynput_check.setToolTip("When checked, uses pynput instead of native CGEvent on macOS for both KEY and Numpad modes.")
+        layout.addWidget(self.macos_use_pynput_check)
+        self.macos_use_pynput_check.setVisible(sys.platform == "darwin")
+
         return group
 
     def _on_input_mode_changed(self):
@@ -575,6 +581,7 @@ class MainWindow(QMainWindow):
         self.live_backend = create_backend(
             self._current_output_mode(),
             self.use_88_key_check.isChecked(),
+            macos_use_pynput=self.macos_use_pynput_check.isChecked(),
             log_message=self.add_log_message)
 
         self.midi_input_thread = QThread()
@@ -640,9 +647,11 @@ class MainWindow(QMainWindow):
         return "key"
 
     def _update_88_key_visibility(self):
-        """88-key layout only applies to KEY Mode; hide the option when using MIDI Numpad."""
+        """88-key layout only applies to KEY Mode. Mac pynput checkbox: on Darwin for both KEY and Numpad."""
         if hasattr(self, "use_88_key_check"):
             self.use_88_key_check.setVisible(self._current_output_mode() == "key")
+        if hasattr(self, "macos_use_pynput_check"):
+            self.macos_use_pynput_check.setVisible(sys.platform == "darwin")
 
     def _on_output_mode_changed(self):
         self._update_88_key_visibility()
@@ -651,6 +660,7 @@ class MainWindow(QMainWindow):
             self.live_backend = create_backend(
                 self._current_output_mode(),
                 self.use_88_key_check.isChecked(),
+                macos_use_pynput=self.macos_use_pynput_check.isChecked(),
                 log_message=self.add_log_message)
 
     def _on_key_layout_changed(self, _checked: bool = False):
@@ -659,6 +669,7 @@ class MainWindow(QMainWindow):
             self.live_backend = create_backend(
                 self._current_output_mode(),
                 self.use_88_key_check.isChecked(),
+                macos_use_pynput=self.macos_use_pynput_check.isChecked(),
                 log_message=self.add_log_message)
 
     def _handle_live_midi_message(self, msg):
@@ -808,6 +819,7 @@ class MainWindow(QMainWindow):
         self.tempo_spinbox.setValue(100)
         self.pedal_style_combo.setCurrentText("Original (from MIDI)")
         self.use_88_key_check.setChecked(False)
+        self.macos_use_pynput_check.setChecked(False)
         self.countdown_check.setChecked(True)
 
     def _reset_humanization_group_to_default(self):
@@ -1014,6 +1026,7 @@ class MainWindow(QMainWindow):
             return
         self._apply_config_to_ui(config)
         self._update_enabled_states()
+        self._update_88_key_visibility()
 
     def gather_config(self):
         if not self.selected_tracks_info:
@@ -1030,6 +1043,7 @@ class MainWindow(QMainWindow):
             'use_88_key_layout': self.use_88_key_check.isChecked(),
             'pedal_style': internal_style,
             'output_mode': self._current_output_mode(),
+            'macos_use_pynput': self.macos_use_pynput_check.isChecked(),
             'simulate_hands': self.all_humanization_checks['simulate_hands'].isChecked(),
             'vary_velocity': False,
             'enable_chord_roll': self.all_humanization_checks['enable_chord_roll'].isChecked(),
@@ -1134,6 +1148,7 @@ class MainWindow(QMainWindow):
         backend = create_backend(
             config["output_mode"],
             config.get("use_88_key_layout", False),
+            macos_use_pynput=config.get("macos_use_pynput", False),
             log_message=self.add_log_message,
         )
 

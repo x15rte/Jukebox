@@ -29,6 +29,7 @@ class Config:
     use_88_key_layout: bool = False
     countdown: bool = True
     output_mode: str = "key"
+    macos_use_pynput: bool = False
     input_mode: str = "file"
     midi_input_device: Optional[str] = None
 
