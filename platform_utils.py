@@ -7,7 +7,8 @@ and reports capabilities at startup for logging/UI.
 from __future__ import annotations
 
 import logging
-import subprocess
+import shutil
+import subprocess  # nosec B404: used with fixed args only; not user-controlled
 import sys
 import time
 from typing import Any, Dict, Optional
@@ -106,8 +107,9 @@ def open_macos_accessibility_preferences() -> None:
     if sys.platform != "darwin":
         return
     try:
-        subprocess.run(
-            ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
+        open_path = shutil.which("open") or "/usr/bin/open"
+        subprocess.run(  # nosec B603 B607: fixed args, executable from shutil.which; not user-controlled
+            [open_path, "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
             check=False,
             timeout=5,
         )
