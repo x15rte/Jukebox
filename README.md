@@ -1,12 +1,11 @@
 # Jukebox
-Based on [HuMidi](https://github.com/smyGitt/HuMidi-Roblox-Piano-Autoplayer) and [RobloxMidiConnect](https://github.com/LordHenryVonHenry/RobloxMidiConnect) 
 
 MIDI to Roblox Piano !  
 
 Tested on Windows 11, but it should work on Linux and macOS.  
 Requires Python 3.9+
 
-[Discord](https://discord.gg/jaxgETk5Em)
+[Discord](https://discord.gg/jaxgETk5Em) | [LICENSE](LICENSE)
 # Usage
 ```bash
 # Install
