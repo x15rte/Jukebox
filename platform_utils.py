@@ -7,6 +7,7 @@ and reports capabilities at startup for logging/UI.
 from __future__ import annotations
 
 import logging
+import subprocess
 import sys
 import time
 from typing import Any, Dict
@@ -75,6 +76,43 @@ def set_app_user_model_id(app_id: str) -> None:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
     except (OSError, AttributeError, ImportError):
         pass
+
+
+# ---------------------------------------------------------------------------
+# macOS Accessibility (for keyboard injection; Darwin only)
+# ---------------------------------------------------------------------------
+
+def is_macos_accessibility_trusted() -> bool:
+    """Return True if the current process is trusted for Accessibility on macOS (Darwin).
+    Returns True on non-Darwin or on any failure so we do not block the user."""
+    if sys.platform != "darwin":
+        return True
+    try:
+        import ctypes
+        app_services = ctypes.CDLL(
+            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+        )
+        fn = app_services.AXIsProcessTrustedWithOptions
+        fn.argtypes = [ctypes.c_void_p]
+        fn.restype = ctypes.c_bool
+        return bool(fn(None))
+    except Exception as e:
+        _log.debug("AXIsProcessTrustedWithOptions check failed: %s", e)
+        return True
+
+
+def open_macos_accessibility_preferences() -> None:
+    """Open System Settings to Privacy & Security → Accessibility on macOS (Darwin). No-op on other platforms."""
+    if sys.platform != "darwin":
+        return
+    try:
+        subprocess.run(
+            ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
+            check=False,
+            timeout=5,
+        )
+    except Exception as e:
+        _log.debug("Failed to open Accessibility preferences: %s", e)
 
 
 # ---------------------------------------------------------------------------

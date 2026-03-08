@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QGridLayout, QStatusBar, QScrollArea, QRadioButton, QLineEdit,
     QTextBrowser, QDialog,
 )
-from PyQt6.QtCore import QThread, QByteArray, pyqtSignal as Signal, Qt
+from PyQt6.QtCore import QThread, QTimer, QByteArray, pyqtSignal as Signal, Qt
 from PyQt6.QtGui import QFont, QIcon
 import mido
 
@@ -28,7 +28,12 @@ from output import create_backend
 from logger_core import jukebox_logger
 from config_repository import Config, ConfigRepository, ConfigLoadError
 from playback_service import PlaybackService
-from platform_utils import set_app_user_model_id, get_capabilities
+from platform_utils import (
+    set_app_user_model_id,
+    get_capabilities,
+    is_macos_accessibility_trusted,
+    open_macos_accessibility_preferences,
+)
 from ui_dialogs import HotkeyManager, TrackSelectionDialog, MidiInputWorker, parse_hotkey_string
 
 APP_NAME = "Jukebox"
@@ -225,6 +230,7 @@ class MainWindow(QMainWindow):
         ver_tag = f" ({APP_VERSION})" if APP_VERSION else ""
         self.add_log_message(f'{APP_NAME}{ver_tag} — <a href="{APP_URL}">{APP_URL}</a>')
         self._log_startup_capabilities()
+        QTimer.singleShot(0, self._check_macos_accessibility)
 
     def _setup_ui(self):
         main_widget = QWidget()
@@ -836,6 +842,26 @@ class MainWindow(QMainWindow):
         if caps.get("platform") == "win32":
             pdi = "available" if caps.get("pydirectinput") else "not available (using pynput)"
             jukebox_logger.info(f"MIDI Numpad mode: pydirectinput {pdi}.")
+
+    def _check_macos_accessibility(self) -> None:
+        """On macOS, check Accessibility trust; if not trusted, show a dialog and offer to open System Settings."""
+        if sys.platform != "darwin":
+            return
+        if is_macos_accessibility_trusted():
+            return
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Accessibility Permission Required")
+        msg.setText(
+            "Jukebox needs Accessibility permission to send key presses to the game (e.g. Roblox piano). "
+            "In System Settings, open Privacy & Security → Accessibility, then add and enable: "
+            "Terminal or iTerm if you launched from a terminal; Python (or Python 3.x) if you use Python from python.org; "
+            "or the IDE (e.g. PyCharm) if you run from an IDE."
+        )
+        open_btn = msg.addButton("Open System Settings", QMessageBox.ButtonRole.ActionRole)
+        msg.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
+        msg.exec()
+        if msg.clickedButton() == open_btn:
+            open_macos_accessibility_preferences()
 
     def _log_message_to_plain(self, message: str) -> str:
         if not message:
