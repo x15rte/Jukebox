@@ -2,7 +2,7 @@
 
 MIDI to Roblox Piano !  
 
-Tested on Windows 11, but it should work on Linux and macOS.  
+Supports Windows, macOS, and Linux
 Requires Python 3.9+
 
 [Discord](https://discord.gg/jaxgETk5Em) | [LICENSE](LICENSE)
