@@ -26,7 +26,7 @@ cd ~/.jukebox_piano/
 
 # KEY Mode: 88-Key -> Ctrl, Pedal -> Space
 ```
-
+We recommend using Windows with MIDI output (Supports Velocity)
 # Screenshots
 
 ![1](images/1.png)
