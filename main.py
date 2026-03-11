@@ -25,6 +25,7 @@ from core import MidiParser
 from visualizer import PianoWidget, TimelineWidget
 from player import Player
 from output import create_backend
+from playback_controller import PlaybackController
 from logger_core import jukebox_logger
 from config_repository import Config, ConfigRepository, ConfigLoadError
 from playback_service import PlaybackService
@@ -41,6 +42,14 @@ APP_ID = "jukebox.piano"
 APP_URL = "https://github.com/x15rte/Jukebox"
 LOG_FILENAME = "log.txt"
 MAX_LOG_ENTRIES = 5000
+
+
+def _resource_dir() -> Path:
+    """Base directory for bundled resources: PyInstaller temp dir when frozen, else script dir."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass)
+    return Path(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _get_git_version() -> str:
@@ -62,7 +71,18 @@ def _get_git_version() -> str:
     return ""
 
 
-APP_VERSION = _get_git_version()
+def _get_version() -> str:
+    """Version for display: when frozen use BUILD_VERSION from _build_version (tag or 'packaged'); when run from source use git commit."""
+    if getattr(sys, "frozen", False):
+        try:
+            from _build_version import BUILD_VERSION
+            return BUILD_VERSION if BUILD_VERSION else "packaged"
+        except ImportError:
+            return "packaged"
+    return _get_git_version()
+
+
+APP_VERSION = _get_version()
 
 
 def _set_output_mode_combo(widget, value):
@@ -182,8 +202,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} ({APP_VERSION})" if APP_VERSION else APP_NAME)
         self.setMinimumSize(780, 520)
-        self.player_thread = None
-        self.player = None
+
         self.midi_input_thread = None
         self.midi_input_worker = None
         self.midi_input_active = False
@@ -191,10 +210,13 @@ class MainWindow(QMainWindow):
         self.config_dir = self.config_repo.config_dir
         self.config_path = self.config_repo.config_path
         self.config_repo.ensure_config_dir()
-        self.selected_tracks_info = None 
+        self.selected_tracks_info = None
         self.parsed_tempo_map = None
-        self.current_notes = [] 
+        self.parsed_tracks = None
+        self.parsed_tempo_scale = 1.0
+        self.current_notes = []
         self.total_song_duration_sec = 1.0
+        self.playback_state = "stopped"
         self._log_entries = []
 
         self.hotkey_manager = HotkeyManager()
@@ -212,7 +234,7 @@ class MainWindow(QMainWindow):
             self.log_record_received.emit(level, message)
 
         jukebox_logger.set_gui_callback(_gui_log_callback)
-        
+
         self.pedal_mapping = {
             "Original (from MIDI)": "original",
             "Automatic": "hybrid",
@@ -225,6 +247,16 @@ class MainWindow(QMainWindow):
         self.live_backend = None
 
         self._setup_ui()
+
+        # Initialize playback controller after UI is constructed so that
+        # widgets like piano_widget already exist when wiring signals.
+        self.playback_controller = PlaybackController(self)
+        self.playback_controller.status_updated.connect(self.add_log_message)
+        self.playback_controller.progress_updated.connect(self.update_progress)
+        self.playback_controller.visualizer_updated.connect(self.piano_widget.set_active_pitches)
+        self.playback_controller.playback_finished.connect(self.on_playback_finished)
+        self.playback_controller.state_changed.connect(self._on_playback_state_changed)
+
         self._load_config()
         self.use_88_key_check.toggled.connect(self._on_key_layout_changed)
 
@@ -372,39 +404,44 @@ class MainWindow(QMainWindow):
         self.hk_btn.setEnabled(True)
         self._update_play_stop_labels()
 
+    def _on_playback_state_changed(self, state: str) -> None:
+        """Qt slot: update cached state from controller and refresh labels."""
+        self.playback_state = state
+        self._update_play_stop_labels()
+
     def _update_play_stop_labels(self):
         key_str = self.hotkey_manager._format_key_string(self.hotkey_manager.current_key)
-        if not self.player: self.play_button.setText(f"Play ({key_str})")
+        state = getattr(self, "playback_state", "stopped")
+        if state == "stopped":
+            self.play_button.setText(f"Play ({key_str})")
+        elif state == "paused":
+            self.play_button.setText(f"Resume ({key_str})")
+        else:
+            self.play_button.setText(f"Pause ({key_str})")
         self.stop_button.setText(f"Stop")
 
     def toggle_playback_state(self):
-        if self.player and self.player.pause_event.is_set(): pass 
-        else: self.piano_widget.clear()
+        controller = getattr(self, "playback_controller", None)
+        if controller is None:
+            return
 
-        if self.player_thread and self.player_thread.isRunning():
-            self.player.toggle_pause()
-            self._update_pause_ui_state()
-            if not self.player.pause_event.is_set():
+        state = getattr(controller, "state", "stopped")
+        if state != "paused":
+            self.piano_widget.clear()
+
+        resuming = state == "paused"
+        if controller.is_running:
+            controller.toggle_pause()
+            if resuming:
                 current_t = self.timeline_widget.current_time
                 self._on_visual_scrub(current_t)
         elif self.play_button.isEnabled():
             self.handle_play()
 
-    def _update_pause_ui_state(self):
-        key_str = self.hotkey_manager._format_key_string(self.hotkey_manager.current_key)
-        if self.player and self.player.pause_event.is_set():
-            self.play_button.setText(f"Resume ({key_str})")
-        else:
-            self.play_button.setText(f"Pause ({key_str})")
-
-    def _on_auto_paused(self):
-        self._update_pause_ui_state()
-        self.piano_widget.clear()
-        self.stop_button.setEnabled(True)
-
     def _on_timeline_seek(self, time):
         self.add_log_message(f"Seeking to {time:.2f}s...")
-        if self.player: self.player.seek(time)
+        if self.playback_controller.is_running:
+            self.playback_controller.seek(time)
     
     def _on_visual_scrub(self, time):
         active_pitches = set()
@@ -414,8 +451,9 @@ class MainWindow(QMainWindow):
         self._update_time_label(time, self.total_song_duration_sec)
 
     def update_progress(self, current_time):
-        if self.player and self.player.total_duration > 0:
-            self.total_song_duration_sec = self.player.total_duration
+        player = self.playback_controller.player
+        if player and player.total_duration > 0:
+            self.total_song_duration_sec = player.total_duration
         if not self.timeline_widget.is_dragging:
             self.timeline_widget.set_position(current_time)
             self.piano_widget.update()
@@ -569,7 +607,7 @@ class MainWindow(QMainWindow):
         if self.midi_input_active:
             return
 
-        if self.player_thread and self.player_thread.isRunning():
+        if self.playback_controller.is_running:
             self.handle_stop()
 
         port_name = self.midi_input_combo.currentText()
@@ -867,7 +905,7 @@ class MainWindow(QMainWindow):
             "Jukebox needs Accessibility permission to send key presses to the game (e.g. Roblox piano). "
             "In System Settings, open Privacy & Security → Accessibility, then add and enable: "
             "Terminal or iTerm if you launched from a terminal; Python (or Python 3.x) if you use Python from python.org; "
-            "or the IDE (e.g. PyCharm) if you run from an IDE."
+            "the IDE (e.g. PyCharm) if you run from an IDE; or the Jukebox app if you run the frozen executable (freeze to exe)."
         )
         open_btn = msg.addButton("Open System Settings", QMessageBox.ButtonRole.ActionRole)
         msg.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
@@ -1061,7 +1099,8 @@ class MainWindow(QMainWindow):
         }
 
     def select_file(self):
-        if self.player_thread and self.player_thread.isRunning(): return
+        if self.playback_controller.is_running:
+            return
         filepath, _ = QFileDialog.getOpenFileName(self, "Select MIDI File", "", "MIDI Files (*.mid *.midi)")
         if filepath:
             self.file_path_label.setText(os.path.basename(filepath))
@@ -1073,11 +1112,15 @@ class MainWindow(QMainWindow):
     def _parse_and_select_tracks(self, filepath):
         self.add_log_message("Parsing MIDI structure...")
         try:
-            tracks, tempo_map = MidiParser.parse_structure(filepath, 1.0)
+            tempo_scale = self.tempo_spinbox.value() / 100.0
+            tracks, tempo_map = MidiParser.parse_structure(filepath, tempo_scale)
         except Exception as e:
             jukebox_logger.error(f"Failed to parse MIDI: {e}", exc_info=True)
             self._log_error("Failed to parse MIDI: " + str(e), show_dialog=True, dialog_title="Error")
             return
+        self.parsed_tracks = tracks
+        self.parsed_tempo_map = tempo_map
+        self.parsed_tempo_scale = tempo_scale
         dialog = TrackSelectionDialog(tracks, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.selected_tracks_info = dialog.get_selection()
@@ -1111,7 +1154,7 @@ class MainWindow(QMainWindow):
             self.reset_button.setEnabled(False)
 
     def handle_play(self):
-        if self.player_thread and self.player_thread.isRunning():
+        if self.playback_controller.is_running:
             self.toggle_playback_state()
             return
         config = self.gather_config()
@@ -1121,7 +1164,13 @@ class MainWindow(QMainWindow):
         self.add_log_message("Preparing playback...")
         try:
             final_notes, sections, compiled_events, total_dur, tempo_map = PlaybackService.prepare_playback(
-                config["midi_file"], self.selected_tracks_info, config
+                config["midi_file"],
+                self.selected_tracks_info,
+                config,
+                preparsed=(self.parsed_tracks, self.parsed_tempo_map)
+                if self.parsed_tracks is not None and self.parsed_tempo_map is not None
+                else None,
+                preparsed_tempo_scale=self.parsed_tempo_scale,
             )
         except Exception as e:
             jukebox_logger.error(f"Error preparing playback: {e}", exc_info=True)
@@ -1140,50 +1189,36 @@ class MainWindow(QMainWindow):
         self.set_controls_enabled(False)
         self.play_button.setEnabled(True)
         self.stop_button.setEnabled(True)
-        key_str = self.hotkey_manager._format_key_string(self.hotkey_manager.current_key)
-        self.play_button.setText(f"Pause ({key_str})")
 
         self.tabs.setCurrentIndex(1)
 
-        backend = create_backend(
+        self.playback_controller.start(
+            compiled_events,
+            config,
+            total_dur,
             config["output_mode"],
             config.get("use_88_key_layout", False),
-            macos_use_pynput=config.get("macos_use_pynput", False),
+            config.get("macos_use_pynput", False),
             log_message=self.add_log_message,
         )
 
-        self.player_thread = QThread()
-        self.player = Player(compiled_events, backend, config, total_dur)
-        self.player.moveToThread(self.player_thread)
-        self.player_thread.started.connect(self.player.play)
-        self.player.playback_finished.connect(self.on_playback_finished)
-        self.player.status_updated.connect(self.add_log_message)
-        self.player.progress_updated.connect(self.update_progress)
-        self.player.visualizer_updated.connect(self.piano_widget.set_active_pitches)
-        self.player_thread.start()
-
     def handle_stop(self):
-        if self.player: self.player.stop()
+        if self.playback_controller.is_running:
+            self.playback_controller.stop()
 
     def handle_reset(self):
         """Reset song progress to 0: update timeline, time label, piano highlight; if playing, seek to start."""
         self.timeline_widget.set_position(0)
         self._update_time_label(0, self.total_song_duration_sec)
         self._on_visual_scrub(0)
-        if self.player and self.player_thread and self.player_thread.isRunning():
-            self.player.seek(0)
+        if self.playback_controller.is_running:
+            self.playback_controller.seek(0)
 
     def on_playback_finished(self):
         self.add_log_message("Playback process finished.\n" + "="*50 + "\n")
         self.piano_widget.clear()
         self.set_controls_enabled(True)
         self.stop_button.setEnabled(False)
-        self.play_button.setText(f"Play ({self.hotkey_manager._format_key_string(self.hotkey_manager.current_key)})")
-        if self.player_thread:
-            self.player_thread.quit()
-            self.player_thread.wait()
-        self.player = None
-        self.player_thread = None
 
     def closeEvent(self, event):
         self._save_config()
@@ -1191,18 +1226,22 @@ class MainWindow(QMainWindow):
             self._disconnect_midi_input()
         if self.live_backend:
             self.live_backend.shutdown()
-        if self.player and self.player_thread and self.player_thread.isRunning():
-            self.player.stop()
-            self.player_thread.wait(1000)
+        if self.playback_controller.is_running:
+            # Mirror previous behavior: stop playback and wait briefly for the
+            # worker thread to finish before closing the window.
+            self.playback_controller.stop_and_wait(timeout_ms=1000)
         event.accept()
 
 if __name__ == "__main__":
     set_app_user_model_id(APP_ID)
 
     app = QApplication(sys.argv)
-    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
-    if os.path.exists(icon_path):
-        app.setWindowIcon(QIcon(icon_path))
+    icon_path = _resource_dir() / "icon.ico"
+    app_icon = QIcon(str(icon_path)) if icon_path.is_file() else None
+    if app_icon:
+        app.setWindowIcon(app_icon)
     window = MainWindow()
+    if app_icon:
+        window.setWindowIcon(app_icon)
     window.show()
     sys.exit(app.exec())

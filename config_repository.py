@@ -74,6 +74,8 @@ class Config:
         # Map legacy keys to current names for backward compatibility
         if "enable_vary_timing" not in data and "vary_timing" in data:
             data = {**data, "enable_vary_timing": data["vary_timing"]}
+        if "enable_vary_articulation" not in data and "vary_articulation" in data:
+            data = {**data, "enable_vary_articulation": data["vary_articulation"]}
         known = {f.name for f in fields(cls)}
         filtered = {k: v for k, v in data.items() if k in known}
         return cls(**filtered)

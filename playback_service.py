@@ -6,7 +6,7 @@ Decouples orchestration logic from the GUI so it can be tested and reused (e.g. 
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 from models import Note, KeyEvent, MusicalSection
 from core import MidiParser, TempoMap
@@ -23,6 +23,8 @@ class PlaybackService:
         midi_file: str,
         selected_tracks_info: List[Tuple[MidiTrack, str]],
         config: Dict[str, Any],
+        preparsed: Optional[Tuple[List[MidiTrack], TempoMap]] = None,
+        preparsed_tempo_scale: float = 1.0,
     ) -> Tuple[List[Note], List[MusicalSection], List[KeyEvent], float, TempoMap]:
         """Build final notes, sections, compiled events, total duration, and tempo map.
 
@@ -33,7 +35,13 @@ class PlaybackService:
         :raises: Exception on parse or compile errors (caller should log with exc_info and show dialog).
         """
         tempo_scale = config.get("tempo", 100) / 100.0
-        tracks, tempo_map = MidiParser.parse_structure(midi_file, tempo_scale)
+        if (
+            preparsed is not None
+            and abs(tempo_scale - preparsed_tempo_scale) < 1e-9
+        ):
+            tracks, tempo_map = preparsed
+        else:
+            tracks, tempo_map = MidiParser.parse_structure(midi_file, tempo_scale)
 
         selected_indices = [t.index for t, _ in selected_tracks_info]
         role_map = {t.index: r for t, r in selected_tracks_info}
@@ -55,6 +63,15 @@ class PlaybackService:
         raw_pedal_events.sort(key=lambda pe: pe[0])
         config = dict(config)
         config["raw_pedal_events"] = raw_pedal_events
+
+        # Normalize legacy humanization flags for downstream code (player/analysis use
+        # enable_drift_correction; Config dataclass uses enable_hand_drift).
+        if "enable_vary_timing" not in config and "vary_timing" in config:
+            config["enable_vary_timing"] = bool(config.get("vary_timing"))
+        if "enable_vary_articulation" not in config and "vary_articulation" in config:
+            config["enable_vary_articulation"] = bool(config.get("vary_articulation"))
+        if "enable_drift_correction" not in config and "enable_hand_drift" in config:
+            config["enable_drift_correction"] = bool(config.get("enable_hand_drift"))
 
         final_notes.sort(key=lambda n: n.start_time)
 

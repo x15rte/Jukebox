@@ -36,9 +36,13 @@ class EventCompiler:
         work = copy.deepcopy(notes)
 
         # --- optional humanization (delegates to analysis.py) ---
-        humanize_keys = ('vary_timing', 'vary_articulation',
-                         'enable_drift_correction', 'enable_chord_roll',
-                         'enable_tempo_sway')
+        humanize_keys = (
+            'enable_vary_timing',
+            'enable_vary_articulation',
+            'enable_drift_correction',
+            'enable_chord_roll',
+            'enable_tempo_sway',
+        )
         if any(config.get(k) for k in humanize_keys):
             humanizer = Humanizer(config)
             left = [n for n in work if n.hand == 'left']
@@ -55,17 +59,13 @@ class EventCompiler:
         use_mistakes = config.get('enable_mistakes', False)
         mistake_chance = config.get('mistake_chance', 0) / 100.0
         played_in_section: Set[int] = set()
-        cur_sec = -1
+        sec_idx = 0
 
         for note in work:
-            sec_idx = -1
-            for i, sec in enumerate(sections):
-                if sec.start_time <= note.start_time < sec.end_time:
-                    sec_idx = i
-                    break
-            if sec_idx != cur_sec:
+            # Advance section index monotonically; sections are time-ordered.
+            while sec_idx < len(sections) and note.start_time >= sections[sec_idx].end_time:
+                sec_idx += 1
                 played_in_section.clear()
-                cur_sec = sec_idx
 
             pitch = note.pitch
             did_mistake = False
@@ -130,7 +130,6 @@ class Player(QObject):
     playback_finished = Signal()
     # Emits the full set of currently active MIDI pitches whenever it changes.
     visualizer_updated = Signal(list)
-    auto_paused = Signal()
 
     def __init__(self, compiled_events: List[KeyEvent],
                  backend: OutputBackend, config: Dict,
@@ -150,6 +149,9 @@ class Player(QObject):
         self._pause_ts = 0.0
         self._pending_shutdown = False
 
+        # Precompute event times for fast seeking / resume logic.
+        self._event_times: List[float] = [e.time for e in self.events]
+
         # Track currently active MIDI pitches for the visualizer; updated in
         # batches and emitted as a list via visualizer_updated.
         self._active_pitches: Set[int] = set()
@@ -168,9 +170,8 @@ class Player(QObject):
             self.status_updated.emit("Playing!")
             self.start_time = time.perf_counter() - start_offset
             self.total_paused_time = 0.0
-            if start_offset > 0:
-                times = [e.time for e in self.events]
-                self.event_index = bisect.bisect_left(times, start_offset)
+            if start_offset > 0 and self._event_times:
+                self.event_index = bisect.bisect_left(self._event_times, start_offset)
             else:
                 self.event_index = 0
             self._run_loop()
@@ -203,8 +204,10 @@ class Player(QObject):
 
     def seek(self, target_time: float):
         self._pending_shutdown = True
-        times = [e.time for e in self.events]
-        self.event_index = bisect.bisect_left(times, target_time)
+        if self._event_times:
+            self.event_index = bisect.bisect_left(self._event_times, target_time)
+        else:
+            self.event_index = 0
         now = time.perf_counter()
         if self.pause_event.is_set():
             self.total_paused_time = 0.0

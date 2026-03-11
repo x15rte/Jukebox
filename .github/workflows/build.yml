@@ -1,0 +1,94 @@
+name: Freeze Jukebox
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freeze:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.14']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix['python-version'] }}
+
+      - name: Install dependencies (common)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Windows-only dependencies
+        if: runner.os == 'Windows'
+        run: |
+          pip install -r requirements-windows.txt
+
+      - name: Install PyInstaller
+        run: |
+          pip install "pyinstaller>=6.0,<7"
+
+      - name: Freeze to exe with PyInstaller
+        env:
+          BUILD_VERSION: ${{ github.ref_name }}
+        run: |
+          pyinstaller Jukebox.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jukebox-${{ runner.os }}-${{ github.ref_name }}
+          path: dist/**
+
+  release:
+    needs: freeze
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download frozen artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          body: |
+            ## Jukebox ${{ github.ref_name }}
+
+            - **Commit**: ${{ github.sha }}
+            - **Workflow run**: ${{ github.run_id }}
+
+            ### Frozen executables
+
+            Frozen executables (packaged with PyInstaller) for this release:
+            - Linux (`ubuntu-latest`)
+            - Windows (`windows-latest`)
+            - macOS (`macos-latest`)
+
+            These frozen executables are automatically produced by the CI workflow for each tagged release.
+            The recommended way to run Jukebox is to use Python and run it from source at the latest commit on the default branch.
+            When filing issues, please test and confirm the problem using the latest source version (run with Python) rather than a previously frozen release.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
