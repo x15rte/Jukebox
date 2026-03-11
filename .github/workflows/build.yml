@@ -74,10 +74,17 @@ jobs:
         with:
           path: artifacts
 
+      - name: Zip per-platform artifacts
+        run: |
+          cd artifacts
+          for dir in */; do
+            zip -r "${dir%/}.zip" "$dir"
+          done
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: artifacts/*.zip
           body: |
             ## Jukebox ${{ github.ref_name }}
 
