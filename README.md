@@ -30,12 +30,14 @@ Download and run the latest release from the [Releases page](https://github.com/
 pyinstaller ./Jukebox.spec
 ```
 # Tips
-Use MIDI output to support velocity
+Use MIDI output to support velocity  
+KEY Mode: 88-Key -> Ctrl    
+Pedal -> Space  
+
 Open config dir  
 `cd ~/.jukebox_piano/`
 
-KEY Mode: 88-Key -> Ctrl  
-Pedal -> Space
+
 # Screenshots
 
 ![1](images/1.png)
