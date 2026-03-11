@@ -30,6 +30,7 @@ Download and run the latest release from the [Releases page](https://github.com/
 pyinstaller ./Jukebox.spec
 ```
 # Tips
+Use MIDI output to support velocity
 Open config dir  
 `cd ~/.jukebox_piano/`
 
