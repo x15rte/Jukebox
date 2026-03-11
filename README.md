@@ -13,6 +13,7 @@ Requires Python 3.9+
 # Install
 git clone https://github.com/x15rte/Jukebox.git
 cd Jukebox/
+sudo apt install libasound2-dev libjack-dev (Linux)
 pip install -r ./requirements.txt (Mac/Linux)
 pip install -r ./requirements-windows.txt (Windows)
 
