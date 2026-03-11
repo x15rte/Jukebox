@@ -21,13 +21,6 @@ python ./main.py
 
 # Update
 git pull
-
----
-
-# Open config dir
-cd ~/.jukebox_piano/
-
-# KEY Mode: 88-Key -> Ctrl, Pedal -> Space
 ```
 ## Method 2  
 Download and run the latest release from the [Releases page](https://github.com/x15rte/Jukebox/releases).
@@ -36,6 +29,12 @@ Download and run the latest release from the [Releases page](https://github.com/
 ```bash
 pyinstaller ./Jukebox.spec
 ```
+# Tips
+Open config dir  
+`cd ~/.jukebox_piano/`
+
+KEY Mode: 88-Key -> Ctrl  
+Pedal -> Space
 # Screenshots
 
 ![1](images/1.png)
