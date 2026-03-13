@@ -163,14 +163,16 @@ def _repair_utf8_mojibake(text: str) -> str:
                 or 0x3400 <= code <= 0x4DBF  # CJK Extension A
                 or 0x4E00 <= code <= 0x9FFF  # CJK Unified
                 or 0xAC00 <= code <= 0xD7AF  # Hangul syllables
-                or code >= 0x1F300          # emoji and symbols
+                or 0x0400 <= code <= 0x04FF  # Cyrillic (e.g., Russian)
+                or code >= 0x1F300           # emoji and symbols
             ):
                 return True
         return False
 
     for enc in ("latin1", "cp1252"):
         try:
-            raw = text.encode(enc)
+            # cp1252 cannot encode e.g. U+0080; use replace to still attempt repair
+            raw = text.encode(enc, errors="replace")
             fixed = raw.decode("utf-8")
         except UnicodeDecodeError:
             continue
