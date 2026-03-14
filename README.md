@@ -40,13 +40,8 @@ pyinstaller ./Jukebox.spec
 ```
 
 # 📸 Screenshots 
-![1](images/1.png)
-![2](images/2.png)
-![3](images/3.png)
-![4](images/4.png)
-![5](images/5.png)
-
-
-
-
-
+<img width="587" height="475" alt="Image" src="https://github.com/user-attachments/assets/a1ec0165-2082-41cc-8c30-487d8cb650a4" />
+<img width="587" height="475" alt="Image" src="https://github.com/user-attachments/assets/20bac806-551f-48ed-b94a-525d01f328d9" />
+<img width="527" height="324" alt="Image" src="https://github.com/user-attachments/assets/e159f892-e071-46ad-b38a-a48764937c90" />
+<img width="587" height="475" alt="Image" src="https://github.com/user-attachments/assets/e68976d8-4095-4790-a6b5-8d22ef4c9cf8" />
+<img width="1174" height="949" alt="Image" src="https://github.com/user-attachments/assets/b5d67952-a513-4dd2-bb84-4d0f0de787ed" />
