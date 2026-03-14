@@ -27,9 +27,10 @@ git pull
 Download and run the latest release from the [Releases page](https://github.com/x15rte/Jukebox/releases).
 
 # 💡 Tips 
-Use MIDI output to support velocity  
-KEY Mode: 88-Key -> Ctrl    
-Pedal -> Space  
+
+**Use MIDI output to support velocity**
+
+KEY Mode: 88-Key -> Ctrl ; Pedal -> Space   
 
 Open config dir  
 `cd ~/.jukebox_piano/`
@@ -40,9 +41,8 @@ pyinstaller ./Jukebox.spec
 ```
 
 # 📸 Screenshots 
-<img width="587" height="475" alt="Image" src="https://github.com/user-attachments/assets/a1ec0165-2082-41cc-8c30-487d8cb650a4" />
-<img width="587" height="475" alt="Image" src="https://github.com/user-attachments/assets/20bac806-551f-48ed-b94a-525d01f328d9" />
-<img width="527" height="324" alt="Image" src="https://github.com/user-attachments/assets/e159f892-e071-46ad-b38a-a48764937c90" />
-<img width="641" height="350" alt="Image" src="https://github.com/user-attachments/assets/bd0ac022-2c44-4127-9fdc-303061d3723c" />
-<img width="587" height="475" alt="Image" src="https://github.com/user-attachments/assets/e68976d8-4095-4790-a6b5-8d22ef4c9cf8" />
-<img width="1174" height="949" alt="Image" src="https://github.com/user-attachments/assets/b5d67952-a513-4dd2-bb84-4d0f0de787ed" />
+<img alt="Image" src="https://github.com/user-attachments/assets/8d4f4b15-11a8-47ab-96a2-4ee24390bc99" />
+<img alt="Image" src="https://github.com/user-attachments/assets/20bac806-551f-48ed-b94a-525d01f328d9" />
+<img alt="Image" src="https://github.com/user-attachments/assets/e159f892-e071-46ad-b38a-a48764937c90" />
+<img alt="Image" src="https://github.com/user-attachments/assets/e68976d8-4095-4790-a6b5-8d22ef4c9cf8" />
+<img alt="Image" src="https://github.com/user-attachments/assets/b5d67952-a513-4dd2-bb84-4d0f0de787ed" />
