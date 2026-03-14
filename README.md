@@ -1,4 +1,5 @@
 # Jukebox 🎹
+
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/x15rte/Jukebox/blob/main/LICENSE)
 ![Discord](https://img.shields.io/discord/1475355729056764066)   
