@@ -3,10 +3,10 @@
 MIDI to Roblox Piano !  
 
 Supports Windows, macOS, and Linux  
-Requires Python 3.9+
 
-
-[Discord](https://discord.gg/jaxgETk5Em) | [LICENSE](LICENSE)
+[![Python Version](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/x15rte/Jukebox/blob/main/LICENSE)
+![Discord](https://img.shields.io/discord/1475355729056764066) 
 # Usage
 ## Method 1 (Recommend)
 ```bash
