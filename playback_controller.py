@@ -95,9 +95,13 @@ class PlaybackController(QObject):
 
         self._total_duration = total_duration
 
+        # Small inter-message delay for midi_numpad spreads RMC bursts so the game
+        # can process input smoothly (avoids stutter from back-to-back frames).
+        inter_message_delay = 0.001 if output_mode == "midi_numpad" else 0.0
         backend = create_backend(
             output_mode,
             use_88_key_layout,
+            inter_message_delay=inter_message_delay,
             macos_use_pynput=macos_use_pynput,
             log_message=log_message,
         )
