@@ -53,7 +53,7 @@ pyinstaller ./Jukebox.spec
 <img alt="Image" src="https://github.com/user-attachments/assets/ac579db3-0bb0-49d4-8912-7402ffeb215b" />
 <img alt="Image" src="https://github.com/user-attachments/assets/7058ab68-e43a-413a-9e9a-1a57dc56b259" />
 
-## Credits
+## ✨ Credits
 - [HuMidi](https://github.com/smyGitt/HuMidi-Roblox-Piano-Autoplayer)
 - [RobloxMidiConnect](https://github.com/LordHenryVonHenry/RobloxMidiConnect)
 - [miditoqwerty-rs](https://github.com/ArijanJ/miditoqwerty-rs)
