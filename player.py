@@ -49,6 +49,7 @@ class EventCompiler:
             right = [n for n in work if n.hand == 'right']
             resync = ({round(n.start_time, 2) for n in left}
                       & {round(n.start_time, 2) for n in right})
+            humanizer.prepare_shared_offsets(work)
             humanizer.apply_to_hand(left, 'left', resync)
             humanizer.apply_to_hand(right, 'right', resync)
             work = sorted(left + right, key=lambda n: n.start_time)

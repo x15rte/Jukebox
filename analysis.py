@@ -9,6 +9,14 @@ from models import Note, MusicalSection, KeyEvent, Finger
 from core import TempoMap, get_time_groups
 
 
+# Default standard deviation (in seconds) for per-group drift noise applied to each hand.
+# This keeps hand drift meaningful even when timing variance is disabled, while allowing
+# overrides via the config dict.
+_DRIFT_NOISE_SIGMA = 0.004
+# Fraction of shared (phrase-level) timing offset to add to both hands' drift (hybrid humanization).
+_DRIFT_SHARED_FACTOR = 0.3
+
+
 class Humanizer:
     """Applies timing variance, articulation, chord roll, drift correction, and tempo rubato per section pace."""
 
@@ -16,6 +24,20 @@ class Humanizer:
         self.config = config
         self.left_hand_drift = 0.0
         self.right_hand_drift = 0.0
+        self._shared_drift_offsets: Dict[float, float] = {}
+
+    def prepare_shared_offsets(self, all_notes: List[Note]) -> None:
+        """Precompute one timing offset per combined time group for shared drift (both hands). Call before apply_to_hand."""
+        self._shared_drift_offsets = {}
+        if not (self.config.get('vary_timing') and self.config.get('enable_drift_correction')):
+            return
+        time_groups = get_time_groups(all_notes)
+        sigma = self.config.get('timing_variance', 0.01)
+        for group in time_groups:
+            offset = random.gauss(0, sigma)  # nosec B311: non-crypto randomness for musical timing only
+            offset = max(-3 * sigma, min(3 * sigma, offset))
+            t_key = round(group[0].start_time, 2)
+            self._shared_drift_offsets[t_key] = offset
 
     def apply_to_hand(self, notes: List[Note], hand: str, resync_points: Set[float]):
         """Apply timing/articulation/roll per group; resync_points are times where both hands hit together (decay drift)."""
@@ -23,7 +45,9 @@ class Humanizer:
 
         time_groups = get_time_groups(notes)
         for group in time_groups:
-            is_resync_point = round(group[0].start_time, 2) in resync_points
+            # Key for shared drift lookup must use original start_time (before we add offset/drift).
+            t_key = round(group[0].start_time, 2)
+            is_resync_point = t_key in resync_points
 
             if self.config.get('enable_drift_correction') and is_resync_point:
                 if hand == 'left':
@@ -53,11 +77,21 @@ class Humanizer:
                     note.start_time += current_drift
                 
                 note.duration *= group_articulation
-                if note.duration < 0.03: note.duration = 0.03
+                if note.duration < 0.03: 
+                    note.duration = 0.03
 
             if self.config.get('enable_drift_correction'):
-                if hand == 'left': self.left_hand_drift += group_timing_offset
-                else: self.right_hand_drift += group_timing_offset
+                # Hybrid: shared (phrase-level) component so both hands move together, plus
+                # independent noise so they still drift apart. Override via 'drift_noise_sigma' / 'drift_shared_factor'.
+                shared = self._shared_drift_offsets.get(t_key, 0.0) * self.config.get('drift_shared_factor', _DRIFT_SHARED_FACTOR)
+                sigma = self.config.get('drift_noise_sigma', _DRIFT_NOISE_SIGMA)
+                drift_noise = random.gauss(0, sigma)  # nosec B311: non-crypto randomness for musical drift only
+                max_dev = 3 * sigma
+                drift_noise = max(-max_dev, min(max_dev, drift_noise))
+                if hand == 'left':
+                    self.left_hand_drift += shared + drift_noise
+                else:
+                    self.right_hand_drift += shared + drift_noise
 
     def apply_tempo_rubato(self, all_notes: List[Note], sections: List[MusicalSection]):
         """Shift note times within each section by a sine curve; intensity scales by section pace (fast/slow)."""
