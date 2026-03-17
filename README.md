@@ -24,7 +24,9 @@ python ./main.py
 git pull
 ```
 ## Method 2  
-Download and run the latest release from the [Releases page](https://github.com/x15rte/Jukebox/releases).
+Download and run the latest release from the [Releases page](https://github.com/x15rte/Jukebox/releases).  
+> First launch of a new `.exe` may be slower with a generic taskbar icon; later launches are normal.  
+
 
 # 💡 Tips 
 
