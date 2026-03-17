@@ -25,7 +25,7 @@ git pull
 ```
 ## Method 2  
 Download and run the latest release from the [Releases page](https://github.com/x15rte/Jukebox/releases).  
-> First launch of a new `.exe` may be slower with a generic taskbar icon; later launches are normal.  
+> the frozen exe may show the window with a random delay; if nothing appears, wait a bit longer or run via Method 1
 
 
 # 💡 Tips 
