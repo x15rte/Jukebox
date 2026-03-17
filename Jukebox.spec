@@ -62,9 +62,21 @@ if (project_dir / "icon.ico").is_file():
 #
 # _build_version: written by this spec before Analysis; main.py imports it
 # only when frozen (sys.frozen), so the conditional import is not traced.
+#
+# Mido backends:
+# - mido.backends.rtmidi: primary backend on Windows when python-rtmidi is installed.
+# - mido.backends.winmm: Windows multimedia backend (fallback on some setups).
+# - mido.backends.portmidi: PortMidi backend (for safety if environment changes).
+# - rtmidi: top-level package for python-rtmidi (sometimes needed for hooks).
+# These are all imported dynamically by mido and must be listed explicitly so
+# PyInstaller includes them in the frozen executable.
 # ---------------------------------------------------------------------------
 hiddenimports = [
     "_build_version",
+    "mido.backends.rtmidi",
+    "mido.backends.winmm",
+    "mido.backends.portmidi",
+    "rtmidi",
 ]
 
 a = Analysis(
