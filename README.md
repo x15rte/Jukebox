@@ -43,8 +43,8 @@ pyinstaller ./Jukebox.spec
 ```
 
 # 📸 Screenshots 
-<img alt="Image" src="https://github.com/user-attachments/assets/8d4f4b15-11a8-47ab-96a2-4ee24390bc99" />
-<img alt="Image" src="https://github.com/user-attachments/assets/20bac806-551f-48ed-b94a-525d01f328d9" />
-<img alt="Image" src="https://github.com/user-attachments/assets/e159f892-e071-46ad-b38a-a48764937c90" />
-<img alt="Image" src="https://github.com/user-attachments/assets/e68976d8-4095-4790-a6b5-8d22ef4c9cf8" />
-<img alt="Image" src="https://github.com/user-attachments/assets/b5d67952-a513-4dd2-bb84-4d0f0de787ed" />
+<img alt="Image" src="https://github.com/user-attachments/assets/f0b03367-02f4-4b12-92e8-3d5695be2742" />
+<img alt="Image" src="https://github.com/user-attachments/assets/99e310f9-cac9-4dfa-810b-479f93d9f961" />
+<img alt="Image" src="https://github.com/user-attachments/assets/93c3ab54-2e89-4a4a-b13b-1339f3806aa9" />
+<img alt="Image" src="https://github.com/user-attachments/assets/ac579db3-0bb0-49d4-8912-7402ffeb215b" />
+<img alt="Image" src="https://github.com/user-attachments/assets/7058ab68-e43a-413a-9e9a-1a57dc56b259" />
