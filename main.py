@@ -395,7 +395,7 @@ class MainWindow(QMainWindow):
         self.play_button.clicked.connect(self.handle_play)
         self.stop_button.clicked.connect(self.handle_stop)
         self.reset_button.clicked.connect(self.handle_reset)
-        self.play_button.setEnabled(False) 
+        self.play_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.reset_button.setEnabled(False)
 
@@ -493,7 +493,10 @@ class MainWindow(QMainWindow):
             if resuming:
                 current_t = self.timeline_widget.current_time
                 self._on_visual_scrub(current_t)
-        elif self.play_button.isEnabled():
+        else:
+            # Starting playback via hotkey or other toggle entry-point.
+            # Always go through handle_play(), so gather_config() is the single
+            # place that validates whether a MIDI file and tracks are selected.
             self.handle_play()
 
     def _on_timeline_seek(self, time):
@@ -1134,12 +1137,31 @@ class MainWindow(QMainWindow):
         self._update_enabled_states()
         self._update_88_key_visibility()
 
+    def _set_current_file_labels(self, filepath: str | None) -> None:
+        """Keep selected file labels (top and bottom) visually in sync."""
+        if filepath:
+            name = os.path.basename(filepath)
+            self.file_path_label.setText(name)
+            self.file_path_label.setToolTip(filepath)
+            self.current_file_bottom_label.setText(name)
+        else:
+            self.file_path_label.setText("No file selected.")
+            self.file_path_label.setToolTip("")
+            self.current_file_bottom_label.setText("No file selected.")
+
     def gather_config(self):
         if not self.selected_tracks_info:
-             self._log_error("Play aborted: no MIDI file or tracks selected.",
-                             show_dialog=True,
-                             dialog_title="No Tracks")
-             QMessageBox.warning(self, "No Tracks", "Please select a MIDI file and choose tracks first."); return None
+             self._log_error(
+                 "Play aborted: no MIDI file or tracks selected.",
+                 show_dialog=False,
+                 dialog_title="No Tracks",
+             )
+             QMessageBox.warning(
+                 self,
+                 "No Tracks",
+                 "Please select a MIDI file and choose tracks first.",
+             )
+             return None
         display_text = self.pedal_style_combo.currentText()
         internal_style = self.pedal_mapping.get(display_text, 'hybrid')
         return {
@@ -1171,9 +1193,8 @@ class MainWindow(QMainWindow):
             return
         filepath, _ = QFileDialog.getOpenFileName(self, "Select MIDI File", "", "MIDI Files (*.mid *.midi)")
         if filepath:
-            self.file_path_label.setText(os.path.basename(filepath))
-            self.file_path_label.setToolTip(filepath)
-            self.current_file_bottom_label.setText(os.path.basename(filepath))
+            # Update file labels (top + bottom) first, then open track selection dialog.
+            self._set_current_file_labels(filepath)
             self.add_log_message(f"Selected file: {filepath}")
             self._parse_and_select_tracks(filepath)
 
@@ -1217,9 +1238,8 @@ class MainWindow(QMainWindow):
         else:
             self.add_log_message("Track selection cancelled.")
             self.selected_tracks_info = None
-            self.current_file_bottom_label.setText("No file selected.")
-            self.play_button.setEnabled(False)
-            self.reset_button.setEnabled(False)
+            # User cancelled track selection: clear file labels so UI consistently shows 'No file selected'.
+            self._set_current_file_labels(None)
 
     def handle_play(self):
         if self.playback_controller.is_running:
