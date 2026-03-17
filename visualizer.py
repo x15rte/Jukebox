@@ -2,10 +2,11 @@
 
 from PyQt6.QtWidgets import QWidget, QSizePolicy
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal as Signal
-from PyQt6.QtGui import QPainter, QBrush, QColor, QPen, QPixmap
+from PyQt6.QtGui import QPainter, QBrush, QColor, QPen, QPixmap, QFont
 from typing import List
 from models import Note
 from core import TempoMap
+import theme
 
 
 class PianoWidget(QWidget):
@@ -47,9 +48,9 @@ class PianoWidget(QWidget):
         black_key_width = key_width * 0.65
         black_key_height = height * 0.6
 
-        white_brush = QBrush(QColor(255, 255, 255))
-        black_brush = QBrush(QColor(0, 0, 0))
-        active_brush = QBrush(QColor(0, 255, 100))
+        white_brush = QBrush(QColor(245, 245, 248))
+        black_brush = QBrush(QColor(30, 30, 32))
+        active_brush = QBrush(theme.ACCENT)
 
         white_idx = 0
         white_key_rects = {}
@@ -77,8 +78,19 @@ class PianoWidget(QWidget):
             
             brush = active_brush if p in self.active_pitches else black_brush
             painter.setBrush(brush)
-            painter.setPen(QPen(QColor(0,0,0), 1))
+            painter.setPen(QPen(QColor(0, 0, 0), 1))
             painter.drawRect(rect)
+
+        # Label a few reference keys (e.g., C3–C5) along the bottom edge.
+        painter.setPen(QPen(QColor(80, 80, 90)))
+        font = QFont()
+        font.setPointSize(8)
+        painter.setFont(font)
+        for p, rect in white_key_rects.items():
+            # MIDI note names: C n
+            if p % 12 == 0 and 36 <= p <= 72:  # C2–C5
+                octave = (p // 12) - 1
+                painter.drawText(rect.adjusted(0, rect.height() - 16, 0, -2), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, f"C{octave}")
 
 
 class TimelineWidget(QWidget):
@@ -97,12 +109,12 @@ class TimelineWidget(QWidget):
         self.tempo_map = None
         self._cached_boundaries = None   # Measure (start, end) times; avoid recompute in paint.
 
-        self.bg_color = QColor(30, 30, 30)
-        self.left_hand_color = QColor(80, 160, 255, 200)   # Blue
-        self.right_hand_color = QColor(255, 80, 80, 200)   # Red
-        self.unknown_color = QColor(150, 150, 150, 150)
-        self.cursor_color = QColor(255, 255, 255)
-        self.measure_line_color = QColor(255, 255, 255, 50)
+        self.bg_color = QColor(24, 24, 28)
+        self.left_hand_color = QColor(80, 160, 255, 210)   # Blue
+        self.right_hand_color = QColor(255, 120, 100, 210)   # Red
+        self.unknown_color = QColor(150, 150, 150, 160)
+        self.cursor_color = theme.ACCENT
+        self.measure_line_color = QColor(255, 255, 255, 40)
 
         # Cached background pixmap (notes + measure lines) to avoid redrawing
         # the entire roll every paint; only rebuilt when size or data changes.
@@ -194,7 +206,7 @@ class TimelineWidget(QWidget):
             for note in self.notes:
                 nx = (note.start_time / self.total_duration) * w
                 nw = (note.duration / self.total_duration) * w
-                nw = max(1.0, nw)
+                nw = max(2.0, nw)
 
                 ny_ratio = 1.0 - ((note.pitch - min_p) / range_p)
                 ny = ny_ratio * (h - 10) + 5

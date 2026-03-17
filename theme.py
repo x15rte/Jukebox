@@ -1,0 +1,332 @@
+"""Centralized visual theme for Jukebox UI.
+
+Defines colors, spacing and font helpers so the application has a coherent,
+modern look without spreading magic numbers across widgets.
+"""
+
+from __future__ import annotations
+
+from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtWidgets import QApplication
+
+
+# --- Color palette (dark theme) ---
+
+WINDOW_BG = QColor(18, 18, 20)
+PANEL_BG = QColor(28, 28, 32)
+PANEL_BORDER = QColor(60, 60, 70)
+TEXT_PRIMARY = QColor(235, 235, 240)
+TEXT_SECONDARY = QColor(170, 170, 180)
+ACCENT = QColor(70, 160, 255)          # primary accent (buttons, highlights)
+ACCENT_SOFT = QColor(70, 160, 255, 60)
+ERROR = QColor(245, 108, 108)
+WARNING = QColor(230, 162, 60)
+
+
+# --- Layout metrics ---
+
+SECTION_MARGIN = 12
+SECTION_SPACING = 10
+CONTROL_SPACING = 6
+
+
+def apply_global_palette(app: QApplication) -> None:
+    """Apply a dark palette to the QApplication while keeping it subtle.
+
+    This intentionally keeps changes minimal to avoid fighting with the
+    platform style; most detailed styling is still done per-widget.
+    """
+    palette = app.palette()
+    palette.setColor(palette.ColorRole.Window, WINDOW_BG)
+    palette.setColor(palette.ColorRole.Base, PANEL_BG)
+    palette.setColor(palette.ColorRole.AlternateBase, PANEL_BG)
+    palette.setColor(palette.ColorRole.Text, TEXT_PRIMARY)
+    palette.setColor(palette.ColorRole.WindowText, TEXT_PRIMARY)
+    palette.setColor(palette.ColorRole.ButtonText, TEXT_PRIMARY)
+    palette.setColor(palette.ColorRole.ToolTipBase, PANEL_BG)
+    palette.setColor(palette.ColorRole.ToolTipText, TEXT_PRIMARY)
+    app.setPalette(palette)
+
+
+def heading_font(base: QFont | None = None, scale: float = 1.1) -> QFont:
+    """Return a slightly larger font for group headings."""
+    f = QFont(base or QApplication.font())
+    f.setPointSizeF(f.pointSizeF() * scale)
+    f.setBold(True)
+    return f
+
+
+def subtle_label_style() -> str:
+    """Style sheet for secondary/description labels."""
+    return (
+        "color: rgb(170, 170, 180);"
+        "font-size: 11px;"
+    )
+
+
+def section_groupbox_style() -> str:
+    """Style sheet for top-level group boxes in the Playback panel."""
+    return (
+        "QGroupBox {"
+        "  border: 1px solid rgb(60, 60, 70);"
+        "  border-radius: 6px;"
+        "  margin-top: 8px;"
+        "  padding: 8px 8px 10px 8px;"
+        "}"
+        "QGroupBox::title {"
+        "  subcontrol-origin: margin;"
+        "  left: 10px;"
+        "  padding: 0 3px 0 3px;"
+        "  color: rgb(235, 235, 240);"
+        "  font-weight: 600;"
+        "}"
+    )
+
+from dataclasses import dataclass
+
+from PyQt6.QtGui import QColor
+
+
+@dataclass(frozen=True)
+class VisualizerColors:
+    background: QColor
+    left_hand: QColor
+    right_hand: QColor
+    unknown: QColor
+    cursor: QColor
+    measure_line: QColor
+
+
+@dataclass(frozen=True)
+class PianoColors:
+    white_key: QColor
+    white_key_border: QColor
+    black_key: QColor
+    black_key_highlight: QColor
+    active_left: QColor
+    active_right: QColor
+
+
+@dataclass(frozen=True)
+class LogColors:
+    info: str
+    warning: str
+    error: str
+
+
+@dataclass(frozen=True)
+class Theme:
+    """Central theme definition for the Jukebox UI."""
+
+    # Base surfaces
+    background_main: str
+    background_panel: str
+    background_panel_alt: str
+    border_subtle: str
+
+    # Text
+    text_primary: str
+    text_secondary: str
+    text_muted: str
+
+    # Accents
+    accent_primary: str
+    accent_secondary: str
+    accent_success: str
+    accent_warning: str
+    accent_error: str
+
+    # Domain-specific groups
+    visualizer: VisualizerColors
+    piano: PianoColors
+    logs: LogColors
+
+    # Global QSS snippet to style common widgets.
+    qss: str
+
+
+def get_dark_cyber_theme() -> Theme:
+    """Return a dark, colorful theme: neutral dark base with clean, non-flashy accents."""
+    # Base colors as hex strings (for QSS / HTML); neutral deep gray without purple tint.
+    background_main = "#121216"
+    background_panel = "#1A1A21"
+    background_panel_alt = "#23232B"
+    border_subtle = "#383843"
+
+    text_primary = "#F5F5F7"
+    text_secondary = "#D0D0D8"
+    text_muted = "#9292A0"
+
+    # Accent colors: primarily blue, teal, and orange; avoid heavy purple and flashy gradients.
+    accent_primary = "#4F9DFF"   # bright blue
+    accent_secondary = "#22C1B5"  # teal
+    accent_success = "#5EC96B"    # green
+    accent_warning = "#F6AD55"    # orange
+    accent_error = "#F56565"      # red
+
+    visualizer = VisualizerColors(
+        background=QColor(24, 24, 32),
+        # Hands: left=blue, right=pinkish, unknown=teal.
+        left_hand=QColor(79, 157, 255, 230),
+        right_hand=QColor(244, 143, 177, 230),
+        unknown=QColor(34, 193, 181, 220),
+        cursor=QColor(246, 173, 85),
+        measure_line=QColor(120, 120, 150, 150),
+    )
+
+    piano = PianoColors(
+        white_key=QColor(48, 48, 60),
+        white_key_border=QColor(88, 88, 112),
+        black_key=QColor(18, 18, 26),
+        black_key_highlight=QColor(110, 110, 140),
+        active_left=QColor(79, 157, 255),
+        active_right=QColor(244, 143, 177),
+    )
+
+    logs = LogColors(
+        info=text_secondary,
+        warning=accent_warning,
+        error=accent_error,
+    )
+
+    # Global stylesheet for common widgets; conservative so it plays well cross‑platform.
+    qss = f"""
+        QMainWindow, QDialog {{
+            background-color: {background_main};
+            color: {text_secondary};
+        }}
+
+        QWidget#CentralWidget {{
+            background-color: {background_main};
+        }}
+
+        QGroupBox {{
+            border: 1px solid {border_subtle};
+            border-radius: 6px;
+            margin-top: 10px;
+            background-color: {background_panel};
+        }}
+
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            padding: 0 6px;
+            color: {text_primary};
+        }}
+
+        QPushButton {{
+            background-color: {background_panel_alt};
+            color: {text_primary};
+            border-radius: 4px;
+            border: 1px solid {border_subtle};
+            padding: 4px 10px;
+        }}
+
+        QPushButton:hover {{
+            background-color: {border_subtle};
+            color: {text_primary};
+        }}
+
+        QPushButton:pressed {{
+            background-color: {accent_primary};
+            color: #000000;
+        }}
+
+        QPushButton#PrimaryButton {{
+            background-color: {accent_primary};
+            color: #000000;
+        }}
+
+        QPushButton#PrimaryButton:hover {{
+            background-color: {accent_secondary};
+            color: {text_primary};
+        }}
+
+        QTabWidget::pane {{
+            border-top: 1px solid {border_subtle};
+        }}
+
+        QTabBar::tab {{
+            background-color: {background_panel};
+            color: {text_muted};
+            padding: 6px 14px;
+        }}
+
+        QTabBar::tab:selected {{
+            background-color: {background_panel_alt};
+            color: {text_primary};
+            border-bottom: 3px solid {accent_primary};
+        }}
+
+        QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+            background-color: {background_panel_alt};
+            border-radius: 3px;
+            border: 1px solid {border_subtle};
+            padding: 2px 6px;
+            color: {text_primary};
+        }}
+
+        QSlider::groove:horizontal {{
+            border: 1px solid {border_subtle};
+            height: 6px;
+            background: {background_panel_alt};
+            border-radius: 3px;
+        }}
+
+        QSlider::sub-page:horizontal {{
+            background: {accent_primary};
+            border-radius: 3px;
+        }}
+
+        QSlider::handle:horizontal {{
+            background: {accent_primary};
+            width: 12px;
+            margin: -4px 0;
+            border-radius: 6px;
+        }}
+
+        QTextBrowser#LogOutput {{
+            background-color: {background_panel_alt};
+            border: 1px solid {border_subtle};
+            color: {text_secondary};
+        }}
+
+        QTableView, QTableWidget {{
+            gridline-color: {border_subtle};
+            background-color: {background_panel};
+            alternate-background-color: {background_panel_alt};
+            color: {text_secondary};
+        }}
+
+        QHeaderView::section {{
+            background-color: {background_panel_alt};
+            color: {text_primary};
+            border: 0px;
+            border-bottom: 1px solid {border_subtle};
+            padding: 4px 6px;
+        }}
+
+        QScrollBar:horizontal, QScrollBar:vertical {{
+            background-color: {background_panel};
+        }}
+    """
+
+    return Theme(
+        background_main=background_main,
+        background_panel=background_panel,
+        background_panel_alt=background_panel_alt,
+        border_subtle=border_subtle,
+        text_primary=text_primary,
+        text_secondary=text_secondary,
+        text_muted=text_muted,
+        accent_primary=accent_primary,
+        accent_secondary=accent_secondary,
+        accent_success=accent_success,
+        accent_warning=accent_warning,
+        accent_error=accent_error,
+        visualizer=visualizer,
+        piano=piano,
+        logs=logs,
+        qss=qss,
+    )
+

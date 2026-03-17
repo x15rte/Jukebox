@@ -36,6 +36,7 @@ from platform_utils import (
     open_macos_accessibility_preferences,
 )
 from ui_dialogs import HotkeyManager, TrackSelectionDialog, MidiInputWorker, parse_hotkey_string
+import theme
 
 APP_NAME = "Jukebox"
 APP_ID = "jukebox.piano"
@@ -202,6 +203,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} ({APP_VERSION})" if APP_VERSION else APP_NAME)
         self.setMinimumSize(780, 520)
+        # Subtle global styling; detailed colors handled in widgets.
+        self.setStyleSheet(
+            "QWidget { background-color: rgb(18, 18, 20); color: rgb(235, 235, 240); }"
+            "QGroupBox { border: 1px solid rgb(60,60,70); border-radius: 6px; margin-top: 8px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; font-weight: 600; }"
+        )
 
         self.midi_input_thread = None
         self.midi_input_worker = None
@@ -270,6 +277,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
         main_layout.setContentsMargins(10, 10, 10, 5)
+        main_layout.setSpacing(theme.SECTION_SPACING)
 
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
@@ -297,11 +305,13 @@ class MainWindow(QMainWindow):
         self.piano_widget = PianoWidget()
         vis_layout.addWidget(self.piano_widget)
 
-        # Playback tab: left column = Input/Output + Humanization, right column = Settings (wider, less tall).
+        # Playback tab: left column = step-based Input/Output + Humanization, right column = Global Settings.
         controls_main = QHBoxLayout(controls_tab)
+        controls_main.setSpacing(theme.SECTION_SPACING)
         left_column = QWidget()
         left_layout = QVBoxLayout(left_column)
         left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(theme.SECTION_SPACING)
         left_layout.addWidget(self._create_input_output_group())
         self.humanization_group = self._create_humanization_group()
         left_layout.addWidget(self.humanization_group)
@@ -311,45 +321,43 @@ class MainWindow(QMainWindow):
         self.settings_group.setMinimumWidth(260)
         controls_main.addWidget(self.settings_group, 0)
 
+        # Output tab: toolbar + log view
         self.log_output = QTextBrowser()
         self.log_output.setOpenExternalLinks(True)
         self.log_output.setFont(QFont("Courier", 9))
         log_layout = QVBoxLayout(log_tab)
-        log_layout.addWidget(self.log_output)
-        
-        # Top row: log actions, level, and persistence
-        log_btn_layout = QHBoxLayout()
+        log_layout.setContentsMargins(8, 8, 8, 8)
+        log_layout.setSpacing(theme.SECTION_SPACING)
+
+        toolbar_layout = QHBoxLayout()
         clear_btn = QPushButton("Clear")
-        copy_btn = QPushButton("Copy to Clipboard")
-        log_level_label = QLabel("Log level:")
+        copy_btn = QPushButton("Copy")
+        log_level_label = QLabel("Level:")
         self.log_level_combo = QComboBox()
         self.log_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
         self.log_level_combo.setCurrentText("INFO")
         self.log_level_combo.setToolTip("Minimum level to show in console and log file.")
         self.log_level_combo.currentTextChanged.connect(self._on_log_level_changed)
-        self.log_save_to_file_check = QCheckBox("Save log to file")
+        self.log_save_to_file_check = QCheckBox("Save to file")
         self.log_save_to_file_check.setChecked(False)
         self.log_save_to_file_check.toggled.connect(self._on_log_save_to_file_toggled)
-        clear_btn.clicked.connect(self.log_output.clear)
-        copy_btn.clicked.connect(self._copy_log_to_clipboard)
-        log_btn_layout.addWidget(clear_btn)
-        log_btn_layout.addWidget(copy_btn)
-        log_btn_layout.addWidget(log_level_label)
-        log_btn_layout.addWidget(self.log_level_combo)
-        log_btn_layout.addWidget(self.log_save_to_file_check)
-        log_btn_layout.addStretch()
-        log_layout.addLayout(log_btn_layout)
-
-        # Second row: text filter for log contents (separated from persistence controls)
-        filter_layout = QHBoxLayout()
         filter_label = QLabel("Filter:")
         self.log_filter_edit = QLineEdit()
-        self.log_filter_edit.setPlaceholderText("Filter log text...")
+        self.log_filter_edit.setPlaceholderText("Type to filter log...")
         self.log_filter_edit.textChanged.connect(self._apply_log_filter)
-        filter_layout.addWidget(filter_label)
-        filter_layout.addWidget(self.log_filter_edit)
-        filter_layout.addStretch()
-        log_layout.addLayout(filter_layout)
+        clear_btn.clicked.connect(self.log_output.clear)
+        copy_btn.clicked.connect(self._copy_log_to_clipboard)
+        toolbar_layout.addWidget(clear_btn)
+        toolbar_layout.addWidget(copy_btn)
+        toolbar_layout.addSpacing(8)
+        toolbar_layout.addWidget(log_level_label)
+        toolbar_layout.addWidget(self.log_level_combo)
+        toolbar_layout.addWidget(self.log_save_to_file_check)
+        toolbar_layout.addSpacing(16)
+        toolbar_layout.addWidget(filter_label)
+        toolbar_layout.addWidget(self.log_filter_edit, 1)
+        log_layout.addLayout(toolbar_layout)
+        log_layout.addWidget(self.log_output, 1)
 
         # Bottom: time display, Play/Stop, Reset.
         media_layout = QHBoxLayout()
@@ -498,11 +506,12 @@ class MainWindow(QMainWindow):
         return slider, spinbox
 
     def _create_input_output_group(self):
-        group = QGroupBox("Input / Output")
+        group = QGroupBox("Input & Output")
         layout = QVBoxLayout(group)
+        layout.setSpacing(theme.CONTROL_SPACING)
 
         mode_row = QHBoxLayout()
-        mode_label = QLabel("Input Mode:")
+        mode_label = QLabel("Input mode:")
         self.input_mode_file_radio = QRadioButton("File (MIDI)")
         self.input_mode_piano_radio = QRadioButton("Piano (MIDI In)")
         self.input_mode_file_radio.setChecked(True)
@@ -514,20 +523,26 @@ class MainWindow(QMainWindow):
         mode_row.addStretch(1)
         layout.addLayout(mode_row)
 
+        # File input (default)
         self.file_input_widget = QWidget()
         file_layout = QVBoxLayout(self.file_input_widget)
+        file_layout.setContentsMargins(0, 0, 0, 0)
+        file_layout.setSpacing(theme.CONTROL_SPACING)
         self.file_path_label = QLabel("No file selected.")
         self.file_path_label.setStyleSheet("font-style: italic; color: grey;")
-        browse_button = QPushButton("Browse for MIDI File")
+        browse_button = QPushButton("Browse MIDI file…")
         browse_button.clicked.connect(self.select_file)
         file_layout.addWidget(self.file_path_label)
         file_layout.addWidget(browse_button)
         layout.addWidget(self.file_input_widget)
 
+        # Live piano input
         self.piano_input_widget = QWidget()
         piano_layout = QVBoxLayout(self.piano_input_widget)
+        piano_layout.setContentsMargins(0, 0, 0, 0)
+        piano_layout.setSpacing(theme.CONTROL_SPACING)
         device_row = QHBoxLayout()
-        device_label = QLabel("MIDI Input Device:")
+        device_label = QLabel("MIDI input device:")
         self.midi_input_combo = QComboBox()
         self.midi_input_refresh_btn = QPushButton("Refresh")
         self.midi_input_refresh_btn.clicked.connect(self._refresh_midi_inputs)
@@ -554,22 +569,25 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.piano_input_widget)
         self.piano_input_widget.hide()
 
+        # Output mode
         output_row = QHBoxLayout()
-        output_label = QLabel("Output Mode:")
+        output_label = QLabel("Output mode:")
         self.output_mode_combo = QComboBox()
-        self.output_mode_combo.addItem("KEY Mode", userData="key")
-        self.output_mode_combo.addItem("MIDI Numpad Mode", userData="midi_numpad")
+        self.output_mode_combo.addItem("KEY mode (keyboard)", userData="key")
+        self.output_mode_combo.addItem("MIDI Numpad (Roblox MIDI Connect)", userData="midi_numpad")
         self.output_mode_combo.currentIndexChanged.connect(self._on_output_mode_changed)
         output_row.addWidget(output_label)
         output_row.addWidget(self.output_mode_combo)
         output_row.addStretch(1)
         layout.addLayout(output_row)
 
-        self.use_88_key_check = QCheckBox("Use 88-Key Extended Layout")
+        self.use_88_key_check = QCheckBox("Use 88-key extended layout")
         layout.addWidget(self.use_88_key_check)
 
         self.macos_use_pynput_check = QCheckBox("Use pynput for key output (Mac)")
-        self.macos_use_pynput_check.setToolTip("When checked, uses pynput instead of native CGEvent on macOS for both KEY and Numpad modes.")
+        self.macos_use_pynput_check.setToolTip(
+            "On macOS, use pynput instead of CGEvent. Turn this on only if you have trouble with the default mode."
+        )
         layout.addWidget(self.macos_use_pynput_check)
         self.macos_use_pynput_check.setVisible(sys.platform == "darwin")
 
@@ -1236,6 +1254,7 @@ if __name__ == "__main__":
     set_app_user_model_id(APP_ID)
 
     app = QApplication(sys.argv)
+    theme.apply_global_palette(app)
     icon_path = _resource_dir() / "icon.ico"
     app_icon = QIcon(str(icon_path)) if icon_path.is_file() else None
     if app_icon:
