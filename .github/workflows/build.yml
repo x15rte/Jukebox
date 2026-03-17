@@ -9,20 +9,35 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   freeze:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        # Standard GitHub-hosted runners available to all public repositories,
+        # and arch strictly reflects the actual CPU architecture:
+        # - Linux:  ubuntu-latest  (x64)
+        # - Windows: windows-latest (x64)
+        # - macOS:  macos-latest  (arm64, Apple Silicon)
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ['3.14']
+        include:
+          - os: ubuntu-latest
+            arch: x64
+          - os: windows-latest
+            arch: x64
+          - os: macos-latest
+            arch: arm64
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix['python-version'] }}
 
@@ -53,9 +68,10 @@ jobs:
           pyinstaller Jukebox.spec
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: Jukebox-${{ runner.os }}-${{ github.ref_name }}
+          # Jukebox-${os}-${arch}-${tag}
+          name: Jukebox-${{ runner.os }}-${{ matrix.arch }}-${{ github.ref_name }}
           path: dist/**
 
   release:
@@ -70,21 +86,51 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Download frozen artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
-      - name: Zip per-platform artifacts
+      - name: Collect and rename executables per platform
+        env:
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           cd artifacts
-          for dir in */; do
-            zip -r "${dir%/}.zip" "$dir"
+          for dir in Jukebox-*; do
+            # Expect artifact directory name: Jukebox-${os}-${arch}-${tag}
+            base="${dir#Jukebox-}"      # ${os}-${arch}-${tag}
+
+            os="${base%%-*}"            # first field -> os
+            rest="${base#${os}-}"       # drop "${os}-" -> ${arch}-${tag}
+            arch="${rest%%-*}"          # second field -> arch
+
+            if [ -z "$os" ] || [ -z "$arch" ]; then
+              echo "Could not parse os/arch from artifact dir '$dir', skip."
+              continue
+            fi
+
+            # Find main executable in this artifact (assumed to start with Jukebox)
+            exe_path="$(find "$dir" -maxdepth 5 -type f -name 'Jukebox*' | head -n 1)"
+            if [ -z "$exe_path" ]; then
+              echo "No Jukebox binary found in $dir, skip."
+              continue
+            fi
+
+            ext=""
+            case "$exe_path" in
+              *.exe) ext=".exe" ;;
+            esac
+
+            # Final release asset filename:
+            #   Jukebox-${TAG_NAME}-${os}-${arch}[.exe]
+            target="Jukebox-${TAG_NAME}-${os}-${arch}${ext}"
+            echo "Copy $exe_path -> $target"
+            cp "$exe_path" "$target"
           done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.zip
+          files: artifacts/Jukebox-*
           body: |
             ## Jukebox ${{ github.ref_name }}
 
@@ -93,15 +139,11 @@ jobs:
 
             ### Frozen executables
 
-            Frozen executables (packaged with PyInstaller) for this release:
-            - Linux (`ubuntu-latest`)
-            - Windows (`windows-latest`)
-            - macOS (`macos-latest`)
-
             These frozen executables are automatically produced by the CI workflow for each tagged release.
             The recommended way to run Jukebox is to use Python and run it from source at the latest commit on the default branch.
             When filing issues, please test and confirm the problem using the latest source version (run with Python) rather than a previously frozen release.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
 
 

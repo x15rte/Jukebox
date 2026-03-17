@@ -6,7 +6,6 @@ import sys
 import shutil
 from pathlib import Path
 import subprocess
-from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
@@ -55,15 +54,7 @@ datas = []
 if (project_dir / "icon.ico").is_file():
     datas.append((str(project_dir / "icon.ico"), "."))
 
-# images directory (if present)
-images_dir = project_dir / "images"
-if images_dir.is_dir():
-    for p in images_dir.iterdir():
-        if p.is_file():
-            # (source path, runtime relative directory)
-            datas.append((str(p), f"images/{p.name}"))
-
-# To bundle additional resources, append to datas similarly, e.g.:
+# To bundle additional resources, append to datas, e.g.:
 # datas.append((str(project_dir / "README.md"), "README.md"))
 
 # ---------------------------------------------------------------------------
