@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QTextBrowser, QDialog,
 )
 from PyQt6.QtCore import QThread, QTimer, QByteArray, pyqtSignal as Signal, Qt
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtGui import QFont, QIcon, QColor
 import mido
 
 from models import Note
@@ -255,6 +255,10 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
 
+        # Track last active tab index so we can guard switching back to
+        # Playback while playback is running/paused.
+        self._last_tab_index = 0
+
         # Initialize playback controller after UI is constructed so that
         # widgets like piano_widget already exist when wiring signals.
         self.playback_controller = PlaybackController(self)
@@ -285,6 +289,10 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(controls_tab, "Playback")
         self.tabs.addTab(visual_tab, "Visualizer")
         self.tabs.addTab(log_tab, "Output")
+
+        # Guard the Playback tab when playback is active: remember last index
+        # and veto switching *into* Playback while a song is playing/paused.
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         # Visualizer tab: scrollable timeline + piano strip.
         vis_layout = QVBoxLayout(visual_tab)
@@ -412,10 +420,52 @@ class MainWindow(QMainWindow):
         self.hk_btn.setEnabled(True)
         self._update_play_stop_labels()
 
+    def _is_playback_locked(self) -> bool:
+        """Return True if playback settings should be locked (playing or paused)."""
+        state = getattr(self, "playback_state", "stopped")
+        return state != "stopped"
+
+    def _update_playback_tab_appearance(self) -> None:
+        """Visually grey out the Playback tab when locked and add a tooltip hint."""
+        if not hasattr(self, "tabs"):
+            return
+        tab_bar = self.tabs.tabBar()
+        locked = self._is_playback_locked()
+        # Playback tab index is 0
+        color = QColor(150, 150, 150) if locked else QColor(235, 235, 240)
+        tab_bar.setTabTextColor(0, color)
+        tooltip = (
+            "Playback options are locked while the song is playing or paused. "
+            "Press Stop to adjust settings."
+            if locked
+            else ""
+        )
+        self.tabs.setTabToolTip(0, tooltip)
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Remember last non-guarded tab index and veto entering Playback when locked."""
+        # If trying to switch *into* Playback while playback is locked,
+        # show a warning and immediately bounce the user to Visualizer.
+        if index == 0 and self._is_playback_locked():
+            QMessageBox.information(
+                self,
+                "Playback Locked",
+                "Playback options cannot be changed while the song is playing or paused.\n"
+                "Please press Stop before modifying settings.",
+            )
+            # Force Visualizer tab (index 1) so it's clear playback continues.
+            if self.tabs.count() > 1:
+                self.tabs.setCurrentIndex(1)
+            return
+
+        # Normal case: just remember the last successfully selected tab.
+        self._last_tab_index = index
+
     def _on_playback_state_changed(self, state: str) -> None:
         """Qt slot: update cached state from controller and refresh labels."""
         self.playback_state = state
         self._update_play_stop_labels()
+        self._update_playback_tab_appearance()
 
     def _update_play_stop_labels(self):
         key_str = self.hotkey_manager._format_key_string(self.hotkey_manager.current_key)
