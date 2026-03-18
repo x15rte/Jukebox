@@ -27,14 +27,15 @@ python ./main.py
 # Update
 git pull
 ```
-[![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/x15rte/Jukebox)](https://github.com/x15rte/Jukebox)
+[![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/x15rte/Jukebox)](https://github.com/x15rte/Jukebox) 
+![GitHub last commit](https://img.shields.io/github/last-commit/x15rte/Jukebox)
+
 
 ## Method 2  
 Download and run the latest release from the [Releases page](https://github.com/x15rte/Jukebox/releases).  
-> the frozen exe may show the window with a random delay; if nothing appears, wait a bit longer or run via Method 1
+> the frozen exe may show the window with a random delay;if nothing appears, wait a bit longer or run via Method1
 
 [![GitHub All Releases](https://img.shields.io/github/downloads/x15rte/Jukebox/total?label=downloads-total&logo=github)](https://github.com/x15rte/Jukebox/releases) 
-[![GitHub Release Date](https://img.shields.io/github/release-date/x15rte/Jukebox)](https://github.com/x15rte/Jukebox/releases/latest)
 [![GitHub Release](https://img.shields.io/github/v/release/x15rte/Jukebox)](https://github.com/x15rte/Jukebox/releases/latest)
 [![GitHub commits since latest release](https://img.shields.io/github/commits-since/x15rte/Jukebox/latest)](https://github.com/x15rte/Jukebox/commits/main/)
 
@@ -64,3 +65,5 @@ pyinstaller ./Jukebox.spec
 - [RobloxMidiConnect](https://github.com/LordHenryVonHenry/RobloxMidiConnect)
 - [miditoqwerty-rs](https://github.com/ArijanJ/miditoqwerty-rs)
 
+---
+This project is based on [HuMidi](https://github.com/smyGitt/HuMidi-Roblox-Piano-Autoplayer)
