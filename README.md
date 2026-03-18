@@ -12,6 +12,9 @@ Supports Windows, macOS, and Linux
  (May not be up-to-date or contain AI hallucinations)
 
 # 🚀 Usage 
+
+**Do not use IME during playback. Use US-QWERTY direct input only.**
+
 ## Method 1 (Recommend)
 ```bash
 # Install
