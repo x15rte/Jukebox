@@ -65,7 +65,7 @@ jobs:
         env:
           BUILD_VERSION: ${{ github.ref_name }}
         run: |
-          pyinstaller Jukebox.spec
+          pyinstaller --clean Jukebox.spec
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
