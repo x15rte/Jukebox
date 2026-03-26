@@ -9,7 +9,7 @@ Supports Windows, macOS, and Linux
 
 # 📖 Wiki
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/x15rte/Jukebox)  
- (May not be up-to-date or contain AI hallucinations)
+> Automatically refresh weekly with the latest code changes, may contain AI hallucinations
 
 # 🚀 Usage 
 
