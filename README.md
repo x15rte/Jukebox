@@ -51,6 +51,19 @@ KEY Mode: 88-Key -> Ctrl ; Pedal -> Space
 Open config dir  
 `cd ~/.jukebox_piano/`
 
+# 🙋 FAQ
+
+## How can I be sure this isn’t a malware?
+You can verify it in several ways:
+- Review the source code yourself (it’s fully open source).
+- Use AI tools like [Claude](https://claude.com/product/claude-code) or [DeepWiki](https://deepwiki.com/x15rte/Jukebox) to analyze the code.
+- Run it directly with `python main.py` without downloading any executable. (Recommended method)
+
+Alternatively, if you prefer to use the pre-built executable from the **Immutable** release:
+- It is **built automatically via GitHub Actions** (see [build.yml](https://github.com/x15rte/Jukebox/blob/main/.github/workflows/build.yml)).
+- [Immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+- You can scan it on [VirusTotal](https://www.virustotal.com/gui/home/upload) before running.
+
 # 📦 Freeze to exe 
 ```bash
 pyinstaller ./Jukebox.spec
