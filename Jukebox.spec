@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- mode: python ; coding: utf-8 -*-
+# pylint: disable=undefined-variable
+# pyright: reportUndefinedVariable=false
 
 import os
 import sys

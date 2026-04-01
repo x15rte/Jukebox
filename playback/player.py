@@ -16,12 +16,13 @@ from models import Note, KeyEvent, MusicalSection
 from core import TempoMap, KeyMapper
 from analysis import Humanizer, PedalGenerator
 from output import OutputBackend
-from platform_utils import set_timer_resolution, restore_timer_resolution, precise_sleep
+from native import set_timer_resolution, restore_timer_resolution, precise_sleep
 
 
 # ---------------------------------------------------------------------------
 # Event compiler
 # ---------------------------------------------------------------------------
+
 
 class EventCompiler:
     """Compile a list of :class:`Note` objects into a time-sorted list of
@@ -31,66 +32,91 @@ class EventCompiler:
     """
 
     @staticmethod
-    def compile(notes: List[Note], sections: List[MusicalSection],
-                config: Dict) -> List[KeyEvent]:
+    def compile(
+        notes: List[Note], sections: List[MusicalSection], config: Dict
+    ) -> List[KeyEvent]:
         work = copy.deepcopy(notes)
 
         # --- optional humanization (delegates to analysis.py) ---
         humanize_keys = (
-            'enable_vary_timing',
-            'enable_vary_articulation',
-            'enable_drift_correction',
-            'enable_chord_roll',
-            'enable_tempo_sway',
+            "enable_vary_timing",
+            "enable_vary_articulation",
+            "enable_drift_correction",
+            "enable_chord_roll",
+            "enable_tempo_sway",
         )
         if any(config.get(k) for k in humanize_keys):
             humanizer = Humanizer(config)
-            left = [n for n in work if n.hand == 'left']
-            right = [n for n in work if n.hand == 'right']
-            resync = ({round(n.start_time, 2) for n in left}
-                      & {round(n.start_time, 2) for n in right})
+            left = [n for n in work if n.hand == "left"]
+            right = [n for n in work if n.hand == "right"]
+            resync = {round(n.start_time, 2) for n in left} & {
+                round(n.start_time, 2) for n in right
+            }
             humanizer.prepare_shared_offsets(work)
-            humanizer.apply_to_hand(left, 'left', resync)
-            humanizer.apply_to_hand(right, 'right', resync)
+            humanizer.apply_to_hand(left, "left", resync)
+            humanizer.apply_to_hand(right, "right", resync)
             work = sorted(left + right, key=lambda n: n.start_time)
             humanizer.apply_tempo_rubato(work, sections)
 
         # --- build press / release events ---
         heap: list = []
-        use_mistakes = config.get('enable_mistakes', False)
-        mistake_chance = config.get('mistake_chance', 0) / 100.0
+        use_mistakes = config.get("enable_mistakes", False)
+        mistake_chance = config.get("mistake_chance", 0) / 100.0
         played_in_section: Set[int] = set()
         sec_idx = 0
 
         for note in work:
             # Advance section index monotonically; sections are time-ordered.
-            while sec_idx < len(sections) and note.start_time >= sections[sec_idx].end_time:
+            while (
+                sec_idx < len(sections)
+                and note.start_time >= sections[sec_idx].end_time
+            ):
                 sec_idx += 1
                 played_in_section.clear()
 
             pitch = note.pitch
             did_mistake = False
 
-            if (use_mistakes
-                    and pitch not in played_in_section
-                    and random.random() < mistake_chance):  # nosec B311: non-crypto randomness for musical mistakes only
+            if (
+                use_mistakes
+                and pitch not in played_in_section
+                and random.random() < mistake_chance
+            ):  # nosec B311: non-crypto randomness for musical mistakes only
                 mp = EventCompiler._mistake_pitch(pitch)
                 if mp is not None:
-                    heapq.heappush(heap, KeyEvent(
-                        note.start_time, 2, 'press', '',
-                        pitch=mp, velocity=note.velocity))
-                    heapq.heappush(heap, KeyEvent(
-                        note.end_time, 4, 'release', '',
-                        pitch=mp, velocity=0))
+                    heapq.heappush(
+                        heap,
+                        KeyEvent(
+                            note.start_time,
+                            2,
+                            "press",
+                            "",
+                            pitch=mp,
+                            velocity=note.velocity,
+                        ),
+                    )
+                    heapq.heappush(
+                        heap,
+                        KeyEvent(note.end_time, 4, "release", "", pitch=mp, velocity=0),
+                    )
                     did_mistake = True
 
             if not did_mistake:
-                heapq.heappush(heap, KeyEvent(
-                    note.start_time, 2, 'press', '',
-                    pitch=pitch, velocity=note.velocity))
-                heapq.heappush(heap, KeyEvent(
-                    note.end_time, 4, 'release', '',
-                    pitch=pitch, velocity=0))
+                heapq.heappush(
+                    heap,
+                    KeyEvent(
+                        note.start_time,
+                        2,
+                        "press",
+                        "",
+                        pitch=pitch,
+                        velocity=note.velocity,
+                    ),
+                )
+                heapq.heappush(
+                    heap,
+                    KeyEvent(note.end_time, 4, "release", "", pitch=pitch, velocity=0),
+                )
 
             played_in_section.add(pitch)
 
@@ -106,16 +132,25 @@ class EventCompiler:
     @staticmethod
     def _mistake_pitch(original: int) -> Optional[int]:
         if KeyMapper.is_black_key(original):
-            return original + random.choice([-2, -1, 1, 2])  # nosec B311: non-crypto randomness for musical mistakes only
-        candidates = [p for p in (original - 2, original - 1,
-                                  original + 1, original + 2)
-                      if not KeyMapper.is_black_key(p)]
+            offsets = [-2, -1, 1, 2]
+            random.shuffle(offsets)  # nosec B311: non-crypto randomness for musical mistakes only
+            for offset in offsets:
+                candidate = original + offset
+                if 0 <= candidate <= 127:
+                    return candidate
+            return None
+        candidates = [
+            p
+            for p in (original - 2, original - 1, original + 1, original + 2)
+            if 0 <= p <= 127 and not KeyMapper.is_black_key(p)
+        ]
         return random.choice(candidates) if candidates else None  # nosec B311: non-crypto randomness for musical mistakes only
 
 
 # ---------------------------------------------------------------------------
 # Playback engine
 # ---------------------------------------------------------------------------
+
 
 class Player(QObject):
     """Time-accurate playback engine that dispatches compiled
@@ -132,9 +167,13 @@ class Player(QObject):
     # Emits the full set of currently active MIDI pitches whenever it changes.
     visualizer_updated = Signal(list)
 
-    def __init__(self, compiled_events: List[KeyEvent],
-                 backend: OutputBackend, config: Dict,
-                 total_duration: float):
+    def __init__(
+        self,
+        compiled_events: List[KeyEvent],
+        backend: OutputBackend,
+        config: Dict,
+        total_duration: float,
+    ):
         super().__init__()
         self.events = compiled_events
         self.backend = backend
@@ -144,6 +183,8 @@ class Player(QObject):
         self.event_index = 0
         self.stop_event = threading.Event()
         self.pause_event = threading.Event()
+        self._pause_lock = threading.Lock()
+        self._pending_pause = False
 
         self.start_time = 0.0
         self.total_paused_time = 0.0
@@ -162,12 +203,12 @@ class Player(QObject):
     def play(self):
         """Entry point — run from a QThread."""
         try:
-            if self.config.get('countdown'):
+            if self.config.get("countdown"):
                 self._countdown()
             if self.stop_event.is_set():
                 return
 
-            start_offset = self.config.get('start_offset', 0.0)
+            start_offset = self.config.get("start_offset", 0.0)
             self.status_updated.emit("Playing!")
             self.start_time = time.perf_counter() - start_offset
             self.total_paused_time = 0.0
@@ -178,6 +219,7 @@ class Player(QObject):
             self._run_loop()
         except Exception as e:
             import traceback
+
             self.status_updated.emit(f"Error: {e}\n{traceback.format_exc()}")
         finally:
             self.backend.shutdown()
@@ -199,12 +241,15 @@ class Player(QObject):
             self.status_updated.emit("Resuming...")
         else:
             self._pause_ts = time.perf_counter()
+            with self._pause_lock:
+                self._pending_pause = True
             self.pause_event.set()
-            self._pending_shutdown = True
             self.status_updated.emit("Paused.")
 
     def seek(self, target_time: float):
         self._pending_shutdown = True
+        self._active_pitches.clear()
+        self.visualizer_updated.emit([])
         if self._event_times:
             self.event_index = bisect.bisect_left(self._event_times, target_time)
         else:
@@ -229,7 +274,6 @@ class Player(QObject):
             time.sleep(1)
 
     def _run_loop(self):
-        import sys
         _old_switch = sys.getswitchinterval()
         sys.setswitchinterval(0.0005)
         set_timer_resolution(1)
@@ -249,6 +293,12 @@ class Player(QObject):
                 self.backend.shutdown()
 
             if self.pause_event.is_set():
+                with self._pause_lock:
+                    if self._pending_pause:
+                        self._pending_pause = False
+                        self.backend.shutdown()
+                        self._active_pitches.clear()
+                        self.visualizer_updated.emit([])
                 time.sleep(0.05)
                 continue
 
@@ -295,12 +345,12 @@ class Player(QObject):
         if self.stop_event.is_set():
             return
 
-        pedals = [e for e in events if e.action == 'pedal']
-        releases = [e for e in events if e.action == 'release']
-        presses = [e for e in events if e.action == 'press']
+        pedals = [e for e in events if e.action == "pedal"]
+        releases = [e for e in events if e.action == "release"]
+        presses = [e for e in events if e.action == "press"]
 
         for e in pedals:
-            if e.key_char == 'down':
+            if e.key_char == "down":
                 self.backend.pedal_on()
             else:
                 self.backend.pedal_off()

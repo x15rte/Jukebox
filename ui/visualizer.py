@@ -2,8 +2,17 @@
 
 from PyQt6.QtWidgets import QWidget, QSizePolicy
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal as Signal
-from PyQt6.QtGui import QPainter, QBrush, QColor, QPen, QPixmap, QFont
-from typing import List
+from PyQt6.QtGui import (
+    QPainter,
+    QBrush,
+    QColor,
+    QPen,
+    QPixmap,
+    QFont,
+    QMouseEvent,
+    QResizeEvent,
+)
+from typing import List, Optional
 from models import Note
 from core import TempoMap
 import theme
@@ -11,16 +20,17 @@ import theme
 
 class PianoWidget(QWidget):
     """Draws a keyboard strip; highlights keys for pitches in active_pitches. A0–C8 (21–108), 52 white keys."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(80)
         self.setMinimumWidth(500)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.active_pitches = set()
-        self.min_pitch = 21   # A0
+        self.min_pitch = 21  # A0
         self.max_pitch = 108  # C8
         self.white_keys_count = 52
-        self.black_keys = {1, 3, 6, 8, 10}   # Semitones that are black keys (mod 12) 
+        self.black_keys = {1, 3, 6, 8, 10}  # Semitones that are black keys (mod 12)
 
     def set_pitch_active(self, pitch: int, active: bool):
         if active:
@@ -32,12 +42,12 @@ class PianoWidget(QWidget):
         """Replace active pitches from an iterable of MIDI note numbers."""
         self.active_pitches = set(pitches)
         self.update()
-        
+
     def clear(self):
         self.active_pitches.clear()
         self.update()
 
-    def paintEvent(self, event):
+    def paintEvent(self, a0) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]  # noqa: N802
         """Draw white keys first, then black keys on top."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -56,26 +66,29 @@ class PianoWidget(QWidget):
         white_key_rects = {}
 
         for p in range(self.min_pitch, self.max_pitch + 1):
-            if (p % 12) in self.black_keys: continue
+            if (p % 12) in self.black_keys:
+                continue
             x = white_idx * key_width
             rect = QRectF(x, 0, key_width, height)
             white_key_rects[p] = rect
-            
+
             brush = active_brush if p in self.active_pitches else white_brush
             painter.setBrush(brush)
-            painter.setPen(QPen(QColor(0,0,0), 1))
+            painter.setPen(QPen(QColor(0, 0, 0), 1))
             painter.drawRect(rect)
             white_idx += 1
 
         for p in range(self.min_pitch, self.max_pitch + 1):
-            if (p % 12) not in self.black_keys: continue
+            if (p % 12) not in self.black_keys:
+                continue
             prev_white = p - 1
-            if prev_white not in white_key_rects: continue
-                
+            if prev_white not in white_key_rects:
+                continue
+
             ref_rect = white_key_rects[prev_white]
             x = ref_rect.right() - (black_key_width / 2)
             rect = QRectF(x, 0, black_key_width, black_key_height)
-            
+
             brush = active_brush if p in self.active_pitches else black_brush
             painter.setBrush(brush)
             painter.setPen(QPen(QColor(0, 0, 0), 1))
@@ -90,11 +103,16 @@ class PianoWidget(QWidget):
             # MIDI note names: C n
             if p % 12 == 0 and 36 <= p <= 72:  # C2–C5
                 octave = (p // 12) - 1
-                painter.drawText(rect.adjusted(0, rect.height() - 16, 0, -2), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, f"C{octave}")
+                painter.drawText(
+                    rect.adjusted(0, rect.height() - 16, 0, -2),
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+                    f"C{octave}",
+                )
 
 
 class TimelineWidget(QWidget):
     """Horizontal timeline: note bars (left=blue, right=red, unknown=gray), measure lines, playhead. Draggable to seek."""
+
     seek_requested = Signal(float)
     scrub_position_changed = Signal(float)
 
@@ -105,13 +123,15 @@ class TimelineWidget(QWidget):
         self.total_duration = 1.0
         self.current_time = 0.0
         self.is_dragging = False
-        self.pixels_per_second = 50   # Zoom: width = duration * this
+        self.pixels_per_second = 50  # Zoom: width = duration * this
         self.tempo_map = None
-        self._cached_boundaries = None   # Measure (start, end) times; avoid recompute in paint.
+        self._cached_boundaries = (
+            None  # Measure (start, end) times; avoid recompute in paint.
+        )
 
         self.bg_color = QColor(24, 24, 28)
-        self.left_hand_color = QColor(80, 160, 255, 210)   # Blue
-        self.right_hand_color = QColor(255, 120, 100, 210)   # Red
+        self.left_hand_color = QColor(80, 160, 255, 210)  # Blue
+        self.right_hand_color = QColor(255, 120, 100, 210)  # Red
         self.unknown_color = QColor(150, 150, 150, 160)
         self.cursor_color = theme.ACCENT
         self.measure_line_color = QColor(255, 255, 255, 40)
@@ -120,7 +140,9 @@ class TimelineWidget(QWidget):
         # the entire roll every paint; only rebuilt when size or data changes.
         self._cached_background: QPixmap | None = None
 
-    def set_data(self, notes: List[Note], duration: float, tempo_map: TempoMap = None):
+    def set_data(
+        self, notes: List[Note], duration: float, tempo_map: TempoMap | None = None
+    ):
         """Set notes and duration; cache measure boundaries from tempo_map for paint."""
         self.notes = notes
         self.total_duration = max(duration, 0.1)
@@ -129,7 +151,9 @@ class TimelineWidget(QWidget):
 
         if self.tempo_map:
             try:
-                self._cached_boundaries = self.tempo_map.get_measure_boundaries(self.total_duration)
+                self._cached_boundaries = self.tempo_map.get_measure_boundaries(
+                    self.total_duration
+                )
             except Exception:
                 self._cached_boundaries = None
 
@@ -145,22 +169,22 @@ class TimelineWidget(QWidget):
             self.current_time = time
             self.update()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, a0: QResizeEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]  # noqa: N802
         # Any size change invalidates the cached pixmap.
         self._cached_background = None
-        super().resizeEvent(event)
+        super().resizeEvent(a0)
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mousePressEvent(self, a0: QMouseEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]  # noqa: N802
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
             self.is_dragging = True
-            self._handle_mouse_input(event.position().x())
+            self._handle_mouse_input(a0.position().x())
 
-    def mouseMoveEvent(self, event):
-        if self.is_dragging:
-            self._handle_mouse_input(event.position().x())
+    def mouseMoveEvent(self, a0: QMouseEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]  # noqa: N802
+        if self.is_dragging and a0 is not None:
+            self._handle_mouse_input(a0.position().x())
 
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mouseReleaseEvent(self, a0: QMouseEvent) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]  # noqa: N802
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
             self.is_dragging = False
             self.seek_requested.emit(self.current_time)
 
@@ -172,7 +196,10 @@ class TimelineWidget(QWidget):
 
     def _ensure_background(self):
         """Rebuild the cached background pixmap if needed."""
-        if self._cached_background is not None and self._cached_background.size() == self.size():
+        if (
+            self._cached_background is not None
+            and self._cached_background.size() == self.size()
+        ):
             return
 
         if self.width() <= 0 or self.height() <= 0:
@@ -212,9 +239,9 @@ class TimelineWidget(QWidget):
                 ny = ny_ratio * (h - 10) + 5
                 nh = 8
 
-                if note.hand == 'left':
+                if note.hand == "left":
                     painter.setBrush(QBrush(self.left_hand_color))
-                elif note.hand == 'right':
+                elif note.hand == "right":
                     painter.setBrush(QBrush(self.right_hand_color))
                 else:
                     painter.setBrush(QBrush(self.unknown_color))
@@ -223,7 +250,7 @@ class TimelineWidget(QWidget):
 
         painter.end()
 
-    def paintEvent(self, event):
+    def paintEvent(self, a0):  # type: ignore[override]  # noqa: N802
         self._ensure_background()
 
         painter = QPainter(self)

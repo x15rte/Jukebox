@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Callable
 from PyQt6.QtCore import QObject, QThread, pyqtSignal as Signal
 
 from models import KeyEvent
-from player import Player
+from .player import Player
 from output import OutputBackend, create_backend
 
 
@@ -54,6 +54,13 @@ class PlaybackController(QObject):
         return self._player
 
     @property
+    def total_duration(self) -> float:
+        """Return the total duration of the current playback run."""
+        if self._player is not None:
+            return self._player.total_duration
+        return self._total_duration
+
+    @property
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.isRunning()
 
@@ -90,7 +97,9 @@ class PlaybackController(QObject):
         # "Stop" fully completes before a new "Play" starts.
         if self.is_running or self._stopping:
             if log_message is not None:
-                log_message("Playback is still stopping; please wait a moment before starting again.")
+                log_message(
+                    "Playback is still stopping; please wait a moment before starting again."
+                )
             return
 
         self._total_duration = total_duration
@@ -124,10 +133,9 @@ class PlaybackController(QObject):
 
     def stop(self) -> None:
         """Request playback stop; returns immediately."""
-        if self._player is not None:
+        if self._player is not None and self.is_running:
             self._stopping = True
             self._player.stop()
-        self._set_state("stopped")
 
     def stop_and_wait(self, timeout_ms: Optional[int] = None) -> None:
         """Request playback stop and wait for the worker thread to finish."""
@@ -140,6 +148,7 @@ class PlaybackController(QObject):
                 thread.wait(timeout_ms)
             else:
                 thread.wait()
+        self._stopping = False
 
     def toggle_pause(self) -> None:
         """Toggle pause/resume if a player is active."""
@@ -164,7 +173,8 @@ class PlaybackController(QObject):
     # ------------------------------------------------------------------
     def _on_playback_finished_internal(self) -> None:
         """Handle Player completion: clean up thread/backend and emit signal."""
-        self.playback_finished.emit()
+        if self._player is None:
+            return  # Already cleaned up (e.g. stop() called after thread died)
 
         thread = self._thread
         player = self._player
@@ -183,3 +193,4 @@ class PlaybackController(QObject):
         # Player.shutdown() is called from inside Player.play()'s finally block,
         # so there is nothing left to do here regarding backend.
 
+        self.playback_finished.emit()

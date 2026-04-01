@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Tuple, Optional
 from models import Note, KeyEvent, MusicalSection
 from core import MidiParser, TempoMap
 from analysis import SectionAnalyzer, FingeringEngine
-from player import EventCompiler
+from .player import EventCompiler
 from models import MidiTrack
 
 
@@ -35,10 +35,7 @@ class PlaybackService:
         :raises: Exception on parse or compile errors (caller should log with exc_info and show dialog).
         """
         tempo_scale = config.get("tempo", 100) / 100.0
-        if (
-            preparsed is not None
-            and abs(tempo_scale - preparsed_tempo_scale) < 1e-9
-        ):
+        if preparsed is not None and abs(tempo_scale - preparsed_tempo_scale) < 1e-9:
             tracks, tempo_map = preparsed
         else:
             tracks, tempo_map = MidiParser.parse_structure(midi_file, tempo_scale)
@@ -49,8 +46,8 @@ class PlaybackService:
         final_notes: List[Note] = []
         raw_pedal_events = []
         for track in tracks:
-            raw_pedal_events.extend(track.pedal_events)
             if track.index in selected_indices:
+                raw_pedal_events.extend(track.pedal_events)
                 role = role_map[track.index]
                 for note in track.notes:
                     new_note = copy.deepcopy(note)
@@ -64,14 +61,28 @@ class PlaybackService:
         config = dict(config)
         config["raw_pedal_events"] = raw_pedal_events
 
-        # Normalize legacy humanization flags for downstream code (player/analysis use
-        # enable_drift_correction; Config dataclass uses enable_hand_drift).
-        if "enable_vary_timing" not in config and "vary_timing" in config:
-            config["enable_vary_timing"] = bool(config.get("vary_timing"))
-        if "enable_vary_articulation" not in config and "vary_articulation" in config:
-            config["enable_vary_articulation"] = bool(config.get("vary_articulation"))
+        # Normalize config keys for downstream code (humanizer/player use short forms
+        # like vary_timing/timing_variance/articulation; Config dataclass uses
+        # enable_vary_timing/value_timing_variance/value_articulation).
+        if "vary_timing" not in config and "enable_vary_timing" in config:
+            config["vary_timing"] = bool(config.get("enable_vary_timing"))
+        if "vary_articulation" not in config and "enable_vary_articulation" in config:
+            config["vary_articulation"] = bool(config.get("enable_vary_articulation"))
+        if "timing_variance" not in config and "value_timing_variance" in config:
+            config["timing_variance"] = config["value_timing_variance"]
+        if "articulation" not in config and "value_articulation" in config:
+            config["articulation"] = config["value_articulation"] / 100.0
         if "enable_drift_correction" not in config and "enable_hand_drift" in config:
             config["enable_drift_correction"] = bool(config.get("enable_hand_drift"))
+        if "drift_decay_factor" not in config and "value_hand_drift_decay" in config:
+            config["drift_decay_factor"] = config["value_hand_drift_decay"] / 100.0
+        if "mistake_chance" not in config and "value_mistake_chance" in config:
+            config["mistake_chance"] = config["value_mistake_chance"]
+        if (
+            "tempo_sway_intensity" not in config
+            and "value_tempo_sway_intensity" in config
+        ):
+            config["tempo_sway_intensity"] = config["value_tempo_sway_intensity"]
 
         final_notes.sort(key=lambda n: n.start_time)
 

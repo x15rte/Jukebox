@@ -16,9 +16,9 @@ from pynput.keyboard import Key, Controller
 
 from models import KeyState
 from core import KeyMapper
-import RobloxMidiConnect_encoder as rmc
+from . import RobloxMidiConnect_encoder as rmc
 from logger_core import jukebox_logger
-from platform_utils import (
+from native import (
     get_macos_vk_for_key,
     get_macos_vk_for_modifier,
     post_macos_key_event,
@@ -53,14 +53,18 @@ class OutputBackend(ABC):
 # Keyboard backend
 # ---------------------------------------------------------------------------
 
+
 class KeyboardBackend(OutputBackend):
     """Translates note/pedal events into pynput keyboard actions.
     On macOS, uses CGEvent when the "Use pynput (Mac)" option is unchecked; otherwise pynput.
     """
 
-    def __init__(self, use_88_key_layout: bool = False,
-                 macos_use_pynput: bool = False,
-                 log_message: Optional[Callable[[str], None]] = None):
+    def __init__(
+        self,
+        use_88_key_layout: bool = False,
+        macos_use_pynput: bool = False,
+        log_message: Optional[Callable[[str], None]] = None,
+    ):
         self._kb = Controller()
         self._mapper = KeyMapper(use_88_key_layout=use_88_key_layout)
         self._states: Dict[str, KeyState] = {}
@@ -96,7 +100,9 @@ class KeyboardBackend(OutputBackend):
 
     # -- notes --
 
-    def _note_on_macos_cgevent(self, data: Dict, base_key: str, modifiers: List) -> bool:
+    def _note_on_macos_cgevent(
+        self, data: Dict, base_key: str, modifiers: List
+    ) -> bool:
         vk = get_macos_vk_for_key(base_key)
         if vk is None:
             return False
@@ -110,22 +116,36 @@ class KeyboardBackend(OutputBackend):
             mod_vk = get_macos_vk_for_modifier(mod)
             if mod_vk is None:
                 continue
-            shift, alt, ctrl = self._macos_modifiers
             if mod in (Key.shift,) or getattr(mod, "name", None) == "shift":
                 shift_rc += 1
-                if not shift:
+                if shift_rc == 1:
                     post_macos_key_event(mod_vk, True, self._macos_flags())
-                    self._macos_modifiers = (True, alt, ctrl)
-            elif mod in (Key.ctrl, Key.control) or getattr(mod, "name", None) in ("ctrl", "control"):
+                    self._macos_modifiers = (
+                        True,
+                        self._macos_modifiers[1],
+                        self._macos_modifiers[2],
+                    )
+            elif mod in (Key.ctrl,) or getattr(mod, "name", None) in (
+                "ctrl",
+                "control",
+            ):
                 ctrl_rc += 1
-                if not ctrl:
+                if ctrl_rc == 1:
                     post_macos_key_event(mod_vk, True, self._macos_flags())
-                    self._macos_modifiers = (shift, alt, True)
+                    self._macos_modifiers = (
+                        self._macos_modifiers[0],
+                        self._macos_modifiers[1],
+                        True,
+                    )
             elif mod == Key.alt or getattr(mod, "name", None) == "alt":
                 alt_rc += 1
-                if not alt:
+                if alt_rc == 1:
                     post_macos_key_event(mod_vk, True, self._macos_flags())
-                    self._macos_modifiers = (shift, True, ctrl)
+                    self._macos_modifiers = (
+                        self._macos_modifiers[0],
+                        True,
+                        self._macos_modifiers[2],
+                    )
         self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
 
         flags = self._macos_flags()
@@ -136,7 +156,9 @@ class KeyboardBackend(OutputBackend):
             post_macos_key_event(vk, True, flags)
         return True
 
-    def _note_off_macos_cgevent(self, data: Dict, base_key: str, modifiers: List) -> bool:
+    def _note_off_macos_cgevent(
+        self, data: Dict, base_key: str, modifiers: List
+    ) -> bool:
         vk = get_macos_vk_for_key(base_key)
         if vk is None:
             return False
@@ -151,22 +173,36 @@ class KeyboardBackend(OutputBackend):
             mod_vk = get_macos_vk_for_modifier(mod)
             if mod_vk is None:
                 continue
-            shift, alt, ctrl = self._macos_modifiers
             if mod in (Key.shift,) or getattr(mod, "name", None) == "shift":
                 shift_rc = max(0, shift_rc - 1)
-                if shift and shift_rc == 0:
-                    post_macos_key_event(mod_vk, False, flags)
-                    self._macos_modifiers = (False, alt, ctrl)
-            elif mod in (Key.ctrl, Key.control) or getattr(mod, "name", None) in ("ctrl", "control"):
+                if shift_rc == 0 and self._macos_modifiers[0]:
+                    self._macos_modifiers = (
+                        False,
+                        self._macos_modifiers[1],
+                        self._macos_modifiers[2],
+                    )
+                    post_macos_key_event(mod_vk, False, self._macos_flags())
+            elif mod in (Key.ctrl,) or getattr(mod, "name", None) in (
+                "ctrl",
+                "control",
+            ):
                 ctrl_rc = max(0, ctrl_rc - 1)
-                if ctrl and ctrl_rc == 0:
-                    post_macos_key_event(mod_vk, False, flags)
-                    self._macos_modifiers = (shift, alt, False)
+                if ctrl_rc == 0 and self._macos_modifiers[2]:
+                    self._macos_modifiers = (
+                        self._macos_modifiers[0],
+                        self._macos_modifiers[1],
+                        False,
+                    )
+                    post_macos_key_event(mod_vk, False, self._macos_flags())
             elif mod == Key.alt or getattr(mod, "name", None) == "alt":
                 alt_rc = max(0, alt_rc - 1)
-                if alt and alt_rc == 0:
-                    post_macos_key_event(mod_vk, False, flags)
-                    self._macos_modifiers = (shift, False, ctrl)
+                if alt_rc == 0 and self._macos_modifiers[1]:
+                    self._macos_modifiers = (
+                        self._macos_modifiers[0],
+                        False,
+                        self._macos_modifiers[2],
+                    )
+                    post_macos_key_event(mod_vk, False, self._macos_flags())
         self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
         return True
 
@@ -177,7 +213,9 @@ class KeyboardBackend(OutputBackend):
         base_key = data["key"]
         modifiers = data["modifiers"]
 
-        if self._use_macos_cgevent and self._note_on_macos_cgevent(data, base_key, modifiers):
+        if self._use_macos_cgevent and self._note_on_macos_cgevent(
+            data, base_key, modifiers
+        ):
             return
 
         state = self._state_for(base_key)
@@ -202,7 +240,9 @@ class KeyboardBackend(OutputBackend):
         base_key = data["key"]
         modifiers = data["modifiers"]
 
-        if self._use_macos_cgevent and self._note_off_macos_cgevent(data, base_key, modifiers):
+        if self._use_macos_cgevent and self._note_off_macos_cgevent(
+            data, base_key, modifiers
+        ):
             return
 
         state = self._states.get(base_key)
@@ -221,6 +261,8 @@ class KeyboardBackend(OutputBackend):
             return
         self._pedal_down = True
         if self._use_macos_cgevent:
+            # Key.space works: get_macos_vk_for_key extracts .name ("space")
+            # and looks it up in _MACOS_VK which maps "space" -> 0x31
             space_vk = get_macos_vk_for_key(Key.space)
             if space_vk is not None and post_macos_key_event(space_vk, True, 0):
                 return
@@ -276,7 +318,9 @@ class KeyboardBackend(OutputBackend):
                 try:
                     self._kb.release(key_char)
                 except Exception as e:
-                    self._log_exception("KeyboardBackend shutdown note release error", e)
+                    self._log_exception(
+                        "KeyboardBackend shutdown note release error", e
+                    )
                 state.release()
 
         if self._pedal_down:
@@ -290,18 +334,24 @@ class KeyboardBackend(OutputBackend):
             try:
                 self._kb.release(mod)
             except Exception as e:
-                self._log_exception("KeyboardBackend shutdown modifier release error", e)
+                self._log_exception(
+                    "KeyboardBackend shutdown modifier release error", e
+                )
 
 
 # ---------------------------------------------------------------------------
 # Numpad (RMC) backend
 # ---------------------------------------------------------------------------
 
+
 class NumpadBackend(OutputBackend):
     """Translates note/pedal events into Roblox MIDI Connect numpad messages."""
 
-    def __init__(self, inter_message_delay: float = 0.0,
-                 log_message: Optional[Callable[[str], None]] = None):
+    def __init__(
+        self,
+        inter_message_delay: float = 0.0,
+        log_message: Optional[Callable[[str], None]] = None,
+    ):
         self._delay = inter_message_delay
         self._active_notes: Set[int] = set()
         self._pedal_down = False
@@ -312,64 +362,99 @@ class NumpadBackend(OutputBackend):
         if self._delay > 0:
             time.sleep(self._delay)
 
+    def _log_exception(self, context: str, exc: Exception) -> None:
+        """Log exception with traceback for easier diagnosis."""
+        if self._log is not None:
+            self._log(f"{context}: {exc}\n{traceback.format_exc()}")
+
     # -- notes --
 
     def note_on(self, pitch: int, velocity: int) -> None:
-        rmc.send_note_message(pitch, velocity, is_note_off=False)
-        self._active_notes.add(pitch)
+        try:
+            rmc.send_note_message(pitch, velocity, is_note_off=False)
+            self._active_notes.add(pitch)
+        except Exception as e:
+            self._log_exception("NumpadBackend note_on error", e)
         self._post_delay()
 
     def note_off(self, pitch: int) -> None:
-        rmc.send_note_message(pitch, velocity=0, is_note_off=True)
-        self._active_notes.discard(pitch)
+        try:
+            rmc.send_note_message(pitch, velocity=0, is_note_off=True)
+            self._active_notes.discard(pitch)
+        except Exception as e:
+            self._log_exception("NumpadBackend note_off error", e)
         self._post_delay()
 
     # -- pedal --
 
     def pedal_on(self) -> None:
         if not self._pedal_down:
-            self._pedal_down = True
-            rmc.send_pedal(127)
+            try:
+                self._pedal_down = True
+                rmc.send_pedal(127)
+            except Exception as e:
+                self._log_exception("NumpadBackend pedal_on error", e)
             self._post_delay()
 
     def pedal_off(self) -> None:
         if self._pedal_down:
-            self._pedal_down = False
-            rmc.send_pedal(0)
+            try:
+                self._pedal_down = False
+                rmc.send_pedal(0)
+            except Exception as e:
+                self._log_exception("NumpadBackend pedal_off error", e)
             self._post_delay()
 
     # -- shutdown --
 
     def shutdown(self) -> None:
         for pitch in list(self._active_notes):
-            rmc.send_note_message(pitch, velocity=0, is_note_off=True)
+            try:
+                rmc.send_note_message(pitch, velocity=0, is_note_off=True)
+            except Exception as e:
+                self._log_exception("NumpadBackend shutdown note release error", e)
             self._post_delay()
         self._active_notes.clear()
 
         if self._pedal_down:
-            self._pedal_down = False
-            rmc.send_pedal(0)
+            try:
+                self._pedal_down = False
+                rmc.send_pedal(0)
+            except Exception as e:
+                self._log_exception("NumpadBackend shutdown pedal release error", e)
+            self._post_delay()
+
+        rmc.reset_batched_sendinput()
 
 
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
-def create_backend(output_mode: str, use_88_key_layout: bool = False,
-                   inter_message_delay: float = 0.0,
-                   macos_use_pynput: bool = False,
-                   log_message: Optional[Callable[[str], None]] = None) -> OutputBackend:
+
+def create_backend(
+    output_mode: str,
+    use_88_key_layout: bool = False,
+    inter_message_delay: float = 0.0,
+    macos_use_pynput: bool = False,
+    log_message: Optional[Callable[[str], None]] = None,
+) -> OutputBackend:
     """Return the appropriate backend for *output_mode* (``'key'`` or ``'midi_numpad'``).
     On macOS, *macos_use_pynput* True forces pynput for both KEY and Numpad; False uses CGEvent.
     """
     effective_log = log_message or jukebox_logger.info
-    if output_mode == 'midi_numpad':
+    if output_mode == "midi_numpad":
         if sys.platform == "darwin":
             rmc.set_macos_cgevent(not macos_use_pynput)
         elif not rmc.is_using_pydirectinput():
-            effective_log("PyDirectInput is not in use; falling back to pynput for numpad input.")
-        return NumpadBackend(inter_message_delay=inter_message_delay,
-                             log_message=effective_log)
-    return KeyboardBackend(use_88_key_layout=use_88_key_layout,
-                           macos_use_pynput=macos_use_pynput,
-                           log_message=effective_log)
+            effective_log(
+                "PyDirectInput is not in use; falling back to pynput for numpad input."
+            )
+        return NumpadBackend(
+            inter_message_delay=inter_message_delay, log_message=effective_log
+        )
+    return KeyboardBackend(
+        use_88_key_layout=use_88_key_layout,
+        macos_use_pynput=macos_use_pynput,
+        log_message=effective_log,
+    )
