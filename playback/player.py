@@ -80,8 +80,8 @@ class EventCompiler:
             if (
                 use_mistakes
                 and pitch not in played_in_section
-                and random.random() < mistake_chance
-            ):  # nosec B311: non-crypto randomness for musical mistakes only
+                and random.random() < mistake_chance  # nosec B311: non-crypto randomness for musical mistakes only
+            ):
                 mp = EventCompiler._mistake_pitch(pitch)
                 if mp is not None:
                     heapq.heappush(

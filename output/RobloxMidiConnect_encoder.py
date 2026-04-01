@@ -127,7 +127,7 @@ if _platform == "Windows":
             )
         _frame_sizeof = ctypes.sizeof(pydirectinput.Input)
         _use_batched_sendinput = True
-    except Exception:
+    except ImportError:
         _use_pydirectinput = False
 
 # pynput fallback (also used for NumLock detection)
@@ -140,7 +140,7 @@ try:
 
     _kb = _kb_mod
     _keyboard = _kb.Controller()
-except Exception:
+except ImportError:
     pass
 
 VK_CODES = {
