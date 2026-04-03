@@ -68,13 +68,12 @@ class KeyboardBackend(OutputBackend):
         self._kb = Controller()
         self._mapper = KeyMapper(use_88_key_layout=use_88_key_layout)
         self._states: Dict[str, KeyState] = {}
+        self._active_pitches: Dict[str, Set[int]] = {}
         self._pedal_down = False
         self._log = log_message or jukebox_logger.info
 
         use_cgevent = sys.platform == "darwin" and not macos_use_pynput
         self._use_macos_cgevent = bool(use_cgevent)
-        # (shift, alt, ctrl) logical state for CGEvent flags.
-        # Refcount so we only release a modifier when no key still needs it.
         self._macos_modifiers: Tuple[bool, bool, bool] = (False, False, False)
         self._macos_modifier_refcount: Tuple[int, int, int] = (0, 0, 0)
 
@@ -91,7 +90,20 @@ class KeyboardBackend(OutputBackend):
     def _state_for(self, key_char: str) -> KeyState:
         if key_char not in self._states:
             self._states[key_char] = KeyState(key_char)
+            self._active_pitches[key_char] = set()
         return self._states[key_char]
+
+    def _release_key_if_unused(self, base_key: str) -> None:
+        if not self._active_pitches.get(base_key):
+            state = self._states.get(base_key)
+            if state:
+                state.release()
+            try:
+                self._kb.release(base_key)
+            except Exception as e:
+                self._log_exception("KeyboardBackend _release_key_if_unused error", e)
+            self._active_pitches.pop(base_key, None)
+            self._states.pop(base_key, None)
 
     def _log_exception(self, context: str, exc: Exception) -> None:
         """Log exception with traceback for easier diagnosis."""
@@ -100,112 +112,6 @@ class KeyboardBackend(OutputBackend):
 
     # -- notes --
 
-    def _note_on_macos_cgevent(
-        self, data: Dict, base_key: str, modifiers: List
-    ) -> bool:
-        vk = get_macos_vk_for_key(base_key)
-        if vk is None:
-            return False
-        state = self._state_for(base_key)
-        was_down = state.is_physically_down
-        is_sustained = state.is_sustained and not state.is_active
-        state.press()
-
-        shift_rc, alt_rc, ctrl_rc = self._macos_modifier_refcount
-        for mod in modifiers:
-            mod_vk = get_macos_vk_for_modifier(mod)
-            if mod_vk is None:
-                continue
-            if mod in (Key.shift,) or getattr(mod, "name", None) == "shift":
-                shift_rc += 1
-                if shift_rc == 1:
-                    post_macos_key_event(mod_vk, True, self._macos_flags())
-                    self._macos_modifiers = (
-                        True,
-                        self._macos_modifiers[1],
-                        self._macos_modifiers[2],
-                    )
-            elif mod in (Key.ctrl,) or getattr(mod, "name", None) in (
-                "ctrl",
-                "control",
-            ):
-                ctrl_rc += 1
-                if ctrl_rc == 1:
-                    post_macos_key_event(mod_vk, True, self._macos_flags())
-                    self._macos_modifiers = (
-                        self._macos_modifiers[0],
-                        self._macos_modifiers[1],
-                        True,
-                    )
-            elif mod == Key.alt or getattr(mod, "name", None) == "alt":
-                alt_rc += 1
-                if alt_rc == 1:
-                    post_macos_key_event(mod_vk, True, self._macos_flags())
-                    self._macos_modifiers = (
-                        self._macos_modifiers[0],
-                        True,
-                        self._macos_modifiers[2],
-                    )
-        self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
-
-        flags = self._macos_flags()
-        if is_sustained:
-            post_macos_key_event(vk, False, flags)
-            time.sleep(0.001)
-        if not was_down or is_sustained:
-            post_macos_key_event(vk, True, flags)
-        return True
-
-    def _note_off_macos_cgevent(
-        self, data: Dict, base_key: str, modifiers: List
-    ) -> bool:
-        vk = get_macos_vk_for_key(base_key)
-        if vk is None:
-            return False
-        state = self._states.get(base_key)
-        if not state:
-            return True
-        state.release()
-        flags = self._macos_flags()
-        post_macos_key_event(vk, False, flags)
-        shift_rc, alt_rc, ctrl_rc = self._macos_modifier_refcount
-        for mod in modifiers:
-            mod_vk = get_macos_vk_for_modifier(mod)
-            if mod_vk is None:
-                continue
-            if mod in (Key.shift,) or getattr(mod, "name", None) == "shift":
-                shift_rc = max(0, shift_rc - 1)
-                if shift_rc == 0 and self._macos_modifiers[0]:
-                    self._macos_modifiers = (
-                        False,
-                        self._macos_modifiers[1],
-                        self._macos_modifiers[2],
-                    )
-                    post_macos_key_event(mod_vk, False, self._macos_flags())
-            elif mod in (Key.ctrl,) or getattr(mod, "name", None) in (
-                "ctrl",
-                "control",
-            ):
-                ctrl_rc = max(0, ctrl_rc - 1)
-                if ctrl_rc == 0 and self._macos_modifiers[2]:
-                    self._macos_modifiers = (
-                        self._macos_modifiers[0],
-                        self._macos_modifiers[1],
-                        False,
-                    )
-                    post_macos_key_event(mod_vk, False, self._macos_flags())
-            elif mod == Key.alt or getattr(mod, "name", None) == "alt":
-                alt_rc = max(0, alt_rc - 1)
-                if alt_rc == 0 and self._macos_modifiers[1]:
-                    self._macos_modifiers = (
-                        self._macos_modifiers[0],
-                        False,
-                        self._macos_modifiers[2],
-                    )
-                    post_macos_key_event(mod_vk, False, self._macos_flags())
-        self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
-        return True
-
     def note_on(self, pitch: int, velocity: int) -> None:
         data = self._mapper.get_key_data(pitch)
         if not data:
@@ -213,23 +119,60 @@ class KeyboardBackend(OutputBackend):
         base_key = data["key"]
         modifiers = data["modifiers"]
 
-        if self._use_macos_cgevent and self._note_on_macos_cgevent(
-            data, base_key, modifiers
-        ):
+        if self._use_macos_cgevent:
+            vk = get_macos_vk_for_key(base_key)
+            if vk is None:
+                return
+            state = self._state_for(base_key)
+            was_down = state.is_physically_down
+            state.press()
+            self._active_pitches.setdefault(base_key, set()).add(pitch)
+            shift_rc, alt_rc, ctrl_rc = self._macos_modifier_refcount
+            for mod in modifiers:
+                mod_vk = get_macos_vk_for_modifier(mod)
+                if mod_vk is None:
+                    continue
+                if mod in (Key.shift,) or getattr(mod, "name", None) == "shift":
+                    shift_rc += 1
+                    if shift_rc == 1:
+                        post_macos_key_event(mod_vk, True, self._macos_flags())
+                        self._macos_modifiers = (
+                            True,
+                            self._macos_modifiers[1],
+                            self._macos_modifiers[2],
+                        )
+                elif mod in (Key.ctrl,) or getattr(mod, "name", None) in (
+                    "ctrl",
+                    "control",
+                ):
+                    ctrl_rc += 1
+                    if ctrl_rc == 1:
+                        post_macos_key_event(mod_vk, True, self._macos_flags())
+                        self._macos_modifiers = (
+                            self._macos_modifiers[0],
+                            self._macos_modifiers[1],
+                            True,
+                        )
+                elif mod == Key.alt or getattr(mod, "name", None) == "alt":
+                    alt_rc += 1
+                    if alt_rc == 1:
+                        post_macos_key_event(mod_vk, True, self._macos_flags())
+                        self._macos_modifiers = (
+                            self._macos_modifiers[0],
+                            True,
+                            self._macos_modifiers[2],
+                        )
+            self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
+            flags = self._macos_flags()
+            post_macos_key_event(vk, True, flags)
             return
 
         state = self._state_for(base_key)
-        was_down = state.is_physically_down
-        is_sustained = state.is_sustained and not state.is_active
         state.press()
+        self._active_pitches.setdefault(base_key, set()).add(pitch)
         try:
             with self._kb.pressed(*modifiers):
-                if is_sustained:
-                    self._kb.release(base_key)
-                    time.sleep(0.001)
-                    self._kb.press(base_key)
-                elif not was_down:
-                    self._kb.press(base_key)
+                self._kb.press(base_key)
         except Exception as e:
             self._log_exception("KeyboardBackend note_on error", e)
 
@@ -240,19 +183,64 @@ class KeyboardBackend(OutputBackend):
         base_key = data["key"]
         modifiers = data["modifiers"]
 
-        if self._use_macos_cgevent and self._note_off_macos_cgevent(
-            data, base_key, modifiers
-        ):
+        active = self._active_pitches.get(base_key)
+        if active:
+            active.discard(pitch)
+
+        if self._use_macos_cgevent:
+            state = self._states.get(base_key)
+            if not state:
+                return
+            vk = get_macos_vk_for_key(base_key)
+            if vk is None:
+                return
+
+            shift_rc, alt_rc, ctrl_rc = self._macos_modifier_refcount
+            for mod in modifiers:
+                mod_vk = get_macos_vk_for_modifier(mod)
+                if mod_vk is None:
+                    continue
+                if mod in (Key.shift,) or getattr(mod, "name", None) == "shift":
+                    shift_rc = max(0, shift_rc - 1)
+                    if shift_rc == 0 and self._macos_modifiers[0]:
+                        self._macos_modifiers = (
+                            False,
+                            self._macos_modifiers[1],
+                            self._macos_modifiers[2],
+                        )
+                        post_macos_key_event(mod_vk, False, self._macos_flags())
+                elif mod in (Key.ctrl,) or getattr(mod, "name", None) in (
+                    "ctrl",
+                    "control",
+                ):
+                    ctrl_rc = max(0, ctrl_rc - 1)
+                    if ctrl_rc == 0 and self._macos_modifiers[2]:
+                        self._macos_modifiers = (
+                            self._macos_modifiers[0],
+                            self._macos_modifiers[1],
+                            False,
+                        )
+                        post_macos_key_event(mod_vk, False, self._macos_flags())
+                elif mod == Key.alt or getattr(mod, "name", None) == "alt":
+                    alt_rc = max(0, alt_rc - 1)
+                    if alt_rc == 0 and self._macos_modifiers[1]:
+                        self._macos_modifiers = (
+                            self._macos_modifiers[0],
+                            False,
+                            self._macos_modifiers[2],
+                        )
+                        post_macos_key_event(mod_vk, False, self._macos_flags())
+            self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
+
+            state.release()
+            flags = self._macos_flags()
+            post_macos_key_event(vk, False, flags)
+            if not self._active_pitches.get(base_key):
+                self._active_pitches.pop(base_key, None)
+                self._states.pop(base_key, None)
             return
 
-        state = self._states.get(base_key)
-        if not state:
-            return
-        state.release()
-        try:
-            self._kb.release(base_key)
-        except Exception as e:
-            self._log_exception("KeyboardBackend note_off error", e)
+        self._release_key_if_unused(base_key)
 
     # -- pedal --
 
@@ -275,6 +263,19 @@ class KeyboardBackend(OutputBackend):
         if not self._pedal_down:
             return
         self._pedal_down = False
+        for key_char in list(self._active_pitches.keys()):
+            if not self._active_pitches[key_char]:
+                if self._use_macos_cgevent:
+                    state = self._states.get(key_char)
+                    if state:
+                        state.release()
+                    vk = get_macos_vk_for_key(key_char)
+                    if vk is not None:
+                        post_macos_key_event(vk, False, 0)
+                    self._active_pitches.pop(key_char, None)
+                    self._states.pop(key_char, None)
+                else:
+                    self._release_key_if_unused(key_char)
         if self._use_macos_cgevent:
             space_vk = get_macos_vk_for_key(Key.space)
             if space_vk is not None and post_macos_key_event(space_vk, False, 0):
@@ -289,12 +290,13 @@ class KeyboardBackend(OutputBackend):
     def shutdown(self) -> None:
         if self._use_macos_cgevent:
             flags = self._macos_flags()
-            for key_char, state in self._states.items():
-                if state.is_active or state.is_sustained:
-                    vk = get_macos_vk_for_key(key_char)
-                    if vk is not None:
-                        post_macos_key_event(vk, False, flags)
-                    state.release()
+            for key_char in list(self._active_pitches.keys()):
+                vk = get_macos_vk_for_key(key_char)
+                if vk is not None:
+                    post_macos_key_event(vk, False, flags)
+            self._active_pitches.clear()
+            for state in self._states.values():
+                state.release()
             if self._pedal_down:
                 space_vk = get_macos_vk_for_key(Key.space)
                 if space_vk is not None:
@@ -313,15 +315,14 @@ class KeyboardBackend(OutputBackend):
             self._macos_modifier_refcount = (0, 0, 0)
             return
 
-        for key_char, state in self._states.items():
-            if state.is_active or state.is_sustained:
-                try:
-                    self._kb.release(key_char)
-                except Exception as e:
-                    self._log_exception(
-                        "KeyboardBackend shutdown note release error", e
-                    )
-                state.release()
+        for key_char in list(self._active_pitches.keys()):
+            try:
+                self._kb.release(key_char)
+            except Exception as e:
+                self._log_exception("KeyboardBackend shutdown note release error", e)
+        self._active_pitches.clear()
+        for state in self._states.values():
+            state.release()
 
         if self._pedal_down:
             self._pedal_down = False

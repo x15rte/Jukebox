@@ -68,10 +68,10 @@ class KeyMapper:
             wi += 1
 
     def get_key_data(self, pitch: int) -> Optional[Dict]:
-        while pitch < self.min_pitch:
-            pitch += 12
-        while pitch > self.max_pitch:
-            pitch -= 12
+        if pitch < self.min_pitch:
+            pitch = self.min_pitch
+        elif pitch > self.max_pitch:
+            pitch = self.max_pitch
         return self.key_map.get(pitch)
 
     def get_key_for_pitch(self, pitch: int) -> Optional[str]:
