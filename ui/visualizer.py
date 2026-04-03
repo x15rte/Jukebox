@@ -58,9 +58,11 @@ class PianoWidget(QWidget):
         black_key_width = key_width * 0.65
         black_key_height = height * 0.6
 
-        white_brush = QBrush(QColor(245, 245, 248))
-        black_brush = QBrush(QColor(30, 30, 32))
-        active_brush = QBrush(theme.ACCENT)
+        t = theme.get_dark_cyber_theme()
+
+        white_brush = QBrush(t.piano.white_key)
+        black_brush = QBrush(t.piano.black_key)
+        active_brush = QBrush(t.piano.active_key)
 
         white_idx = 0
         white_key_rects = {}
@@ -74,7 +76,7 @@ class PianoWidget(QWidget):
 
             brush = active_brush if p in self.active_pitches else white_brush
             painter.setBrush(brush)
-            painter.setPen(QPen(QColor(0, 0, 0), 1))
+            painter.setPen(QPen(t.piano.white_key_border, 1))
             painter.drawRect(rect)
             white_idx += 1
 
@@ -91,7 +93,7 @@ class PianoWidget(QWidget):
 
             brush = active_brush if p in self.active_pitches else black_brush
             painter.setBrush(brush)
-            painter.setPen(QPen(QColor(0, 0, 0), 1))
+            painter.setPen(QPen(t.piano.black_key_highlight, 1))
             painter.drawRect(rect)
 
         # Label a few reference keys (e.g., C3–C5) along the bottom edge.
@@ -111,7 +113,7 @@ class PianoWidget(QWidget):
 
 
 class TimelineWidget(QWidget):
-    """Horizontal timeline: note bars (left=blue, right=red, unknown=gray), measure lines, playhead. Draggable to seek."""
+    """Horizontal timeline: note bars (left=blue-gray, right=gold, unknown=gray), measure lines, playhead. Draggable to seek."""
 
     seek_requested = Signal(float)
     scrub_position_changed = Signal(float)
@@ -129,12 +131,14 @@ class TimelineWidget(QWidget):
             None  # Measure (start, end) times; avoid recompute in paint.
         )
 
-        self.bg_color = QColor(24, 24, 28)
-        self.left_hand_color = QColor(80, 160, 255, 210)  # Blue
-        self.right_hand_color = QColor(255, 120, 100, 210)  # Red
-        self.unknown_color = QColor(150, 150, 150, 160)
-        self.cursor_color = theme.ACCENT
-        self.measure_line_color = QColor(255, 255, 255, 40)
+        t = theme.get_dark_cyber_theme()
+
+        self.bg_color = t.visualizer.background
+        self.left_hand_color = t.visualizer.left_hand
+        self.right_hand_color = t.visualizer.right_hand
+        self.unknown_color = t.visualizer.unknown
+        self.cursor_color = t.visualizer.cursor
+        self.measure_line_color = t.visualizer.measure_line
 
         # Cached background pixmap (notes + measure lines) to avoid redrawing
         # the entire roll every paint; only rebuilt when size or data changes.
@@ -265,5 +269,5 @@ class TimelineWidget(QWidget):
         h = self.height()
 
         cx = (self.current_time / self.total_duration) * w
-        painter.setPen(QPen(self.cursor_color, 2))
+        painter.setPen(QPen(self.cursor_color, 1))
         painter.drawLine(QPointF(cx, 0), QPointF(cx, h))

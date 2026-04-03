@@ -6,6 +6,8 @@ modern look without spreading magic numbers across widgets.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import QApplication
 
@@ -17,8 +19,8 @@ PANEL_BG = QColor(28, 28, 32)
 PANEL_BORDER = QColor(60, 60, 70)
 TEXT_PRIMARY = QColor(235, 235, 240)
 TEXT_SECONDARY = QColor(170, 170, 180)
-ACCENT = QColor(70, 160, 255)          # primary accent (buttons, highlights)
-ACCENT_SOFT = QColor(70, 160, 255, 60)
+ACCENT = QColor(239, 108, 77)  # primary accent (buttons, highlights)
+ACCENT_SOFT = QColor(239, 108, 77, 60)
 ERROR = QColor(245, 108, 108)
 WARNING = QColor(230, 162, 60)
 
@@ -58,10 +60,7 @@ def heading_font(base: QFont | None = None, scale: float = 1.1) -> QFont:
 
 def subtle_label_style() -> str:
     """Style sheet for secondary/description labels."""
-    return (
-        "color: rgb(170, 170, 180);"
-        "font-size: 11px;"
-    )
+    return "color: rgb(170, 170, 180);font-size: 11px;"
 
 
 def section_groupbox_style() -> str:
@@ -82,10 +81,6 @@ def section_groupbox_style() -> str:
         "}"
     )
 
-from dataclasses import dataclass
-
-from PyQt6.QtGui import QColor
-
 
 @dataclass(frozen=True)
 class VisualizerColors:
@@ -103,8 +98,7 @@ class PianoColors:
     white_key_border: QColor
     black_key: QColor
     black_key_highlight: QColor
-    active_left: QColor
-    active_right: QColor
+    active_key: QColor
 
 
 @dataclass(frozen=True)
@@ -158,29 +152,27 @@ def get_dark_cyber_theme() -> Theme:
     text_muted = "#9292A0"
 
     # Accent colors: primarily blue, teal, and orange; avoid heavy purple and flashy gradients.
-    accent_primary = "#4F9DFF"   # bright blue
+    accent_primary = "#4F9DFF"  # bright blue
     accent_secondary = "#22C1B5"  # teal
-    accent_success = "#5EC96B"    # green
-    accent_warning = "#F6AD55"    # orange
-    accent_error = "#F56565"      # red
+    accent_success = "#5EC96B"  # green
+    accent_warning = "#F6AD55"  # orange
+    accent_error = "#F56565"  # red
 
     visualizer = VisualizerColors(
-        background=QColor(24, 24, 32),
-        # Hands: left=blue, right=pinkish, unknown=teal.
-        left_hand=QColor(79, 157, 255, 230),
-        right_hand=QColor(244, 143, 177, 230),
-        unknown=QColor(34, 193, 181, 220),
-        cursor=QColor(246, 173, 85),
-        measure_line=QColor(120, 120, 150, 150),
+        background=QColor(24, 24, 28),
+        left_hand=QColor(96, 125, 139, 210),
+        right_hand=QColor(240, 192, 64, 210),
+        unknown=QColor(150, 150, 150, 160),
+        cursor=QColor(255, 255, 255),
+        measure_line=QColor(255, 255, 255, 40),
     )
 
     piano = PianoColors(
-        white_key=QColor(48, 48, 60),
-        white_key_border=QColor(88, 88, 112),
-        black_key=QColor(18, 18, 26),
-        black_key_highlight=QColor(110, 110, 140),
-        active_left=QColor(79, 157, 255),
-        active_right=QColor(244, 143, 177),
+        white_key=QColor(200, 200, 210),
+        white_key_border=QColor(140, 140, 155),
+        black_key=QColor(30, 30, 38),
+        black_key_highlight=QColor(80, 80, 100),
+        active_key=QColor(160, 160, 170),
     )
 
     logs = LogColors(
@@ -329,4 +321,3 @@ def get_dark_cyber_theme() -> Theme:
         logs=logs,
         qss=qss,
     )
-
