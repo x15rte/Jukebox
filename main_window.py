@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
         self._last_tab_index = 0
 
         self.playback_controller = PlaybackController(self)
-        self.playback_controller.status_updated.connect(self.add_log_message)
+        self.playback_controller.status_updated.connect(self._on_status_updated)
         self.playback_controller.progress_updated.connect(self.update_progress)
         self.playback_controller.visualizer_updated.connect(
             self.piano_widget.set_active_pitches
@@ -134,7 +134,7 @@ class MainWindow(QMainWindow):
         self.use_88_key_check.toggled.connect(self._on_key_layout_changed)
 
         ver_tag = f" ({self._app_version})" if self._app_version else ""
-        self.add_log_message(f'{APP_NAME}{ver_tag} — <a href="{APP_URL}">{APP_URL}</a>')
+        self.add_log_message(f"{APP_NAME}{ver_tag} — {APP_URL}")
         self._log_startup_capabilities()
         QTimer.singleShot(0, self._check_macos_accessibility)
 
@@ -544,6 +544,7 @@ class MainWindow(QMainWindow):
                 "Failed to list MIDI input devices: " + str(e),
                 show_dialog=show_dialog,
                 dialog_title="Error",
+                exc_info=True,
             )
             return
         self.midi_input_combo.clear()
@@ -959,8 +960,9 @@ class MainWindow(QMainWindow):
         message: str,
         show_dialog: bool = False,
         dialog_title: str = "Error",
+        exc_info: bool = False,
     ) -> None:
-        jukebox_logger.error(message)
+        jukebox_logger.error(message, exc_info=exc_info)
         if show_dialog:
             QMessageBox.critical(self, dialog_title, message)
 
@@ -978,6 +980,17 @@ class MainWindow(QMainWindow):
         else:
             jukebox_logger.disable_file_logging()
             self.add_log_message("Log file saving disabled.")
+        self._save_config()
+
+    def _on_status_updated(self, message: str) -> None:
+        lowered = message.lstrip().lower()
+        if lowered.startswith("error:"):
+            jukebox_logger.error(message)
+            return
+        if lowered.startswith("warning:"):
+            jukebox_logger.warning(message)
+            return
+        self.add_log_message(message)
 
     def add_log_message(self, message):
         jukebox_logger.info(message)

@@ -7,6 +7,8 @@ import threading
 import mido
 from PyQt6.QtCore import QObject, pyqtSignal as Signal
 
+from logger_core import jukebox_logger
+
 
 class MidiInputWorker(QObject):
     """Reads MIDI messages from a hardware input port on a background thread."""
@@ -30,12 +32,14 @@ class MidiInputWorker(QObject):
             try:
                 port.close()
             except OSError as e:
+                jukebox_logger.warning(f"Failed to close MIDI input port: {e}")
                 self.warning.emit(f"Failed to close MIDI input port: {e}")
 
     def run(self):
         try:
             self._inport = mido.open_input(self._port)  # pyright: ignore[reportAttributeAccessIssue]
         except Exception as e:
+            jukebox_logger.error(f"Failed to open MIDI input '{self._port}': {e}", exc_info=True)
             self.connection_error.emit(str(e))
             self.finished.emit()
             return
@@ -48,12 +52,16 @@ class MidiInputWorker(QObject):
                     self.message_received.emit(msg)
                 self._stop_event.wait(0.005)
         except Exception as e:
+            jukebox_logger.error(f"MIDI input worker loop failed for '{self._port}': {e}", exc_info=True)
             self.connection_error.emit(str(e))
         finally:
             if self._inport is not None:
                 try:
                     self._inport.close()
                 except OSError as e:
+                    jukebox_logger.warning(
+                        f"Failed to close MIDI input port during cleanup: {e}"
+                    )
                     self.warning.emit(
                         f"Failed to close MIDI input port during cleanup: {e}"
                     )

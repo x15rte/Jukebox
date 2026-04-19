@@ -15,6 +15,7 @@ from PyQt6.QtGui import (
 from typing import List, Optional
 from models import Note
 from core import TempoMap
+from logger_core import jukebox_logger
 import theme
 
 
@@ -158,7 +159,8 @@ class TimelineWidget(QWidget):
                 self._cached_boundaries = self.tempo_map.get_measure_boundaries(
                     self.total_duration
                 )
-            except Exception:
+            except Exception as e:
+                jukebox_logger.debug(f"Failed to cache tempo measure boundaries: {e}")
                 self._cached_boundaries = None
 
         new_width = int(self.total_duration * self.pixels_per_second)

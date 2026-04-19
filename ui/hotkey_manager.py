@@ -6,6 +6,8 @@ from pynput import keyboard
 from pynput.keyboard import Key, KeyCode
 from PyQt6.QtCore import QObject, pyqtSignal as Signal
 
+from logger_core import jukebox_logger
+
 
 def parse_hotkey_string(s: str | None) -> Key | KeyCode:
     """Parse config string to pynput Key or KeyCode (special key name or single char); default Key.f6."""
@@ -19,6 +21,7 @@ def parse_hotkey_string(s: str | None) -> Key | KeyCode:
         try:
             return KeyCode.from_char(s)
         except Exception:
+            jukebox_logger.debug(f"Invalid hotkey character '{s}', using default F6.")
             return Key.f6
     return Key.f6
 

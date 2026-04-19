@@ -13,6 +13,8 @@ import platform
 import ctypes
 from typing import Tuple
 
+from logger_core import jukebox_logger
+
 
 # ---------------------------------------------------------------------------
 # Game-defined protocol constants  (DO NOT MODIFY)
@@ -221,8 +223,8 @@ def ensure_numlock_on() -> None:
             and not (ctypes.windll.user32.GetKeyState(0x90) & 1)
         ):
             _keyboard.tap(_kb.Key.num_lock)
-    except Exception:
-        # Best-effort only; ignore failures.
+    except Exception as e:
+        jukebox_logger.debug(f"Failed to ensure NumLock state: {e}")
         return
 
 
@@ -232,7 +234,8 @@ def _tap_key(name: str) -> None:
         try:
             pydirectinput.keyDown(name, _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
             pydirectinput.keyUp(name, _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
-        except Exception:
+        except Exception as e:
+            jukebox_logger.debug(f"pydirectinput key send failed for '{name}': {e}")
             return
         return
     if _platform == "Darwin" and _use_macos_cgevent:
@@ -243,7 +246,8 @@ def _tap_key(name: str) -> None:
 
                 post_macos_key_event(vk, True, 0)
                 post_macos_key_event(vk, False, 0)
-            except Exception:
+            except Exception as e:
+                jukebox_logger.debug(f"macOS CGEvent key send failed for '{name}': {e}")
                 return
         return
     kc = _precomputed_keys.get(name)
@@ -253,7 +257,8 @@ def _tap_key(name: str) -> None:
             try:
                 kb.press(kc)
                 kb.release(kc)
-            except Exception:
+            except Exception as e:
+                jukebox_logger.debug(f"pynput key send failed for '{name}': {e}")
                 return
 
 

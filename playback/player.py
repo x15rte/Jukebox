@@ -17,6 +17,7 @@ from core import TempoMap, KeyMapper
 from analysis import Humanizer, PedalGenerator
 from output import OutputBackend
 from native import set_timer_resolution, restore_timer_resolution, precise_sleep
+from logger_core import jukebox_logger
 
 
 # ---------------------------------------------------------------------------
@@ -218,9 +219,8 @@ class Player(QObject):
                 self.event_index = 0
             self._run_loop()
         except Exception as e:
-            import traceback
-
-            self.status_updated.emit(f"Error: {e}\n{traceback.format_exc()}")
+            jukebox_logger.error(f"Playback thread failed: {e}", exc_info=True)
+            self.status_updated.emit(f"Error: {e}")
         finally:
             self.backend.shutdown()
             self.playback_finished.emit()
