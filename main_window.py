@@ -53,7 +53,12 @@ from native import (
     open_macos_accessibility_preferences,
 )
 from platform_utils import get_capabilities
-from config_bindings import CONFIG_UI_BINDINGS
+from config_bindings import (
+    CONFIG_UI_BINDINGS,
+    EFFECTFUL_CONFIG_KEYS,
+    apply_config_effects,
+    validate_config_ui_bindings,
+)
 import theme
 
 APP_NAME = "Jukebox"
@@ -118,6 +123,11 @@ class MainWindow(QMainWindow):
         self.live_backend = None
 
         self._setup_ui()
+
+        try:
+            validate_config_ui_bindings()
+        except ValueError as e:
+            raise RuntimeError(f"Invalid config UI bindings: {e}") from e
 
         self._last_tab_index = 0
 
@@ -1085,6 +1095,8 @@ class MainWindow(QMainWindow):
 
     def _apply_config_to_ui(self, config: Config) -> None:
         for key, _, set_fn in CONFIG_UI_BINDINGS:
+            if key in EFFECTFUL_CONFIG_KEYS:
+                continue
             if hasattr(config, key):
                 set_fn(self, getattr(config, key))
 
@@ -1095,13 +1107,20 @@ class MainWindow(QMainWindow):
             jukebox_logger.error(
                 f"Failed to load config from {e.path}: {e.cause}", exc_info=True
             )
+            backup_note = (
+                f" Corrupt config was moved to: {e.backup_path}."
+                if e.backup_path is not None
+                else ""
+            )
             self._log_error(
-                "Config file could not be loaded; using defaults. You may delete or backup the file and restart."
+                "Config file could not be loaded; using defaults."
+                + backup_note
             )
             self._reset_controls_to_default()
             self._update_enabled_states()
             return
         self._apply_config_to_ui(config)
+        apply_config_effects(self, config)
         self._update_enabled_states()
         self._update_88_key_visibility()
         self._update_play_stop_labels()
@@ -1130,51 +1149,9 @@ class MainWindow(QMainWindow):
                 "Please select a MIDI file and choose tracks first.",
             )
             return None
-        display_text = self.pedal_style_combo.currentText()
-        internal_style = self.pedal_mapping.get(display_text, "hybrid")
-        return {
-            "midi_file": self.file_path_label.toolTip(),
-            "tempo": self.tempo_spinbox.value(),
-            "countdown": self.countdown_check.isChecked(),
-            "use_88_key_layout": self.use_88_key_check.isChecked(),
-            "pedal_style": internal_style,
-            "output_mode": self._current_output_mode(),
-            "macos_use_pynput": self.macos_use_pynput_check.isChecked(),
-            "simulate_hands": self.all_humanization_checks[
-                "simulate_hands"
-            ].isChecked(),
-            "enable_chord_roll": self.all_humanization_checks[
-                "enable_chord_roll"
-            ].isChecked(),
-            "enable_vary_timing": self.all_humanization_checks[
-                "vary_timing"
-            ].isChecked(),
-            "value_timing_variance": self.all_humanization_spinboxes[
-                "vary_timing"
-            ].value(),
-            "enable_vary_articulation": self.all_humanization_checks[
-                "vary_articulation"
-            ].isChecked(),
-            "value_articulation": self.all_humanization_spinboxes[
-                "vary_articulation"
-            ].value(),
-            "enable_drift_correction": self.all_humanization_checks[
-                "hand_drift"
-            ].isChecked(),
-            "drift_decay_factor": self.all_humanization_spinboxes["hand_drift"].value()
-            / 100.0,
-            "enable_mistakes": self.all_humanization_checks[
-                "mistake_chance"
-            ].isChecked(),
-            "mistake_chance": self.all_humanization_spinboxes["mistake_chance"].value(),
-            "enable_tempo_sway": self.all_humanization_checks["tempo_sway"].isChecked(),
-            "tempo_sway_intensity": self.all_humanization_spinboxes[
-                "tempo_sway"
-            ].value(),
-            "invert_tempo_sway": self.all_humanization_checks[
-                "invert_tempo_sway"
-            ].isChecked(),
-        }
+        config = self._config_from_ui().to_runtime_playback_dict()
+        config["midi_file"] = self.file_path_label.toolTip()
+        return config
 
     def select_file(self):
         if self.playback_controller.is_running:

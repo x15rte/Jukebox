@@ -7,8 +7,12 @@ The binding list below is the single source of truth, but there is no
 compile-time or type-time check that these attributes exist.
 """
 
+from dataclasses import fields
+from typing import Iterable
+
 from PyQt6.QtCore import QByteArray
 
+from config_repository import Config
 from logger_core import jukebox_logger
 from ui import parse_hotkey_string
 
@@ -48,7 +52,7 @@ CONFIG_UI_BINDINGS = [
     (
         "input_mode",
         lambda w: "piano" if w.input_mode_piano_radio.isChecked() else "file",
-        lambda w, v: _apply_input_mode(w, v),
+        lambda w, v: _set_input_mode(w, v),
     ),
     (
         "midi_input_device",
@@ -148,14 +152,45 @@ CONFIG_UI_BINDINGS = [
     (
         "save_log_to_file",
         lambda w: w.log_save_to_file_check.isChecked(),
-        lambda w, v: _set_save_log_to_file(w, v),
+        lambda w, v: _set_save_log_to_file_checkbox(w, v),
     ),
     (
         "log_level",
         lambda w: w.log_level_combo.currentText(),
-        lambda w, v: _set_log_level(w, v),
+        lambda w, v: _set_log_level_combo(w, v),
     ),
 ]
+
+
+EFFECTFUL_CONFIG_KEYS = {"input_mode", "save_log_to_file", "log_level"}
+
+
+def validate_config_ui_bindings(bindings: Iterable = CONFIG_UI_BINDINGS) -> None:
+    known_fields = {f.name for f in fields(Config)}
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+
+    for entry in bindings:
+        if not isinstance(entry, tuple) or len(entry) != 3:
+            raise ValueError("Each binding must be a 3-item tuple")
+        key, get_fn, set_fn = entry
+        if key in seen:
+            duplicates.add(key)
+        seen.add(key)
+        if key not in known_fields:
+            raise ValueError(f"Unknown config binding key: {key}")
+        if not callable(get_fn) or not callable(set_fn):
+            raise ValueError(f"Binding functions must be callable for key: {key}")
+
+    if duplicates:
+        dupes = ", ".join(sorted(duplicates))
+        raise ValueError(f"Duplicate config binding keys: {dupes}")
+
+
+def apply_config_effects(widget, config) -> None:
+    _apply_input_mode(widget, config.input_mode)
+    _set_save_log_to_file(widget, config.save_log_to_file)
+    _set_log_level(widget, config.log_level)
 
 
 def _set_input_mode(widget, value):
@@ -224,10 +259,26 @@ def _set_window_geometry(widget, value):
         widget.restoreGeometry(data)
 
 
-def _set_save_log_to_file(widget, value):
+def _set_save_log_to_file_checkbox(widget, value):
     widget.log_save_to_file_check.blockSignals(True)
-    widget.log_save_to_file_check.setChecked(value)
+    widget.log_save_to_file_check.setChecked(bool(value))
     widget.log_save_to_file_check.blockSignals(False)
+
+
+def _set_log_level_combo(widget, value):
+    if not value:
+        value = "INFO"
+    level = str(value).upper()
+    if level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
+        level = "INFO"
+    if widget.log_level_combo.currentText() != level:
+        widget.log_level_combo.blockSignals(True)
+        widget.log_level_combo.setCurrentText(level)
+        widget.log_level_combo.blockSignals(False)
+
+
+def _set_save_log_to_file(widget, value):
+    _set_save_log_to_file_checkbox(widget, value)
     log_path = widget.config_dir / "log.txt"
     if value:
         widget.config_dir.mkdir(parents=True, exist_ok=True)
@@ -237,13 +288,5 @@ def _set_save_log_to_file(widget, value):
 
 
 def _set_log_level(widget, value):
-    if not value:
-        return
-    level = str(value).upper()
-    if level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
-        level = "INFO"
-    if widget.log_level_combo.currentText() != level:
-        widget.log_level_combo.blockSignals(True)
-        widget.log_level_combo.setCurrentText(level)
-        widget.log_level_combo.blockSignals(False)
-    jukebox_logger.set_level(level)
+    _set_log_level_combo(widget, value)
+    jukebox_logger.set_level(widget.log_level_combo.currentText())

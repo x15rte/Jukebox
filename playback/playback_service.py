@@ -61,29 +61,6 @@ class PlaybackService:
         config = dict(config)
         config["raw_pedal_events"] = raw_pedal_events
 
-        # Normalize config keys for downstream code (humanizer/player use short forms
-        # like vary_timing/timing_variance/articulation; Config dataclass uses
-        # enable_vary_timing/value_timing_variance/value_articulation).
-        if "vary_timing" not in config and "enable_vary_timing" in config:
-            config["vary_timing"] = bool(config.get("enable_vary_timing"))
-        if "vary_articulation" not in config and "enable_vary_articulation" in config:
-            config["vary_articulation"] = bool(config.get("enable_vary_articulation"))
-        if "timing_variance" not in config and "value_timing_variance" in config:
-            config["timing_variance"] = config["value_timing_variance"]
-        if "articulation" not in config and "value_articulation" in config:
-            config["articulation"] = config["value_articulation"] / 100.0
-        if "enable_drift_correction" not in config and "enable_hand_drift" in config:
-            config["enable_drift_correction"] = bool(config.get("enable_hand_drift"))
-        if "drift_decay_factor" not in config and "value_hand_drift_decay" in config:
-            config["drift_decay_factor"] = config["value_hand_drift_decay"] / 100.0
-        if "mistake_chance" not in config and "value_mistake_chance" in config:
-            config["mistake_chance"] = config["value_mistake_chance"]
-        if (
-            "tempo_sway_intensity" not in config
-            and "value_tempo_sway_intensity" in config
-        ):
-            config["tempo_sway_intensity"] = config["value_tempo_sway_intensity"]
-
         final_notes.sort(key=lambda n: n.start_time)
 
         if config.get("simulate_hands", False):
