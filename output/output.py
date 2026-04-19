@@ -438,8 +438,10 @@ class KeyboardBackend(OutputBackend):
             for mod in ("shiftleft", "ctrlleft", "altleft"):
                 try:
                     self._pdi_key_up(mod)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log_exception(
+                        "KeyboardBackend shutdown modifier release error", e
+                    )
         elif self._kb is not None:
             for mod in (Key.shift, Key.ctrl, Key.alt):
                 try:
