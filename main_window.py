@@ -911,12 +911,12 @@ class MainWindow(QMainWindow):
             f"Platform: {caps.get('platform', 'unknown')}; high-resolution timer: {timer_status}."
         )
         if caps.get("platform") == "win32":
-            pdi = (
+            direct = (
                 "available"
-                if caps.get("pydirectinput")
-                else "not available (using pynput)"
+                if caps.get("direct_input")
+                else "not available (using pynput fallback)"
             )
-            jukebox_logger.info(f"MIDI Numpad mode: pydirectinput {pdi}.")
+            jukebox_logger.info(f"Windows direct input (pydirectinput): {direct}.")
 
     def _check_macos_accessibility(self) -> None:
         if sys.platform != "darwin":
@@ -1266,6 +1266,11 @@ class MainWindow(QMainWindow):
 
         self.timeline_widget.set_data(final_notes, total_dur, tempo_map)
         self.total_song_duration_sec = total_dur
+
+        if config.get("output_mode") == "key":
+            self.add_log_message(
+                "KEY mode does not preserve MIDI velocity dynamics. Use MIDI Numpad mode for full velocity expression."
+            )
 
         self.set_controls_enabled(False)
         self.play_button.setEnabled(True)

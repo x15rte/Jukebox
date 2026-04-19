@@ -21,15 +21,18 @@ def set_app_user_model_id(app_id: str) -> None:
 
 
 def get_capabilities() -> Dict[str, Any]:
-    """Return a small dict of runtime capabilities (timer, pydirectinput) for logging or UI."""
+    """Return runtime capabilities used for transport selection/logging."""
     caps: Dict[str, Any] = {
         "high_res_timer": has_high_res_timer(),
         "platform": sys.platform,
     }
     if sys.platform == "win32":
-        caps["pydirectinput"] = _check_pydirectinput()
+        pdi = _check_pydirectinput()
+        caps["pydirectinput"] = pdi
+        caps["direct_input"] = pdi
     else:
         caps["pydirectinput"] = False
+        caps["direct_input"] = False
     return caps
 
 

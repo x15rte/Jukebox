@@ -345,35 +345,29 @@ class Player(QObject):
         if self.stop_event.is_set():
             return
 
-        pedals = [e for e in events if e.action == "pedal"]
-        releases = [e for e in events if e.action == "release"]
-        presses = [e for e in events if e.action == "press"]
-
-        for e in pedals:
-            if e.key_char == "down":
-                self.backend.pedal_on()
-            else:
-                self.backend.pedal_off()
+        self.backend.execute_batch(events)
 
         state_changed = False
 
-        for e in releases:
-            if self.stop_event.is_set():
-                return
-            if e.pitch is not None:
-                self.backend.note_off(e.pitch)
-                if e.pitch in self._active_pitches:
-                    self._active_pitches.discard(e.pitch)
-                    state_changed = True
+        for e in events:
+            if e.action != "release":
+                continue
+            pitch = e.pitch
+            if pitch is None:
+                continue
+            if pitch in self._active_pitches:
+                self._active_pitches.discard(pitch)
+                state_changed = True
 
-        for e in presses:
-            if self.stop_event.is_set():
-                return
-            if e.pitch is not None:
-                self.backend.note_on(e.pitch, e.velocity)
-                if e.pitch not in self._active_pitches:
-                    self._active_pitches.add(e.pitch)
-                    state_changed = True
+        for e in events:
+            if e.action != "press":
+                continue
+            pitch = e.pitch
+            if pitch is None:
+                continue
+            if pitch not in self._active_pitches:
+                self._active_pitches.add(pitch)
+                state_changed = True
 
         if state_changed:
             self.visualizer_updated.emit(list(self._active_pitches))

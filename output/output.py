@@ -10,7 +10,7 @@ import sys
 import time
 import traceback
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from pynput.keyboard import Key, Controller
 
@@ -43,6 +43,29 @@ class OutputBackend(ABC):
     @abstractmethod
     def pedal_off(self) -> None: ...
 
+    def execute_batch(self, events: List[Any]) -> None:
+        """Execute a same-timeslice event batch.
+
+        Default behavior preserves historical ordering semantics.
+        """
+        pedals = [e for e in events if e.action == "pedal"]
+        releases = [e for e in events if e.action == "release"]
+        presses = [e for e in events if e.action == "press"]
+
+        for e in pedals:
+            if e.key_char == "down":
+                self.pedal_on()
+            else:
+                self.pedal_off()
+
+        for e in releases:
+            if e.pitch is not None:
+                self.note_off(e.pitch)
+
+        for e in presses:
+            if e.pitch is not None:
+                self.note_on(e.pitch, e.velocity)
+
     @abstractmethod
     def shutdown(self) -> None:
         """Release every active note and pedal.  Must be idempotent."""
@@ -55,8 +78,12 @@ class OutputBackend(ABC):
 
 
 class KeyboardBackend(OutputBackend):
-    """Translates note/pedal events into pynput keyboard actions.
-    On macOS, uses CGEvent when the "Use pynput (Mac)" option is unchecked; otherwise pynput.
+    """Translates note/pedal events into key output.
+
+    Transport selection:
+    - macOS: CGEvent (default) or pynput (when explicitly requested)
+    - Windows: pydirectinput when available, otherwise pynput
+    - Other platforms: pynput
     """
 
     def __init__(
@@ -65,17 +92,38 @@ class KeyboardBackend(OutputBackend):
         macos_use_pynput: bool = False,
         log_message: Optional[Callable[[str], None]] = None,
     ):
-        self._kb = Controller()
         self._mapper = KeyMapper(use_88_key_layout=use_88_key_layout)
         self._states: Dict[str, KeyState] = {}
         self._active_pitches: Dict[str, Set[int]] = {}
         self._pedal_down = False
         self._log = log_message or jukebox_logger.info
 
+        self._kb: Optional[Controller] = None
+        self._pdi = None
+
         use_cgevent = sys.platform == "darwin" and not macos_use_pynput
         self._use_macos_cgevent = bool(use_cgevent)
+        self._use_pydirectinput = False
+
         self._macos_modifiers: Tuple[bool, bool, bool] = (False, False, False)
         self._macos_modifier_refcount: Tuple[int, int, int] = (0, 0, 0)
+
+        if not self._use_macos_cgevent and sys.platform == "win32":
+            try:
+                import pydirectinput as pdi_mod
+
+                pdi_mod.PAUSE = 0
+                pdi_mod.FAILSAFE = False
+                self._pdi = pdi_mod
+                self._use_pydirectinput = True
+                self._log("KEY mode: using pydirectinput on Windows.")
+            except Exception:
+                self._kb = Controller()
+                self._log(
+                    "KEY mode: pydirectinput unavailable, falling back to pynput."
+                )
+        elif not self._use_macos_cgevent:
+            self._kb = Controller()
 
     def _macos_flags(self) -> int:
         f = 0
@@ -93,29 +141,56 @@ class KeyboardBackend(OutputBackend):
             self._active_pitches[key_char] = set()
         return self._states[key_char]
 
+    def _modifier_name(self, mod) -> Optional[str]:
+        name = getattr(mod, "name", None)
+        if mod in (Key.shift,) or name == "shift":
+            return "shiftleft"
+        if mod in (Key.ctrl,) or name in ("ctrl", "control"):
+            return "ctrlleft"
+        if mod == Key.alt or name == "alt":
+            return "altleft"
+        return None
+
+    def _pdi_key_down(self, key_name: str) -> None:
+        if self._pdi is None:
+            return
+        try:
+            self._pdi.keyDown(key_name, _pause=False)
+        except TypeError:
+            self._pdi.keyDown(key_name)
+
+    def _pdi_key_up(self, key_name: str) -> None:
+        if self._pdi is None:
+            return
+        try:
+            self._pdi.keyUp(key_name, _pause=False)
+        except TypeError:
+            self._pdi.keyUp(key_name)
+
     def _release_key_if_unused(self, base_key: str) -> None:
         if not self._active_pitches.get(base_key):
             state = self._states.get(base_key)
             if state:
                 state.release()
             try:
-                self._kb.release(base_key)
+                if self._use_pydirectinput and self._pdi is not None:
+                    self._pdi_key_up(base_key)
+                elif self._kb is not None:
+                    self._kb.release(base_key)
             except Exception as e:
                 self._log_exception("KeyboardBackend _release_key_if_unused error", e)
             self._active_pitches.pop(base_key, None)
             self._states.pop(base_key, None)
 
     def _log_exception(self, context: str, exc: Exception) -> None:
-        """Log exception with traceback for easier diagnosis."""
         if self._log is not None:
             self._log(f"{context}: {exc}\n{traceback.format_exc()}")
-
-    # -- notes --
 
     def note_on(self, pitch: int, velocity: int) -> None:
         data = self._mapper.get_key_data(pitch)
         if not data:
             return
+
         base_key = data["key"]
         modifiers = data["modifiers"]
 
@@ -124,7 +199,6 @@ class KeyboardBackend(OutputBackend):
             if vk is None:
                 return
             state = self._state_for(base_key)
-            was_down = state.is_physically_down
             state.press()
             self._active_pitches.setdefault(base_key, set()).add(pitch)
             shift_rc, alt_rc, ctrl_rc = self._macos_modifier_refcount
@@ -163,16 +237,30 @@ class KeyboardBackend(OutputBackend):
                             self._macos_modifiers[2],
                         )
             self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
-            flags = self._macos_flags()
-            post_macos_key_event(vk, True, flags)
+            post_macos_key_event(vk, True, self._macos_flags())
             return
 
         state = self._state_for(base_key)
         state.press()
         self._active_pitches.setdefault(base_key, set()).add(pitch)
+
         try:
-            with self._kb.pressed(*modifiers):
-                self._kb.press(base_key)
+            if self._use_pydirectinput and self._pdi is not None:
+                pressed_modifiers: List[str] = []
+                try:
+                    for mod in modifiers:
+                        mod_name = self._modifier_name(mod)
+                        if mod_name is None:
+                            continue
+                        self._pdi_key_down(mod_name)
+                        pressed_modifiers.append(mod_name)
+                    self._pdi_key_down(base_key)
+                finally:
+                    for mod_name in reversed(pressed_modifiers):
+                        self._pdi_key_up(mod_name)
+            elif self._kb is not None:
+                with self._kb.pressed(*modifiers):
+                    self._kb.press(base_key)
         except Exception as e:
             self._log_exception("KeyboardBackend note_on error", e)
 
@@ -180,6 +268,7 @@ class KeyboardBackend(OutputBackend):
         data = self._mapper.get_key_data(pitch)
         if not data:
             return
+
         base_key = data["key"]
         modifiers = data["modifiers"]
 
@@ -188,13 +277,6 @@ class KeyboardBackend(OutputBackend):
             active.discard(pitch)
 
         if self._use_macos_cgevent:
-            state = self._states.get(base_key)
-            if not state:
-                return
-            vk = get_macos_vk_for_key(base_key)
-            if vk is None:
-                return
-
             shift_rc, alt_rc, ctrl_rc = self._macos_modifier_refcount
             for mod in modifiers:
                 mod_vk = get_macos_vk_for_modifier(mod)
@@ -232,30 +314,34 @@ class KeyboardBackend(OutputBackend):
                         post_macos_key_event(mod_vk, False, self._macos_flags())
             self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
 
-            state.release()
-            flags = self._macos_flags()
-            post_macos_key_event(vk, False, flags)
             if not self._active_pitches.get(base_key):
+                state = self._states.get(base_key)
+                vk = get_macos_vk_for_key(base_key)
+                if state:
+                    state.release()
+                if vk is not None:
+                    post_macos_key_event(vk, False, self._macos_flags())
                 self._active_pitches.pop(base_key, None)
                 self._states.pop(base_key, None)
             return
 
         self._release_key_if_unused(base_key)
 
-    # -- pedal --
-
     def pedal_on(self) -> None:
         if self._pedal_down:
             return
         self._pedal_down = True
+
         if self._use_macos_cgevent:
-            # Key.space works: get_macos_vk_for_key extracts .name ("space")
-            # and looks it up in _MACOS_VK which maps "space" -> 0x31
             space_vk = get_macos_vk_for_key(Key.space)
             if space_vk is not None and post_macos_key_event(space_vk, True, 0):
                 return
+
         try:
-            self._kb.press(Key.space)
+            if self._use_pydirectinput and self._pdi is not None:
+                self._pdi.keyDown("space")
+            elif self._kb is not None:
+                self._kb.press(Key.space)
         except Exception as e:
             self._log_exception("KeyboardBackend pedal_on error", e)
 
@@ -263,6 +349,7 @@ class KeyboardBackend(OutputBackend):
         if not self._pedal_down:
             return
         self._pedal_down = False
+
         for key_char in list(self._active_pitches.keys()):
             if not self._active_pitches[key_char]:
                 if self._use_macos_cgevent:
@@ -276,16 +363,25 @@ class KeyboardBackend(OutputBackend):
                     self._states.pop(key_char, None)
                 else:
                     self._release_key_if_unused(key_char)
+
         if self._use_macos_cgevent:
             space_vk = get_macos_vk_for_key(Key.space)
             if space_vk is not None and post_macos_key_event(space_vk, False, 0):
                 return
+
         try:
-            self._kb.release(Key.space)
+            if self._use_pydirectinput and self._pdi is not None:
+                self._pdi.keyUp("space")
+            elif self._kb is not None:
+                self._kb.release(Key.space)
         except Exception as e:
             self._log_exception("KeyboardBackend pedal_off error", e)
 
-    # -- shutdown --
+    def execute_batch(self, events: List[Any]) -> None:
+        if not events:
+            return
+
+        super().execute_batch(events)
 
     def shutdown(self) -> None:
         if self._use_macos_cgevent:
@@ -317,9 +413,13 @@ class KeyboardBackend(OutputBackend):
 
         for key_char in list(self._active_pitches.keys()):
             try:
-                self._kb.release(key_char)
+                if self._use_pydirectinput and self._pdi is not None:
+                    self._pdi_key_up(key_char)
+                elif self._kb is not None:
+                    self._kb.release(key_char)
             except Exception as e:
                 self._log_exception("KeyboardBackend shutdown note release error", e)
+
         self._active_pitches.clear()
         for state in self._states.values():
             state.release()
@@ -327,17 +427,27 @@ class KeyboardBackend(OutputBackend):
         if self._pedal_down:
             self._pedal_down = False
             try:
-                self._kb.release(Key.space)
+                if self._use_pydirectinput and self._pdi is not None:
+                    self._pdi_key_up("space")
+                elif self._kb is not None:
+                    self._kb.release(Key.space)
             except Exception as e:
                 self._log_exception("KeyboardBackend shutdown pedal release error", e)
 
-        for mod in (Key.shift, Key.ctrl, Key.alt):
-            try:
-                self._kb.release(mod)
-            except Exception as e:
-                self._log_exception(
-                    "KeyboardBackend shutdown modifier release error", e
-                )
+        if self._use_pydirectinput and self._pdi is not None:
+            for mod in ("shiftleft", "ctrlleft", "altleft"):
+                try:
+                    self._pdi_key_up(mod)
+                except Exception:
+                    pass
+        elif self._kb is not None:
+            for mod in (Key.shift, Key.ctrl, Key.alt):
+                try:
+                    self._kb.release(mod)
+                except Exception as e:
+                    self._log_exception(
+                        "KeyboardBackend shutdown modifier release error", e
+                    )
 
 
 # ---------------------------------------------------------------------------
