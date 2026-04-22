@@ -48,8 +48,10 @@ def test_pdi_key_down_up_typeerror_fallback(monkeypatch):
     kb._pdi_key_down("x")
     kb._pdi_key_up("x")
 
-    assert kb._pdi.down == ["x"]
-    assert kb._pdi.up == ["x"]
+    if not (kb._pdi.down == ["x"]):
+        raise AssertionError("Assertion failed")
+    if not (kb._pdi.up == ["x"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_release_key_if_unused_handles_backend_exception(monkeypatch):
@@ -60,7 +62,8 @@ def test_release_key_if_unused_handles_backend_exception(monkeypatch):
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
 
     key_data = kb._mapper.get_key_data(60)
-    assert key_data is not None
+    if not (key_data is not None):
+        raise AssertionError("Assertion failed")
     base = key_data["key"]
     kb._active_pitches[base] = set()
     kb._state_for(base)
@@ -72,8 +75,10 @@ def test_release_key_if_unused_handles_backend_exception(monkeypatch):
     kb._kb = cast(Any, BadKB())
     kb._release_key_if_unused(base)
 
-    assert base not in kb._active_pitches
-    assert any("release_key_if_unused" in msg for msg in logs)
+    if not (base not in kb._active_pitches):
+        raise AssertionError("Assertion failed")
+    if not (any("release_key_if_unused" in msg for msg in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_note_on_with_unknown_pitch_noop(monkeypatch):
@@ -98,9 +103,11 @@ def test_note_on_pydirectinput_modifier_none_branch(monkeypatch):
     kb.note_on(61, 100)
 
     key_data = kb._mapper.get_key_data(61)
-    assert key_data is not None
+    if not (key_data is not None):
+        raise AssertionError("Assertion failed")
     base = key_data["key"]
-    assert base in kb._pdi.down
+    if not (base in kb._pdi.down):
+        raise AssertionError("Assertion failed")
 
 
 def test_note_off_macos_releases_only_when_no_active_pitches(monkeypatch):
@@ -127,9 +134,12 @@ def test_note_off_macos_releases_only_when_no_active_pitches(monkeypatch):
     p2 = 36
     key_data_1 = kb._mapper.get_key_data(p1)
     key_data_2 = kb._mapper.get_key_data(p2)
-    assert key_data_1 is not None
-    assert key_data_2 is not None
-    assert key_data_1["key"] == key_data_2["key"]
+    if not (key_data_1 is not None):
+        raise AssertionError("Assertion failed")
+    if not (key_data_2 is not None):
+        raise AssertionError("Assertion failed")
+    if not (key_data_1["key"] == key_data_2["key"]):
+        raise AssertionError("Assertion failed")
 
     base_key = key_data_1["key"]
     base_vk = _vk_for_key(base_key)
@@ -139,11 +149,13 @@ def test_note_off_macos_releases_only_when_no_active_pitches(monkeypatch):
     kb.note_off(p1)
 
     release_calls_after_first = [e for e in events if e[0] == base_vk and e[1] is False]
-    assert not release_calls_after_first
+    if not (not release_calls_after_first):
+        raise AssertionError("Assertion failed")
 
     kb.note_off(p2)
     release_calls_after_second = [e for e in events if e[0] == base_vk and e[1] is False]
-    assert release_calls_after_second
+    if not (release_calls_after_second):
+        raise AssertionError("Assertion failed")
 
 
 def test_numpad_backend_logs_note_and_pedal_exceptions(monkeypatch):
@@ -165,9 +177,12 @@ def test_numpad_backend_logs_note_and_pedal_exceptions(monkeypatch):
     nb.pedal_on()
     nb.pedal_off()
 
-    assert any("note_on error" in m for m in logs)
-    assert any("note_off error" in m for m in logs)
-    assert any("pedal_on error" in m for m in logs)
+    if not (any("note_on error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
+    if not (any("note_off error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
+    if not (any("pedal_on error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_numpad_backend_shutdown_logs_errors(monkeypatch):
@@ -188,8 +203,10 @@ def test_numpad_backend_shutdown_logs_errors(monkeypatch):
     nb._pedal_down = True
     nb.shutdown()
 
-    assert any("shutdown note release error" in m for m in logs)
-    assert any("shutdown pedal release error" in m for m in logs)
+    if not (any("shutdown note release error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
+    if not (any("shutdown pedal release error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_keyboard_backend_windows_import_fallback_logs(monkeypatch):
@@ -209,9 +226,12 @@ def test_keyboard_backend_windows_import_fallback_logs(monkeypatch):
     logs = []
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
 
-    assert kb._use_pydirectinput is False
-    assert kb._kb is not None
-    assert any("falling back to pynput" in m.lower() for m in logs)
+    if not (kb._use_pydirectinput is False):
+        raise AssertionError("Assertion failed")
+    if not (kb._kb is not None):
+        raise AssertionError("Assertion failed")
+    if not (any("falling back to pynput" in m.lower() for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_helper_branches_for_modifier_and_pdi_none(monkeypatch):
@@ -219,8 +239,10 @@ def test_helper_branches_for_modifier_and_pdi_none(monkeypatch):
     monkeypatch.setattr(out, "Controller", FakeController)
 
     kb = out.KeyboardBackend(use_88_key_layout=False)
-    assert kb._modifier_name(Key.ctrl) == "ctrlleft"
-    assert kb._modifier_name(Key.alt) == "altleft"
+    if not (kb._modifier_name(Key.ctrl) == "ctrlleft"):
+        raise AssertionError("Assertion failed")
+    if not (kb._modifier_name(Key.alt) == "altleft"):
+        raise AssertionError("Assertion failed")
 
     kb._pdi = None
     kb._pdi_key_down("x")
@@ -265,8 +287,10 @@ def test_note_on_off_macos_ctrl_alt_and_none_modifier(monkeypatch):
     kb.note_on(60, 100)
     kb.note_off(60)
 
-    assert kb._macos_modifier_refcount == (0, 0, 0)
-    assert events
+    if not (kb._macos_modifier_refcount == (0, 0, 0)):
+        raise AssertionError("Assertion failed")
+    if not (events):
+        raise AssertionError("Assertion failed")
 
 
 def test_note_on_logs_exception_when_backend_press_fails(monkeypatch):
@@ -282,7 +306,8 @@ def test_note_on_logs_exception_when_backend_press_fails(monkeypatch):
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
     kb.note_on(60, 100)
 
-    assert any("note_on error" in m for m in logs)
+    if not (any("note_on error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_note_off_returns_when_no_mapping(monkeypatch):
@@ -314,8 +339,10 @@ def test_pedal_on_off_extra_branches(monkeypatch):
     kb.pedal_off()
     kb.pedal_off()
 
-    assert any("pedal_on error" in m for m in logs)
-    assert any("pedal_off error" in m for m in logs)
+    if not (any("pedal_on error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
+    if not (any("pedal_off error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_pedal_off_releases_empty_active_keys(monkeypatch):
@@ -325,7 +352,8 @@ def test_pedal_off_releases_empty_active_keys(monkeypatch):
     kb = out.KeyboardBackend(use_88_key_layout=False)
     kb._pedal_down = True
     key_data = kb._mapper.get_key_data(60)
-    assert key_data is not None
+    if not (key_data is not None):
+        raise AssertionError("Assertion failed")
     base = key_data["key"]
     kb._active_pitches[base] = set()
     kb._state_for(base)
@@ -334,7 +362,8 @@ def test_pedal_off_releases_empty_active_keys(monkeypatch):
     monkeypatch.setattr(kb, "_release_key_if_unused", lambda k: calls.append(k))
     kb.pedal_off()
 
-    assert calls == [base]
+    if not (calls == [base]):
+        raise AssertionError("Assertion failed")
 
 
 def test_keyboard_shutdown_macos_releases_keys_pedal_and_modifiers(monkeypatch):
@@ -356,9 +385,12 @@ def test_keyboard_shutdown_macos_releases_keys_pedal_and_modifiers(monkeypatch):
 
     kb.shutdown()
 
-    assert kb._macos_modifiers == (False, False, False)
-    assert kb._macos_modifier_refcount == (0, 0, 0)
-    assert any(ev[1] is False for ev in events)
+    if not (kb._macos_modifiers == (False, False, False)):
+        raise AssertionError("Assertion failed")
+    if not (kb._macos_modifier_refcount == (0, 0, 0)):
+        raise AssertionError("Assertion failed")
+    if not (any(ev[1] is False for ev in events)):
+        raise AssertionError("Assertion failed")
 
 
 def test_keyboard_shutdown_pdi_and_pynput_exception_branches(monkeypatch):
@@ -381,9 +413,12 @@ def test_keyboard_shutdown_pdi_and_pynput_exception_branches(monkeypatch):
 
     kb.shutdown()
 
-    assert any("shutdown note release error" in m for m in logs)
-    assert any("shutdown pedal release error" in m for m in logs)
-    assert any("shutdown modifier release error" in m for m in logs)
+    if not (any("shutdown note release error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
+    if not (any("shutdown pedal release error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
+    if not (any("shutdown modifier release error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
     monkeypatch.setattr(out.sys, "platform", "linux")
 
@@ -395,7 +430,8 @@ def test_keyboard_shutdown_pdi_and_pynput_exception_branches(monkeypatch):
     kb2._kb = cast(Any, BadKB())
     kb2.shutdown()
 
-    assert any("shutdown modifier release error" in m for m in logs)
+    if not (any("shutdown modifier release error" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_output_backend_execute_batch_pedal_up_and_empty_branch():
@@ -427,7 +463,8 @@ def test_output_backend_execute_batch_pedal_up_and_empty_branch():
     keyboard_backend = out.KeyboardBackend(use_88_key_layout=False)
     keyboard_backend.execute_batch([])
 
-    assert b.calls == [("pedal_off",)]
+    if not (b.calls == [("pedal_off",)]):
+        raise AssertionError("Assertion failed")
 
 
 def test_create_backend_sets_macos_cgevent_for_numpad(monkeypatch):
@@ -437,8 +474,10 @@ def test_create_backend_sets_macos_cgevent_for_numpad(monkeypatch):
 
     backend = out.create_backend("midi_numpad", macos_use_pynput=True)
 
-    assert backend.__class__.__name__ == "NumpadBackend"
-    assert calls == [False]
+    if not (backend.__class__.__name__ == "NumpadBackend"):
+        raise AssertionError("Assertion failed")
+    if not (calls == [False]):
+        raise AssertionError("Assertion failed")
 
 
 def test_modifier_name_returns_none_for_unrecognized_modifier(monkeypatch):
@@ -447,7 +486,8 @@ def test_modifier_name_returns_none_for_unrecognized_modifier(monkeypatch):
 
     kb = out.KeyboardBackend(use_88_key_layout=False)
 
-    assert kb._modifier_name(object()) is None
+    if not (kb._modifier_name(object()) is None):
+        raise AssertionError("Assertion failed")
 
 
 def test_note_on_returns_when_mapper_has_no_data(monkeypatch):
@@ -459,7 +499,8 @@ def test_note_on_returns_when_mapper_has_no_data(monkeypatch):
 
     kb.note_on(60, 100)
 
-    assert kb._active_pitches == {}
+    if not (kb._active_pitches == {}):
+        raise AssertionError("Assertion failed")
 
 
 def test_pedal_off_macos_releases_empty_keys_without_vk(monkeypatch):
@@ -480,9 +521,12 @@ def test_pedal_off_macos_releases_empty_keys_without_vk(monkeypatch):
 
     kb.pedal_off()
 
-    assert kb._active_pitches == {}
-    assert kb._states == {}
-    assert any(vk == 99 and down is False for vk, down, _ in calls)
+    if not (kb._active_pitches == {}):
+        raise AssertionError("Assertion failed")
+    if not (kb._states == {}):
+        raise AssertionError("Assertion failed")
+    if not (any(vk == 99 and down is False for vk, down, _ in calls)):
+        raise AssertionError("Assertion failed")
 
 
 def test_pedal_off_macos_releases_empty_keys_with_vk(monkeypatch):
@@ -503,8 +547,10 @@ def test_pedal_off_macos_releases_empty_keys_with_vk(monkeypatch):
 
     kb.pedal_off()
 
-    assert any(vk == 50 and down is False for vk, down, _ in calls)
-    assert any(vk == 99 and down is False for vk, down, _ in calls)
+    if not (any(vk == 50 and down is False for vk, down, _ in calls)):
+        raise AssertionError("Assertion failed")
+    if not (any(vk == 99 and down is False for vk, down, _ in calls)):
+        raise AssertionError("Assertion failed")
 
 
 def test_execute_batch_non_empty_delegates_to_super(monkeypatch):
@@ -521,7 +567,8 @@ def test_execute_batch_non_empty_delegates_to_super(monkeypatch):
 
     kb.execute_batch([FakeEvent(0.0, 0, "pedal", key_char="up", pitch=None, velocity=0)])
 
-    assert called["count"] == 1
+    if not (called["count"] == 1):
+        raise AssertionError("Assertion failed")
 
 
 def test_shutdown_releases_note_and_pedal_with_keyboard_backend(monkeypatch):
@@ -536,5 +583,7 @@ def test_shutdown_releases_note_and_pedal_with_keyboard_backend(monkeypatch):
     kb.shutdown()
 
     kb_impl = cast(Any, kb._kb)
-    assert "x" in kb_impl.releases
-    assert Key.space in kb_impl.releases
+    if not ("x" in kb_impl.releases):
+        raise AssertionError("Assertion failed")
+    if not (Key.space in kb_impl.releases):
+        raise AssertionError("Assertion failed")

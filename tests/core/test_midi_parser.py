@@ -16,28 +16,34 @@ class DummyMsg:
 
 
 def test_strip_control_chars_removes_nulls():
-    assert _strip_control_chars("ab\x00c\n") == "abc\n"
+    if not (_strip_control_chars("ab\x00c\n") == "abc\n"):
+        raise AssertionError("Assertion failed")
 
 
 def test_repair_utf8_mojibake_keeps_normal_text():
-    assert _repair_utf8_mojibake("hello") == "hello"
+    if not (_repair_utf8_mojibake("hello") == "hello"):
+        raise AssertionError("Assertion failed")
 
 
 def test_decode_midi_text_uses_name_when_data_missing():
     msg = DummyMsg(data=None, name="Track\x00Name")
-    assert _decode_midi_text(msg) == "TrackName"
+    if not (_decode_midi_text(msg) == "TrackName"):
+        raise AssertionError("Assertion failed")
 
 
 def test_decode_midi_text_ascii_fast_path():
     msg = DummyMsg(data=b"Piano")
-    assert _decode_midi_text(msg) == "Piano"
+    if not (_decode_midi_text(msg) == "Piano"):
+        raise AssertionError("Assertion failed")
 
 
 def test_decode_midi_text_latin_fallback():
     msg = DummyMsg(data=bytes([0xFF, 0xFE]))
     out = _decode_midi_text(msg)
-    assert isinstance(out, str)
-    assert len(out) > 0
+    if not (isinstance(out, str)):
+        raise AssertionError("Assertion failed")
+    if not (len(out) > 0):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_structure_raises_ioerror_on_bad_file(monkeypatch):
@@ -63,12 +69,18 @@ def test_parse_structure_builds_notes_and_pedal(monkeypatch):
 
     tracks, tempo_map = MidiParser.parse_structure("ok.mid", tempo_scale=1.0)
 
-    assert len(tracks) == 1
-    assert tracks[0].name == "Main"
-    assert len(tracks[0].notes) == 1
-    assert tracks[0].notes[0].pitch == 60
-    assert len(tracks[0].pedal_events) == 1
-    assert tempo_map is not None
+    if not (len(tracks) == 1):
+        raise AssertionError("Assertion failed")
+    if not (tracks[0].name == "Main"):
+        raise AssertionError("Assertion failed")
+    if not (len(tracks[0].notes) == 1):
+        raise AssertionError("Assertion failed")
+    if not (tracks[0].notes[0].pitch == 60):
+        raise AssertionError("Assertion failed")
+    if not (len(tracks[0].pedal_events) == 1):
+        raise AssertionError("Assertion failed")
+    if not (tempo_map is not None):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_structure_treats_note_on_zero_velocity_as_note_off(monkeypatch):
@@ -80,22 +92,27 @@ def test_parse_structure_treats_note_on_zero_velocity_as_note_off(monkeypatch):
 
     monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda *a, **k: mid)
     tracks, _ = MidiParser.parse_structure("ok.mid")
-    assert len(tracks[0].notes) == 1
+    if not (len(tracks[0].notes) == 1):
+        raise AssertionError("Assertion failed")
 
 
 def test_strip_and_repair_empty_inputs():
-    assert _strip_control_chars("") == ""
-    assert _repair_utf8_mojibake("") == ""
+    if not (_strip_control_chars("") == ""):
+        raise AssertionError("Assertion failed")
+    if not (_repair_utf8_mojibake("") == ""):
+        raise AssertionError("Assertion failed")
 
 
 def test_decode_midi_text_data_object_invalid_uses_name():
     msg = type("Msg", (), {"data": object(), "name": "Name\x00X"})()
-    assert _decode_midi_text(msg) == "NameX"
+    if not (_decode_midi_text(msg) == "NameX"):
+        raise AssertionError("Assertion failed")
 
 
 def test_decode_midi_text_empty_bytes_uses_name_fallback():
     msg = DummyMsg(data=b"", name="ignored")
-    assert _decode_midi_text(msg) == "ignored"
+    if not (_decode_midi_text(msg) == "ignored"):
+        raise AssertionError("Assertion failed")
 
 
 def test_decode_midi_text_ascii_decode_error_falls_through():
@@ -110,7 +127,8 @@ def test_decode_midi_text_ascii_decode_error_falls_through():
             return BadBytes(b"ABC")
 
     out = _decode_midi_text(DummyMsg(data=Data(), name="n"))
-    assert out == "ABC"
+    if not (out == "ABC"):
+        raise AssertionError("Assertion failed")
 
 
 def test_decode_midi_text_encoding_fallback_to_name_on_latin1_error():
@@ -123,7 +141,8 @@ def test_decode_midi_text_encoding_fallback_to_name_on_latin1_error():
             return BadBytes(b"\xff")
 
     out = _decode_midi_text(DummyMsg(data=Data(), name="Fallback"))
-    assert out == "Fallback"
+    if not (out == "Fallback"):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_structure_program_channel_9_marks_drum_and_scales(monkeypatch):
@@ -137,8 +156,10 @@ def test_parse_structure_program_channel_9_marks_drum_and_scales(monkeypatch):
     monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda *a, **k: mid)
     tracks, _ = MidiParser.parse_structure("ok.mid", tempo_scale=2.0)
 
-    assert tracks[0].is_drum is True
-    assert tracks[0].notes[0].duration == pytest.approx(0.25)
+    if not (tracks[0].is_drum is True):
+        raise AssertionError("Assertion failed")
+    if not (tracks[0].notes[0].duration == pytest.approx(0.25)):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_structure_notes_channel_9_marks_drum(monkeypatch):
@@ -151,7 +172,8 @@ def test_parse_structure_notes_channel_9_marks_drum(monkeypatch):
     monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda *a, **k: mid)
     tracks, _ = MidiParser.parse_structure("ok.mid")
 
-    assert tracks[0].is_drum is True
+    if not (tracks[0].is_drum is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_structure_skips_too_short_notes(monkeypatch):
@@ -164,7 +186,8 @@ def test_parse_structure_skips_too_short_notes(monkeypatch):
     monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda *a, **k: mid)
     tracks, _ = MidiParser.parse_structure("ok.mid")
 
-    assert tracks == []
+    if not (tracks == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_structure_ignores_note_off_without_open_note(monkeypatch):
@@ -175,17 +198,17 @@ def test_parse_structure_ignores_note_off_without_open_note(monkeypatch):
 
     monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda *a, **k: mid)
     tracks, _ = MidiParser.parse_structure("ok.mid")
-    assert tracks == []
+    if not (tracks == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_repair_utf8_mojibake_repairs_japanese_text():
-    assert _repair_utf8_mojibake("ã\x81\x82") == "あ"
-
+    if not (_repair_utf8_mojibake("ã\x81\x82") == "あ"):
+        raise AssertionError("Assertion failed")
 
 def test_repair_utf8_mojibake_decode_errors_return_original_text():
-    assert _repair_utf8_mojibake("ÿ") == "ÿ"
-
-
+    if not (_repair_utf8_mojibake("ÿ") == "ÿ"):
+        raise AssertionError("Assertion failed")
 def test_decode_midi_text_true_but_empty_bytes_returns_empty_string():
     class EmptyBytes:
         def __bool__(self):
@@ -195,7 +218,8 @@ def test_decode_midi_text_true_but_empty_bytes_returns_empty_string():
             return b""
 
     msg = DummyMsg(data=EmptyBytes(), name="fallback")
-    assert _decode_midi_text(msg) == ""
+    if not (_decode_midi_text(msg) == ""):
+        raise AssertionError("Assertion failed")
 
 
 def test_decode_midi_text_appends_environment_encodings(monkeypatch):
@@ -204,7 +228,8 @@ def test_decode_midi_text_appends_environment_encodings(monkeypatch):
 
     msg = DummyMsg(data=b"\xff\xfeA\x00", name="n")
     out = _decode_midi_text(msg)
-    assert isinstance(out, str)
+    if not (isinstance(out, str)):
+        raise AssertionError("Assertion failed")
 
 
 def test_decode_midi_text_latin1_fallback_deterministic():
@@ -219,4 +244,5 @@ def test_decode_midi_text_latin1_fallback_deterministic():
             return BadBytes(b"\xff")
 
     out = _decode_midi_text(DummyMsg(data=Data(), name="n"))
-    assert out == "latin-fallback"
+    if not (out == "latin-fallback"):
+        raise AssertionError("Assertion failed")

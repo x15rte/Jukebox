@@ -39,10 +39,14 @@ def test_apply_global_palette_sets_core_roles():
     theme.apply_global_palette(cast(Any, app))
 
     roles = {role for role, _ in app.p.calls}
-    assert "Window" in roles
-    assert "Base" in roles
-    assert "ToolTipText" in roles
-    assert app.set_palette_called is True
+    if not ("Window" in roles):
+        raise AssertionError("Assertion failed")
+    if not ("Base" in roles):
+        raise AssertionError("Assertion failed")
+    if not ("ToolTipText" in roles):
+        raise AssertionError("Assertion failed")
+    if not (app.set_palette_called is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_heading_font_uses_provided_base_and_default_font(monkeypatch):
@@ -71,20 +75,30 @@ def test_heading_font_uses_provided_base_and_default_font(monkeypatch):
     base = FakeFont()
     base.size = 20.0
     f1 = cast(Any, theme.heading_font(base=cast(Any, base), scale=1.5))
-    assert f1.size == 30.0
-    assert f1.bold is True
+    if not (f1.size == 30.0):
+        raise AssertionError("Assertion failed")
+    if not (f1.bold is True):
+        raise AssertionError("Assertion failed")
 
     f2 = cast(Any, theme.heading_font(base=None, scale=1.2))
-    assert f2.size == 12.0
-    assert f2.bold is True
+    if not (f2.size == 12.0):
+        raise AssertionError("Assertion failed")
+    if not (f2.bold is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_theme_helpers_and_dark_theme_payload():
-    assert "font-size" in theme.subtle_label_style()
-    assert "QGroupBox" in theme.section_groupbox_style()
+    if not ("font-size" in theme.subtle_label_style()):
+        raise AssertionError("Assertion failed")
+    if not ("QGroupBox" in theme.section_groupbox_style()):
+        raise AssertionError("Assertion failed")
 
     t = theme.get_dark_cyber_theme()
-    assert t.background_main.startswith("#")
-    assert t.logs.warning == t.accent_warning
-    assert t.logs.error == t.accent_error
-    assert "QPushButton#PrimaryButton" in t.qss
+    if not (t.background_main.startswith("#")):
+        raise AssertionError("Assertion failed")
+    if not (t.logs.warning == t.accent_warning):
+        raise AssertionError("Assertion failed")
+    if not (t.logs.error == t.accent_error):
+        raise AssertionError("Assertion failed")
+    if not ("QPushButton#PrimaryButton" in t.qss):
+        raise AssertionError("Assertion failed")

@@ -29,14 +29,20 @@ def test_compile_triggers_humanizer_when_enable_flags_used(monkeypatch):
         {"enable_vary_timing": True, "pedal_style": "none"},
     )
 
-    assert out
-    assert calls["init"] == 1
-    assert calls["prep"] == 1
-    assert calls["hand"] == 2
-    assert calls["rubato"] == 1
+    if not (out):
+        raise AssertionError("Assertion failed")
+    if not (calls["init"] == 1):
+        raise AssertionError("Assertion failed")
+    if not (calls["prep"] == 1):
+        raise AssertionError("Assertion failed")
+    if not (calls["hand"] == 2):
+        raise AssertionError("Assertion failed")
+    if not (calls["rubato"] == 1):
+        raise AssertionError("Assertion failed")
 
 
 def test_mistake_pitch_white_key_returns_none_when_no_candidates(monkeypatch):
     monkeypatch.setattr("playback.player.KeyMapper.is_black_key", lambda p: p != 0)
     out = EventCompiler._mistake_pitch(0)
-    assert out is None
+    if not (out is None):
+        raise AssertionError("Assertion failed")

@@ -20,8 +20,10 @@ def test_set_gui_callback_replaces_existing_callbacks():
     lg.set_gui_callback(cb2)
     lg.info("hello")
 
-    assert len(events) == 1
-    assert events[0][0] == "cb2"
+    if not (len(events) == 1):
+        raise AssertionError("Assertion failed")
+    if not (events[0][0] == "cb2"):
+        raise AssertionError("Assertion failed")
 
 
 def test_add_and_remove_gui_callback_idempotent():
@@ -34,17 +36,20 @@ def test_add_and_remove_gui_callback_idempotent():
     lg.add_gui_callback(cb)
     lg.add_gui_callback(cb)
     lg.info("a")
-    assert len(events) == 1
+    if not (len(events) == 1):
+        raise AssertionError("Assertion failed")
 
     lg.remove_gui_callback(cb)
     lg.info("b")
-    assert len(events) == 1
+    if not (len(events) == 1):
+        raise AssertionError("Assertion failed")
 
 
 def test_set_level_with_unknown_name_defaults_info():
     lg = _JukeboxLogger()
     lg.set_level("not-a-level")
-    assert lg._logger.level == logging.INFO
+    if not (lg._logger.level == logging.INFO):
+        raise AssertionError("Assertion failed")
 
 
 def test_enable_file_logging_noop_when_same_handler(tmp_path):
@@ -55,7 +60,8 @@ def test_enable_file_logging_noop_when_same_handler(tmp_path):
     h1 = lg._file_handler
     lg.enable_file_logging(str(p), max_bytes=111, backup_count=2)
 
-    assert lg._file_handler is h1
+    if not (lg._file_handler is h1):
+        raise AssertionError("Assertion failed")
 
 
 def test_enable_file_logging_replaces_old_handler_even_if_close_fails(tmp_path, monkeypatch):
@@ -71,8 +77,10 @@ def test_enable_file_logging_replaces_old_handler_even_if_close_fails(tmp_path, 
     monkeypatch.setattr(lg._file_handler, "close", bad_close)
     lg.enable_file_logging(str(p2))
 
-    assert lg._file_handler is not None
-    assert lg._file_handler.baseFilename.endswith("log2.txt")
+    if not (lg._file_handler is not None):
+        raise AssertionError("Assertion failed")
+    if not (lg._file_handler.baseFilename.endswith("log2.txt")):
+        raise AssertionError("Assertion failed")
 
 
 def test_disable_file_logging_no_handler_noop():
@@ -90,7 +98,8 @@ def test_disable_file_logging_close_exception_is_swallowed(tmp_path, monkeypatch
 
     monkeypatch.setattr(lg._file_handler, "close", bad_close)
     lg.disable_file_logging()
-    assert lg._file_handler is None
+    if not (lg._file_handler is None):
+        raise AssertionError("Assertion failed")
 
 
 def test_log_with_exc_info_appends_traceback_and_notifies_callbacks():
@@ -104,9 +113,12 @@ def test_log_with_exc_info_appends_traceback_and_notifies_callbacks():
     except ValueError:
         lg.error("problem", exc_info=True)
 
-    assert events
-    assert events[0][0] == "ERROR"
-    assert "Traceback" in events[0][1]
+    if not (events):
+        raise AssertionError("Assertion failed")
+    if not (events[0][0] == "ERROR"):
+        raise AssertionError("Assertion failed")
+    if not ("Traceback" in events[0][1]):
+        raise AssertionError("Assertion failed")
 
 
 def test_log_skips_callbacks_when_level_disabled():
@@ -116,7 +128,8 @@ def test_log_skips_callbacks_when_level_disabled():
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
 
     lg.info("hello")
-    assert events == []
+    if not (events == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_log_callback_exception_does_not_break_logging():
@@ -134,8 +147,10 @@ def test_log_callback_exception_does_not_break_logging():
     lg.add_gui_callback(ok_cb)
 
     lg.info("hello")
-    assert calls["ok"] == 1
+    if not (calls["ok"] == 1):
+        raise AssertionError("Assertion failed")
 
 
 def test_global_singleton_has_expected_type():
-    assert isinstance(logger_core.jukebox_logger, _JukeboxLogger)
+    if not (isinstance(logger_core.jukebox_logger, _JukeboxLogger)):
+        raise AssertionError("Assertion failed")

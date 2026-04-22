@@ -17,8 +17,10 @@ def test_worker_emits_connection_error_and_finished(monkeypatch):
 
     worker.run()
 
-    assert errors == ["boom"]
-    assert finished == [True]
+    if not (errors == ["boom"]):
+        raise AssertionError("Assertion failed")
+    if not (finished == [True]):
+        raise AssertionError("Assertion failed")
 
 
 def test_worker_reads_messages_and_finishes(monkeypatch):
@@ -51,11 +53,16 @@ def test_worker_reads_messages_and_finishes(monkeypatch):
 
     worker.run()
 
-    assert connected == [True]
-    assert len(received) == 1
-    assert getattr(received[0], "note") == 60
-    assert finished == [True]
-    assert port.closed is True
+    if not (connected == [True]):
+        raise AssertionError("Assertion failed")
+    if not (len(received) == 1):
+        raise AssertionError("Assertion failed")
+    if not (getattr(received[0], "note") == 60):
+        raise AssertionError("Assertion failed")
+    if not (finished == [True]):
+        raise AssertionError("Assertion failed")
+    if not (port.closed is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_stop_emits_warning_when_close_fails():
@@ -70,8 +77,10 @@ def test_stop_emits_warning_when_close_fails():
     worker._inport = Port()
     worker.stop()
 
-    assert worker._stop_event.is_set() is True
-    assert warnings and "close boom" in warnings[0]
+    if not (worker._stop_event.is_set() is True):
+        raise AssertionError("Assertion failed")
+    if not (warnings and "close boom" in warnings[0]):
+        raise AssertionError("Assertion failed")
 
 
 def test_run_emits_connection_error_when_iter_pending_fails(monkeypatch):
@@ -92,8 +101,10 @@ def test_run_emits_connection_error_when_iter_pending_fails(monkeypatch):
 
     worker.run()
 
-    assert errors == ["loop boom"]
-    assert finished == [True]
+    if not (errors == ["loop boom"]):
+        raise AssertionError("Assertion failed")
+    if not (finished == [True]):
+        raise AssertionError("Assertion failed")
 
 
 def test_run_emits_warning_when_cleanup_close_fails(monkeypatch):
@@ -118,7 +129,8 @@ def test_run_emits_warning_when_cleanup_close_fails(monkeypatch):
 
     worker.run()
 
-    assert warnings and "cleanup boom" in warnings[0]
+    if not (warnings and "cleanup boom" in warnings[0]):
+        raise AssertionError("Assertion failed")
 
 
 def test_run_breaks_inner_loop_when_stop_event_set_during_iteration(monkeypatch):
@@ -153,5 +165,7 @@ def test_run_breaks_inner_loop_when_stop_event_set_during_iteration(monkeypatch)
 
     worker.run()
 
-    assert len(received) == 1
-    assert received[0].note == 60
+    if not (len(received) == 1):
+        raise AssertionError("Assertion failed")
+    if not (received[0].note == 60):
+        raise AssertionError("Assertion failed")

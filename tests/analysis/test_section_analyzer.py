@@ -14,7 +14,8 @@ def _tempo_map(explicit=False):
 
 def test_analyze_empty_returns_empty():
     sa = SectionAnalyzer([], _tempo_map())
-    assert sa.analyze() == []
+    if not (sa.analyze() == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_analyze_by_silence_splits_on_large_gap():
@@ -25,7 +26,8 @@ def test_analyze_by_silence_splits_on_large_gap():
     ]
     sa = SectionAnalyzer(notes, _tempo_map())
     sections = sa.analyze()
-    assert len(sections) == 2
+    if not (len(sections) == 2):
+        raise AssertionError("Assertion failed")
 
 
 def test_classify_bass_articulation_boundaries():
@@ -35,33 +37,39 @@ def test_classify_bass_articulation_boundaries():
         make_note(2, 41, 0.5, 0.1, hand="left"),
     ]
     sa = SectionAnalyzer(stacc, tm)
-    assert sa._classify_bass_articulation(stacc) == "staccato"
+    if not (sa._classify_bass_articulation(stacc) == "staccato"):
+        raise AssertionError("Assertion failed")
 
     lega = [
         make_note(3, 40, 0.0, 0.6, hand="left"),
         make_note(4, 41, 0.5, 0.6, hand="left"),
     ]
-    assert sa._classify_bass_articulation(lega) == "legato"
+    if not (sa._classify_bass_articulation(lega) == "legato"):
+        raise AssertionError("Assertion failed")
 
 
 def test_classify_pace_beats_thresholds():
     tm = _tempo_map()
     notes = [make_note(i, 60, i * 0.01, 0.1, hand="right") for i in range(40)]
     sa = SectionAnalyzer(notes, tm)
-    assert sa._classify_pace_beats(notes, 0.0, 8.0) == "fast"
-    assert sa._classify_pace_beats(notes[:2], 0.0, 8.0) == "slow"
+    if not (sa._classify_pace_beats(notes, 0.0, 8.0) == "fast"):
+        raise AssertionError("Assertion failed")
+    if not (sa._classify_pace_beats(notes[:2], 0.0, 8.0) == "slow"):
+        raise AssertionError("Assertion failed")
 
 
 def test_analyze_by_measures_path_with_explicit_signatures():
     notes = [make_note(1, 60, 0.1, 0.2, hand="right"), make_note(2, 62, 3.2, 0.2, hand="right")]
     sa = SectionAnalyzer(notes, _tempo_map(explicit=True))
     sections = sa.analyze()
-    assert len(sections) >= 1
+    if not (len(sections) >= 1):
+        raise AssertionError("Assertion failed")
 
 
 def test_detect_grand_pauses_handles_empty_notes():
     sa = SectionAnalyzer([], _tempo_map())
-    assert sa._detect_grand_pauses() == [0]
+    if not (sa._detect_grand_pauses() == [0]):
+        raise AssertionError("Assertion failed")
 
 
 def test_analyze_by_silence_skips_empty_boundaries(monkeypatch):
@@ -69,7 +77,8 @@ def test_analyze_by_silence_skips_empty_boundaries(monkeypatch):
     sa = SectionAnalyzer(notes, _tempo_map())
     monkeypatch.setattr(sa, "_detect_grand_pauses", lambda: [0, 0, 1])
     sections = sa._analyze_by_silence()
-    assert len(sections) == 1
+    if not (len(sections) == 1):
+        raise AssertionError("Assertion failed")
 
 
 def test_classify_bass_articulation_single_or_nonpositive_ioi_defaults_legato():
@@ -77,13 +86,15 @@ def test_classify_bass_articulation_single_or_nonpositive_ioi_defaults_legato():
     sa = SectionAnalyzer([], tm)
 
     single = [make_note(1, 40, 0.0, 0.1, hand="left")]
-    assert sa._classify_bass_articulation(single) == "legato"
+    if not (sa._classify_bass_articulation(single) == "legato"):
+        raise AssertionError("Assertion failed")
 
     same_start = [
         make_note(1, 40, 0.0, 0.2, hand="left"),
         make_note(2, 41, 0.0, 0.2, hand="left"),
     ]
-    assert sa._classify_bass_articulation(same_start) == "legato"
+    if not (sa._classify_bass_articulation(same_start) == "legato"):
+        raise AssertionError("Assertion failed")
 
 
 def test_classify_bass_articulation_hybrid_branch():
@@ -94,7 +105,8 @@ def test_classify_bass_articulation_hybrid_branch():
         make_note(1, 40, 0.0, 0.35, hand="left"),
         make_note(2, 41, 0.5, 0.35, hand="left"),
     ]
-    assert sa._classify_bass_articulation(notes) == "hybrid"
+    if not (sa._classify_bass_articulation(notes) == "hybrid"):
+        raise AssertionError("Assertion failed")
 
 
 def test_classify_pace_zero_or_normal_paths():
@@ -102,8 +114,10 @@ def test_classify_pace_zero_or_normal_paths():
     sa = SectionAnalyzer([], tm)
     notes = [make_note(1, 60, 0.0, 0.2, hand="right")]
 
-    assert sa._classify_pace_beats(notes, 1.0, 1.0) == "normal"
-    assert sa._classify_pace_beats(notes * 2, 0.0, 2.0) == "normal"
+    if not (sa._classify_pace_beats(notes, 1.0, 1.0) == "normal"):
+        raise AssertionError("Assertion failed")
+    if not (sa._classify_pace_beats(notes * 2, 0.0, 2.0) == "normal"):
+        raise AssertionError("Assertion failed")
 
 
 def test_analyze_by_measures_with_empty_measure_uses_prev_style(monkeypatch):
@@ -119,7 +133,8 @@ def test_analyze_by_measures_with_empty_measure_uses_prev_style(monkeypatch):
     )
 
     sections = sa._analyze_by_measures()
-    assert sections
+    if not (sections):
+        raise AssertionError("Assertion failed")
 
 
 def test_analyze_by_measures_style_change_splits_sections(monkeypatch):
@@ -146,7 +161,8 @@ def test_analyze_by_measures_style_change_splits_sections(monkeypatch):
     monkeypatch.setattr(sa, "_classify_bass_articulation", wrapped)
     sections = sa._analyze_by_measures()
 
-    assert len(sections) >= 2
+    if not (len(sections) >= 2):
+        raise AssertionError("Assertion failed")
     sa._classify_bass_articulation = orig
 
 
@@ -162,4 +178,5 @@ def test_analyze_by_silence_handles_empty_slice_notes(monkeypatch):
 
     sections = sa._analyze_by_silence()
 
-    assert sections == []
+    if not (sections == []):
+        raise AssertionError("Assertion failed")

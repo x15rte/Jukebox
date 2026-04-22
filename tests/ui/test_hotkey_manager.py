@@ -13,9 +13,11 @@ def _patch_listener(monkeypatch):
 
 
 def test_parse_hotkey_string_defaults_and_char():
-    assert parse_hotkey_string(None) == Key.f6
+    if not (parse_hotkey_string(None) == Key.f6):
+        raise AssertionError("Assertion failed")
     key = cast(Any, parse_hotkey_string("x"))
-    assert hasattr(key, "char") and key.char == "x"
+    if not (hasattr(key, "char") and key.char == "x"):
+        raise AssertionError("Assertion failed")
 
 
 def test_hotkey_manager_binding_and_toggle(monkeypatch):
@@ -28,11 +30,13 @@ def test_hotkey_manager_binding_and_toggle(monkeypatch):
 
     mgr.start_binding()
     mgr.on_press(Key.f7)
-    assert captured["bound"] == "f7"
+    if not (captured["bound"] == "f7"):
+        raise AssertionError("Assertion failed")
 
     mgr.current_key = Key.f8
     mgr.on_press(Key.f8)
-    assert captured["toggle"] == 1
+    if not (captured["toggle"] == 1):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_hotkey_string_invalid_char_falls_back_to_default(monkeypatch):
@@ -40,11 +44,13 @@ def test_parse_hotkey_string_invalid_char_falls_back_to_default(monkeypatch):
         "ui.hotkey_manager.KeyCode.from_char",
         lambda _c: (_ for _ in ()).throw(ValueError("bad char")),
     )
-    assert parse_hotkey_string("x") == Key.f6
+    if not (parse_hotkey_string("x") == Key.f6):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_hotkey_string_multi_char_falls_back_to_default():
-    assert parse_hotkey_string("xx") == Key.f6
+    if not (parse_hotkey_string("xx") == Key.f6):
+        raise AssertionError("Assertion failed")
 
 
 def test_format_key_string_prefers_key_char(monkeypatch):
@@ -54,7 +60,8 @@ def test_format_key_string_prefers_key_char(monkeypatch):
     _patch_listener(monkeypatch)
     mgr = HotkeyManager()
 
-    assert mgr.format_key_string(CharKey()) == "z"
+    if not (mgr.format_key_string(CharKey()) == "z"):
+        raise AssertionError("Assertion failed")
 
 
 def test_stop_with_no_listener_noop(monkeypatch):

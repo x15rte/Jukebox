@@ -27,9 +27,12 @@ class _Keyboard:
 
 def test_encode_note_components_clamps_velocity():
     a, b, c, d = rmc._encode_note_components(60, 999, False)
-    assert (a, b) == (5, 0)
-    assert 0 <= c <= 11
-    assert 0 <= d <= 11
+    if not ((a, b) == (5, 0)):
+        raise AssertionError("Assertion failed")
+    if not (0 <= c <= 11):
+        raise AssertionError("Assertion failed")
+    if not (0 <= d <= 11):
+        raise AssertionError("Assertion failed")
 
 
 def test_send_pedal_uses_sentinel(monkeypatch):
@@ -42,9 +45,12 @@ def test_send_pedal_uses_sentinel(monkeypatch):
     rmc.send_pedal(127)
 
     a, b, c, d = sent["vals"]
-    assert a == rmc.PEDAL_SENTINEL // 12
-    assert b == rmc.PEDAL_SENTINEL % 12
-    assert (c, d) == (10, 7)
+    if not (a == rmc.PEDAL_SENTINEL // 12):
+        raise AssertionError("Assertion failed")
+    if not (b == rmc.PEDAL_SENTINEL % 12):
+        raise AssertionError("Assertion failed")
+    if not ((c, d) == (10, 7)):
+        raise AssertionError("Assertion failed")
 
 
 def test_process_mido_message_dispatches(monkeypatch):
@@ -58,10 +64,14 @@ def test_process_mido_message_dispatches(monkeypatch):
     rmc.process_mido_message(SimpleNamespace(type="control_change", control=64, value=70))
     rmc.process_mido_message(SimpleNamespace(type="clock"))
 
-    assert calls[0] == ("note", 60, 100, False)
-    assert calls[1] == ("note", 60, 0, True)
-    assert calls[2] == ("note", 61, 0, True)
-    assert calls[3] == ("pedal", 70)
+    if not (calls[0] == ("note", 60, 100, False)):
+        raise AssertionError("Assertion failed")
+    if not (calls[1] == ("note", 60, 0, True)):
+        raise AssertionError("Assertion failed")
+    if not (calls[2] == ("note", 61, 0, True)):
+        raise AssertionError("Assertion failed")
+    if not (calls[3] == ("pedal", 70)):
+        raise AssertionError("Assertion failed")
 
 
 def test_encode_and_send_message_falls_back_when_batched_send_fails(monkeypatch):
@@ -73,11 +83,14 @@ def test_encode_and_send_message_falls_back_when_batched_send_fails(monkeypatch)
 
     rmc.encode_and_send_message(1, 2, 3, 4)
 
-    assert rmc._use_batched_sendinput is False
+    if not (rmc._use_batched_sendinput is False):
+        raise AssertionError("Assertion failed")
 
     rmc.encode_and_send_message(1, 2, 3, 4)
-    assert tapped[0] == "multiply"
-    assert tapped[1:5] == ["numpad1", "numpad2", "numpad3", "numpad4"]
+    if not (tapped[0] == "multiply"):
+        raise AssertionError("Assertion failed")
+    if not (tapped[1:5] == ["numpad1", "numpad2", "numpad3", "numpad4"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_ensure_numlock_windows_path_taps_when_off(monkeypatch):
@@ -96,7 +109,8 @@ def test_ensure_numlock_windows_path_taps_when_off(monkeypatch):
 
     rmc.ensure_numlock_on()
 
-    assert kb.taps == ["NUMLOCK"]
+    if not (kb.taps == ["NUMLOCK"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_ensure_numlock_windows_handles_exception(monkeypatch):
@@ -130,7 +144,8 @@ def test_tap_key_pydirectinput_and_pynput_paths(monkeypatch):
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
     monkeypatch.setattr(rmc, "pydirectinput", _PDI, raising=False)
     rmc._tap_key("numpad1")
-    assert pdi_calls == [("down", "numpad1"), ("up", "numpad1")]
+    if not (pdi_calls == [("down", "numpad1"), ("up", "numpad1")]):
+        raise AssertionError("Assertion failed")
 
     presses = []
     monkeypatch.setattr(rmc, "_use_pydirectinput", False)
@@ -146,20 +161,25 @@ def test_tap_key_pydirectinput_and_pynput_paths(monkeypatch):
 
     monkeypatch.setattr(rmc, "_keyboard", _KBCtrl())
     rmc._tap_key("numpad2")
-    assert presses == [("press", "KC2"), ("release", "KC2")]
+    if not (presses == [("press", "KC2"), ("release", "KC2")]):
+        raise AssertionError("Assertion failed")
 
 
 def test_set_macos_cgevent_and_is_using_pydirectinput(monkeypatch):
     monkeypatch.setattr(rmc, "_use_pydirectinput", False)
-    assert rmc.is_using_pydirectinput() is False
+    if not (rmc.is_using_pydirectinput() is False):
+        raise AssertionError("Assertion failed")
 
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
-    assert rmc.is_using_pydirectinput() is True
+    if not (rmc.is_using_pydirectinput() is True):
+        raise AssertionError("Assertion failed")
 
     rmc.set_macos_cgevent(True)
-    assert rmc._use_macos_cgevent is True
+    if not (rmc._use_macos_cgevent is True):
+        raise AssertionError("Assertion failed")
     rmc.set_macos_cgevent(False)
-    assert rmc._use_macos_cgevent is False
+    if not (rmc._use_macos_cgevent is False):
+        raise AssertionError("Assertion failed")
 
 
 def test_reset_batched_sendinput_branches(monkeypatch):
@@ -168,11 +188,13 @@ def test_reset_batched_sendinput_branches(monkeypatch):
     monkeypatch.setattr(rmc, "_use_batched_sendinput", False)
 
     rmc.reset_batched_sendinput()
-    assert rmc._use_batched_sendinput is True
+    if not (rmc._use_batched_sendinput is True):
+        raise AssertionError("Assertion failed")
 
     monkeypatch.setattr(rmc, "_use_batched_sendinput", True)
     rmc.reset_batched_sendinput()
-    assert rmc._use_batched_sendinput is True
+    if not (rmc._use_batched_sendinput is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_reset_batched_sendinput_noop_non_windows(monkeypatch):
@@ -181,7 +203,8 @@ def test_reset_batched_sendinput_noop_non_windows(monkeypatch):
     monkeypatch.setattr(rmc, "_use_batched_sendinput", False)
 
     rmc.reset_batched_sendinput()
-    assert rmc._use_batched_sendinput is False
+    if not (rmc._use_batched_sendinput is False):
+        raise AssertionError("Assertion failed")
 
 
 def test_ensure_numlock_returns_when_already_ensured(monkeypatch):
@@ -201,7 +224,8 @@ def test_ensure_numlock_non_windows_noop(monkeypatch):
     monkeypatch.setattr(rmc, "_numlock_ensured", False)
     monkeypatch.setattr(rmc, "_platform", "Linux")
     rmc.ensure_numlock_on()
-    assert rmc._numlock_ensured is True
+    if not (rmc._numlock_ensured is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_tap_key_handles_pydirectinput_exception(monkeypatch):
@@ -221,7 +245,8 @@ def test_tap_key_handles_pydirectinput_exception(monkeypatch):
     monkeypatch.setattr(rmc, "pydirectinput", _PDI, raising=False)
 
     rmc._tap_key("numpad1")
-    assert any("pydirectinput key send failed" in m for m in logs)
+    if not (any("pydirectinput key send failed" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_tap_key_macos_cgevent_paths(monkeypatch):
@@ -241,7 +266,8 @@ def test_tap_key_macos_cgevent_paths(monkeypatch):
     monkeypatch.setitem(sys.modules, "native", _Native)
     rmc._tap_key("numpad1")
 
-    assert events == [(42, True, 0), (42, False, 0)]
+    if not (events == [(42, True, 0), (42, False, 0)]):
+        raise AssertionError("Assertion failed")
 
 
 def test_tap_key_macos_cgevent_logs_on_exception(monkeypatch):
@@ -262,7 +288,8 @@ def test_tap_key_macos_cgevent_logs_on_exception(monkeypatch):
     monkeypatch.setitem(sys.modules, "native", _Native)
     rmc._tap_key("numpad1")
 
-    assert any("macOS CGEvent key send failed" in m for m in logs)
+    if not (any("macOS CGEvent key send failed" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_tap_key_pynput_exception_branch(monkeypatch):
@@ -282,7 +309,8 @@ def test_tap_key_pynput_exception_branch(monkeypatch):
     monkeypatch.setattr(rmc, "_keyboard", _KBCtrl())
     rmc._tap_key("numpad2")
 
-    assert any("pynput key send failed" in m for m in logs)
+    if not (any("pynput key send failed" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_send_frame_batched_writes_scans_and_checks_result(monkeypatch):
@@ -311,8 +339,10 @@ def test_send_frame_batched_writes_scans_and_checks_result(monkeypatch):
 
     ok = rmc._send_frame_batched(1, 2, 3, 4, 5)
 
-    assert ok is True
-    assert [frame[i].ii.ki.wScan for i in range(10)] == [1, 1, 2, 2, 3, 3, 4, 4, 5, 5]
+    if not (ok is True):
+        raise AssertionError("Assertion failed")
+    if not ([frame[i].ii.ki.wScan for i in range(10)] == [1, 1, 2, 2, 3, 3, 4, 4, 5, 5]):
+        raise AssertionError("Assertion failed")
 
 
 def test_encode_and_send_message_clamps_indices(monkeypatch):
@@ -323,7 +353,8 @@ def test_encode_and_send_message_clamps_indices(monkeypatch):
 
     rmc.encode_and_send_message(-5, 999, 2, 3)
 
-    assert sent == ["multiply", "numpad0", "add", "numpad2", "numpad3"]
+    if not (sent == ["multiply", "numpad0", "add", "numpad2", "numpad3"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_encode_and_send_message_uses_delay(monkeypatch):
@@ -336,9 +367,12 @@ def test_encode_and_send_message_uses_delay(monkeypatch):
 
     rmc.encode_and_send_message(1, 2, 3, 4, inter_key_delay=0.01)
 
-    assert sent[0] == "multiply"
-    assert sent[1:] == ["numpad1", "numpad2", "numpad3", "numpad4"]
-    assert sleeps == [0.01, 0.01, 0.01, 0.01]
+    if not (sent[0] == "multiply"):
+        raise AssertionError("Assertion failed")
+    if not (sent[1:] == ["numpad1", "numpad2", "numpad3", "numpad4"]):
+        raise AssertionError("Assertion failed")
+    if not (sleeps == [0.01, 0.01, 0.01, 0.01]):
+        raise AssertionError("Assertion failed")
 
 
 def test_send_note_message_passes_encoded_components(monkeypatch):
@@ -347,7 +381,8 @@ def test_send_note_message_passes_encoded_components(monkeypatch):
 
     rmc.send_note_message(61, 100, False)
 
-    assert sent and sent[0][:4] == rmc._encode_note_components(61, 100, False)
+    if not (sent and sent[0][:4] == rmc._encode_note_components(61, 100, False)):
+        raise AssertionError("Assertion failed")
 
 
 def test_send_pedal_clamps_value(monkeypatch):
@@ -357,8 +392,10 @@ def test_send_pedal_clamps_value(monkeypatch):
     rmc.send_pedal(999)
 
     a, b, c, d = sent[0]
-    assert (a, b) == (rmc.PEDAL_SENTINEL // 12, rmc.PEDAL_SENTINEL % 12)
-    assert (c, d) == (10, 7)
+    if not ((a, b) == (rmc.PEDAL_SENTINEL // 12, rmc.PEDAL_SENTINEL % 12)):
+        raise AssertionError("Assertion failed")
+    if not ((c, d) == (10, 7)):
+        raise AssertionError("Assertion failed")
 
 
 def test_encode_and_send_message_emits_exact_rmc_key_sequence(monkeypatch):
@@ -369,7 +406,8 @@ def test_encode_and_send_message_emits_exact_rmc_key_sequence(monkeypatch):
 
     rmc.encode_and_send_message(5, 0, 8, 4)
 
-    assert sent == ["multiply", "numpad5", "numpad0", "numpad8", "numpad4"]
+    if not (sent == ["multiply", "numpad5", "numpad0", "numpad8", "numpad4"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_send_note_message_note_off_uses_zero_velocity_digits(monkeypatch):
@@ -378,7 +416,8 @@ def test_send_note_message_note_off_uses_zero_velocity_digits(monkeypatch):
 
     rmc.send_note_message(73, 120, True)
 
-    assert sent == [(6, 1, 0, 0)]
+    if not (sent == [(6, 1, 0, 0)]):
+        raise AssertionError("Assertion failed")
 
 
 def test_process_mido_message_note_missing_and_non_pedal_cc(monkeypatch):
@@ -389,13 +428,16 @@ def test_process_mido_message_note_missing_and_non_pedal_cc(monkeypatch):
     rmc.process_mido_message(SimpleNamespace(type="note_on", velocity=100))
     rmc.process_mido_message(SimpleNamespace(type="control_change", control=1, value=70))
 
-    assert calls == []
+    if not (calls == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_encode_note_components_note_off_and_clamped_velocity():
-    assert rmc._encode_note_components(60, 90, True) == (5, 0, 0, 0)
+    if not (rmc._encode_note_components(60, 90, True) == (5, 0, 0, 0)):
+        raise AssertionError("Assertion failed")
     a, b, c, d = rmc._encode_note_components(60, -10, False)
-    assert (a, b, c, d) == (5, 0, 0, 0)
+    if not ((a, b, c, d) == (5, 0, 0, 0)):
+        raise AssertionError("Assertion failed")
 
 
 def test_import_sets_pydirectinput_false_on_import_error(monkeypatch):
@@ -411,7 +453,8 @@ def test_import_sets_pydirectinput_false_on_import_error(monkeypatch):
 
     mod = importlib.reload(rmc)
     try:
-        assert mod._use_pydirectinput is False
+        if not (mod._use_pydirectinput is False):
+            raise AssertionError("Assertion failed")
     finally:
         importlib.reload(mod)
 
@@ -428,7 +471,9 @@ def test_import_leaves_keyboard_none_when_pynput_missing(monkeypatch):
 
     mod = importlib.reload(rmc)
     try:
-        assert mod._kb is None
-        assert mod._keyboard is None
+        if not (mod._kb is None):
+            raise AssertionError("Assertion failed")
+        if not (mod._keyboard is None):
+            raise AssertionError("Assertion failed")
     finally:
         importlib.reload(mod)

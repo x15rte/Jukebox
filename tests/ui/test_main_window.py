@@ -59,11 +59,14 @@ def test_init_raises_runtime_error_on_invalid_config_bindings(
 def test_set_current_file_labels_updates_widgets(qtbot, monkeypatch, tmp_path):
     w = _make_window(qtbot, monkeypatch, tmp_path)
     w._set_current_file_labels("C:/tmp/song.mid")
-    assert w.file_path_label.text() == "song.mid"
-    assert w.current_file_bottom_label.text() == "song.mid"
+    if not (w.file_path_label.text() == "song.mid"):
+        raise AssertionError("Assertion failed")
+    if not (w.current_file_bottom_label.text() == "song.mid"):
+        raise AssertionError("Assertion failed")
 
     w._set_current_file_labels(None)
-    assert w.file_path_label.text() == "No file selected."
+    if not (w.file_path_label.text() == "No file selected."):
+        raise AssertionError("Assertion failed")
 
 
 def test_handle_live_midi_message_routes_to_backend(qtbot, monkeypatch, tmp_path):
@@ -77,11 +80,16 @@ def test_handle_live_midi_message_routes_to_backend(qtbot, monkeypatch, tmp_path
     w._handle_live_midi_message(SimpleNamespace(type="control_change", control=64, value=127))
     w._handle_live_midi_message(SimpleNamespace(type="control_change", control=64, value=0))
 
-    assert backend.calls[0] == ("note_on", 60, 90)
-    assert backend.calls[1] == ("note_off", 60)
-    assert backend.calls[2] == ("note_off", 61)
-    assert backend.calls[3] == ("pedal_on",)
-    assert backend.calls[4] == ("pedal_off",)
+    if not (backend.calls[0] == ("note_on", 60, 90)):
+        raise AssertionError("Assertion failed")
+    if not (backend.calls[1] == ("note_off", 60)):
+        raise AssertionError("Assertion failed")
+    if not (backend.calls[2] == ("note_off", 61)):
+        raise AssertionError("Assertion failed")
+    if not (backend.calls[3] == ("pedal_on",)):
+        raise AssertionError("Assertion failed")
+    if not (backend.calls[4] == ("pedal_off",)):
+        raise AssertionError("Assertion failed")
 
 
 def test_gather_config_without_tracks_shows_warning(qtbot, monkeypatch, tmp_path):
@@ -91,8 +99,10 @@ def test_gather_config_without_tracks_shows_warning(qtbot, monkeypatch, tmp_path
     monkeypatch.setattr("main_window.QMessageBox.warning", lambda *a, **k: warnings.append(True))
 
     cfg = w.gather_config()
-    assert cfg is None
-    assert warnings == [True]
+    if not (cfg is None):
+        raise AssertionError("Assertion failed")
+    if not (warnings == [True]):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_midi_input_finished_resets_state(qtbot, monkeypatch, tmp_path):
@@ -103,17 +113,23 @@ def test_on_midi_input_finished_resets_state(qtbot, monkeypatch, tmp_path):
 
     w._on_midi_input_finished()
 
-    assert w.midi_input_active is False
-    assert w.midi_input_thread is None
-    assert w.midi_input_worker is None
-    assert w.midi_input_connect_btn.isEnabled() is True
-    assert w.midi_input_disconnect_btn.isEnabled() is False
+    if not (w.midi_input_active is False):
+        raise AssertionError("Assertion failed")
+    if not (w.midi_input_thread is None):
+        raise AssertionError("Assertion failed")
+    if not (w.midi_input_worker is None):
+        raise AssertionError("Assertion failed")
+    if not (w.midi_input_connect_btn.isEnabled() is True):
+        raise AssertionError("Assertion failed")
+    if not (w.midi_input_disconnect_btn.isEnabled() is False):
+        raise AssertionError("Assertion failed")
 
 
 def test_log_message_to_plain_strips_tags(qtbot, monkeypatch, tmp_path):
     w = _make_window(qtbot, monkeypatch, tmp_path)
     out = w._log_message_to_plain("<b>Hello &amp; bye</b>")
-    assert out == "Hello & bye"
+    if not (out == "Hello & bye"):
+        raise AssertionError("Assertion failed")
 
 
 def test_toggle_playback_state_paused_resumes_and_scrubs(qtbot, monkeypatch, tmp_path):
@@ -136,8 +152,10 @@ def test_toggle_playback_state_paused_resumes_and_scrubs(qtbot, monkeypatch, tmp
 
     w.toggle_playback_state()
 
-    assert called["toggle"] == 1
-    assert called["scrub"] == [1.23]
+    if not (called["toggle"] == 1):
+        raise AssertionError("Assertion failed")
+    if not (called["scrub"] == [1.23]):
+        raise AssertionError("Assertion failed")
 
 
 def test_toggle_playback_state_stopped_starts_play(qtbot, monkeypatch, tmp_path):
@@ -152,7 +170,8 @@ def test_toggle_playback_state_stopped_starts_play(qtbot, monkeypatch, tmp_path)
     monkeypatch.setattr(w, "handle_play", lambda: called.append(True))
 
     w.toggle_playback_state()
-    assert called == [True]
+    if not (called == [True]):
+        raise AssertionError("Assertion failed")
 
 
 def test_update_play_stop_labels_for_states(qtbot, monkeypatch, tmp_path):
@@ -160,15 +179,18 @@ def test_update_play_stop_labels_for_states(qtbot, monkeypatch, tmp_path):
 
     w.playback_state = "stopped"
     w._update_play_stop_labels()
-    assert "Play" in w.play_button.text()
+    if not ("Play" in w.play_button.text()):
+        raise AssertionError("Assertion failed")
 
     w.playback_state = "paused"
     w._update_play_stop_labels()
-    assert "Resume" in w.play_button.text()
+    if not ("Resume" in w.play_button.text()):
+        raise AssertionError("Assertion failed")
 
     w.playback_state = "playing"
     w._update_play_stop_labels()
-    assert "Pause" in w.play_button.text()
+    if not ("Pause" in w.play_button.text()):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_input_mode_changed_piano_and_back(qtbot, monkeypatch, tmp_path):
@@ -180,12 +202,14 @@ def test_on_input_mode_changed_piano_and_back(qtbot, monkeypatch, tmp_path):
 
     w.input_mode_piano_radio.setChecked(True)
     w._on_input_mode_changed()
-    assert refresh_calls
+    if not (refresh_calls):
+        raise AssertionError("Assertion failed")
 
     w.midi_input_active = True
     w.input_mode_file_radio.setChecked(True)
     w._on_input_mode_changed()
-    assert len(disconnect_calls) >= 1
+    if not (len(disconnect_calls) >= 1):
+        raise AssertionError("Assertion failed")
 
 
 def test_refresh_midi_inputs_populates_combo(qtbot, monkeypatch, tmp_path):
@@ -194,8 +218,10 @@ def test_refresh_midi_inputs_populates_combo(qtbot, monkeypatch, tmp_path):
 
     w._refresh_midi_inputs()
 
-    assert w.midi_input_combo.count() == 2
-    assert w.midi_input_combo.itemText(0) == "A"
+    if not (w.midi_input_combo.count() == 2):
+        raise AssertionError("Assertion failed")
+    if not (w.midi_input_combo.itemText(0) == "A"):
+        raise AssertionError("Assertion failed")
 
 
 def test_update_88_key_visibility_follows_output_mode(qtbot, monkeypatch, tmp_path):
@@ -206,11 +232,13 @@ def test_update_88_key_visibility_follows_output_mode(qtbot, monkeypatch, tmp_pa
 
     w.output_mode_combo.setCurrentIndex(idx_key)
     w._update_88_key_visibility()
-    assert w.use_88_key_check.isHidden() is False
+    if not (w.use_88_key_check.isHidden() is False):
+        raise AssertionError("Assertion failed")
 
     w.output_mode_combo.setCurrentIndex(idx_num)
     w._update_88_key_visibility()
-    assert w.use_88_key_check.isHidden() is True
+    if not (w.use_88_key_check.isHidden() is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_handle_stop_and_reset_call_controller(qtbot, monkeypatch, tmp_path):
@@ -235,8 +263,10 @@ def test_handle_stop_and_reset_call_controller(qtbot, monkeypatch, tmp_path):
     w.handle_stop()
     w.handle_reset()
 
-    assert calls["stop"] == 1
-    assert calls["seek"] == [0]
+    if not (calls["stop"] == 1):
+        raise AssertionError("Assertion failed")
+    if not (calls["seek"] == [0]):
+        raise AssertionError("Assertion failed")
 
 
 def test_close_event_stops_everything(qtbot, monkeypatch, tmp_path):
@@ -274,12 +304,18 @@ def test_close_event_stops_everything(qtbot, monkeypatch, tmp_path):
     e = E()
     w.closeEvent(cast(Any, e))
 
-    assert ("save", None) in events
-    assert ("disconnect", None) in events
-    assert ("live_shutdown", None) in events
-    assert ("stop_and_wait", 1000) in events
-    assert ("hk_stop", None) in events
-    assert e.accepted is True
+    if not (("save", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (("disconnect", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (("live_shutdown", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (("stop_and_wait", 1000) in events):
+        raise AssertionError("Assertion failed")
+    if not (("hk_stop", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (e.accepted is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_toggle_always_on_top_no_show_when_not_visible(qtbot, monkeypatch, tmp_path):
@@ -289,13 +325,15 @@ def test_toggle_always_on_top_no_show_when_not_visible(qtbot, monkeypatch, tmp_p
     monkeypatch.setattr(w, "show", lambda: shown.append(True))
 
     w._toggle_always_on_top(True)
-    assert shown == []
+    if not (shown == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_update_time_label_format(qtbot, monkeypatch, tmp_path):
     w = _make_window(qtbot, monkeypatch, tmp_path)
     w._update_time_label(61, 125)
-    assert w.time_label.text() == "01:01 / 02:05"
+    if not (w.time_label.text() == "01:01 / 02:05"):
+        raise AssertionError("Assertion failed")
 
 
 def test_copy_log_to_clipboard(qtbot, monkeypatch, tmp_path):
@@ -309,14 +347,17 @@ def test_copy_log_to_clipboard(qtbot, monkeypatch, tmp_path):
     monkeypatch.setattr("main_window.QApplication.clipboard", lambda: Clip())
     w.log_output.setPlainText("hello")
     w._copy_log_to_clipboard()
-    assert copied["text"] == "hello"
+    if not (copied["text"] == "hello"):
+        raise AssertionError("Assertion failed")
 
 
 def test_get_log_file_path_uses_config_dir(qtbot, monkeypatch, tmp_path):
     w = _make_window(qtbot, monkeypatch, tmp_path)
     p = w._get_log_file_path()
-    assert p.name == "log.txt"
-    assert str(tmp_path) in str(p)
+    if not (p.name == "log.txt"):
+        raise AssertionError("Assertion failed")
+    if not (str(tmp_path) in str(p)):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_playback_finished_resets_controls(qtbot, monkeypatch, tmp_path):
@@ -327,9 +368,12 @@ def test_on_playback_finished_resets_controls(qtbot, monkeypatch, tmp_path):
 
     w.on_playback_finished()
 
-    assert "clear" in events
-    assert ("controls", True) in events
-    assert w.stop_button.isEnabled() is False
+    if not ("clear" in events):
+        raise AssertionError("Assertion failed")
+    if not (("controls", True) in events):
+        raise AssertionError("Assertion failed")
+    if not (w.stop_button.isEnabled() is False):
+        raise AssertionError("Assertion failed")
 
 
 def test_set_controls_enabled_sets_groupboxes(qtbot, monkeypatch, tmp_path):
@@ -337,10 +381,12 @@ def test_set_controls_enabled_sets_groupboxes(qtbot, monkeypatch, tmp_path):
     groups = w.findChildren(type(w.settings_group))
 
     w.set_controls_enabled(False)
-    assert all(not g.isEnabled() for g in groups)
+    if not (all(not g.isEnabled() for g in groups)):
+        raise AssertionError("Assertion failed")
 
     w.set_controls_enabled(True)
-    assert all(g.isEnabled() for g in groups)
+    if not (all(g.isEnabled() for g in groups)):
+        raise AssertionError("Assertion failed")
 
 
 def test_check_macos_accessibility_opens_settings_when_requested(
@@ -385,7 +431,8 @@ def test_check_macos_accessibility_opens_settings_when_requested(
 
     w._check_macos_accessibility()
 
-    assert opened == [True]
+    if not (opened == [True]):
+        raise AssertionError("Assertion failed")
 
 
 def test_change_hotkey_starts_binding_and_dialog(qtbot, monkeypatch, tmp_path):
@@ -398,10 +445,14 @@ def test_change_hotkey_starts_binding_and_dialog(qtbot, monkeypatch, tmp_path):
 
     w._change_hotkey()
 
-    assert started == [True]
-    assert infos == [True]
-    assert w.hk_btn.isEnabled() is False
-    assert w.hk_btn.text() == "Listening..."
+    if not (started == [True]):
+        raise AssertionError("Assertion failed")
+    if not (infos == [True]):
+        raise AssertionError("Assertion failed")
+    if not (w.hk_btn.isEnabled() is False):
+        raise AssertionError("Assertion failed")
+    if not (w.hk_btn.text() == "Listening..."):
+        raise AssertionError("Assertion failed")
 
 
 def test_update_playback_tab_appearance_locked_and_unlocked(qtbot, monkeypatch, tmp_path):
@@ -409,11 +460,13 @@ def test_update_playback_tab_appearance_locked_and_unlocked(qtbot, monkeypatch, 
 
     w.playback_state = "playing"
     w._update_playback_tab_appearance()
-    assert "locked" in w.tabs.tabToolTip(0).lower()
+    if not ("locked" in w.tabs.tabToolTip(0).lower()):
+        raise AssertionError("Assertion failed")
 
     w.playback_state = "stopped"
     w._update_playback_tab_appearance()
-    assert w.tabs.tabToolTip(0) == ""
+    if not (w.tabs.tabToolTip(0) == ""):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_tab_changed_when_locked_shows_dialog_and_redirects(
@@ -427,8 +480,10 @@ def test_on_tab_changed_when_locked_shows_dialog_and_redirects(
     w.tabs.setCurrentIndex(2)
     w._on_tab_changed(0)
 
-    assert infos == [True]
-    assert w.tabs.currentIndex() == 1
+    if not (infos == [True]):
+        raise AssertionError("Assertion failed")
+    if not (w.tabs.currentIndex() == 1):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_timeline_seek_logs_and_calls_controller_when_running(
@@ -452,8 +507,10 @@ def test_on_timeline_seek_logs_and_calls_controller_when_running(
 
     w._on_timeline_seek(1.25)
 
-    assert logs and "Seeking to 1.25s" in logs[0]
-    assert seeks == [1.25]
+    if not (logs and "Seeking to 1.25s" in logs[0]):
+        raise AssertionError("Assertion failed")
+    if not (seeks == [1.25]):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_log_save_to_file_toggled_enables_and_disables(qtbot, monkeypatch, tmp_path):
@@ -468,9 +525,12 @@ def test_on_log_save_to_file_toggled_enables_and_disables(qtbot, monkeypatch, tm
     w._on_log_save_to_file_toggled(True)
     w._on_log_save_to_file_toggled(False)
 
-    assert any(e[0] == "enable" for e in events)
-    assert any(e[0] == "disable" for e in events)
-    assert [e for e in events if e[0] == "save"]
+    if not (any(e[0] == "enable" for e in events)):
+        raise AssertionError("Assertion failed")
+    if not (any(e[0] == "disable" for e in events)):
+        raise AssertionError("Assertion failed")
+    if not ([e for e in events if e[0] == "save"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_status_updated_routes_levels(qtbot, monkeypatch, tmp_path):
@@ -487,9 +547,12 @@ def test_on_status_updated_routes_levels(qtbot, monkeypatch, tmp_path):
     w._on_status_updated("warning: heads up")
     w._on_status_updated("all good")
 
-    assert errors == ["Error: boom"]
-    assert warnings == ["warning: heads up"]
-    assert infos == ["all good"]
+    if not (errors == ["Error: boom"]):
+        raise AssertionError("Assertion failed")
+    if not (warnings == ["warning: heads up"]):
+        raise AssertionError("Assertion failed")
+    if not (infos == ["all good"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_append_log_error_multiline_and_trim(qtbot, monkeypatch, tmp_path):
@@ -499,8 +562,10 @@ def test_append_log_error_multiline_and_trim(qtbot, monkeypatch, tmp_path):
     w._append_log("ERROR", "boom\ntrace line")
     w._append_log("INFO", "ok")
 
-    assert len(w._log_entries) == 1
-    assert w._log_entries[0]["level"] == "INFO"
+    if not (len(w._log_entries) == 1):
+        raise AssertionError("Assertion failed")
+    if not (w._log_entries[0]["level"] == "INFO"):
+        raise AssertionError("Assertion failed")
 
 
 def test_save_config_logs_error_on_oserror(qtbot, monkeypatch, tmp_path):
@@ -521,9 +586,12 @@ def test_save_config_logs_error_on_oserror(qtbot, monkeypatch, tmp_path):
 
     w._save_config()
 
-    assert errors
-    assert "Error saving config" in errors[0][0]
-    assert errors[0][1].get("show_dialog") is True
+    if not (errors):
+        raise AssertionError("Assertion failed")
+    if not ("Error saving config" in errors[0][0]):
+        raise AssertionError("Assertion failed")
+    if not (errors[0][1].get("show_dialog") is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_load_config_handles_config_load_error(qtbot, monkeypatch, tmp_path):
@@ -538,9 +606,12 @@ def test_load_config_handles_config_load_error(qtbot, monkeypatch, tmp_path):
 
     w._load_config()
 
-    assert any("Config file could not be loaded" in e[1] for e in events if e[0] == "error")
-    assert ("reset", None) in events
-    assert ("enabled", None) in events
+    if not (any("Config file could not be loaded" in e[1] for e in events if e[0] == "error")):
+        raise AssertionError("Assertion failed")
+    if not (("reset", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (("enabled", None) in events):
+        raise AssertionError("Assertion failed")
 
 
 def test_load_config_success_applies_effects_and_updates(qtbot, monkeypatch, tmp_path):
@@ -559,11 +630,16 @@ def test_load_config_success_applies_effects_and_updates(qtbot, monkeypatch, tmp
 
     w._load_config()
 
-    assert ("apply", cfg) in events
-    assert ("effects", cfg) in events
-    assert ("enabled", None) in events
-    assert ("vis", None) in events
-    assert ("labels", None) in events
+    if not (("apply", cfg) in events):
+        raise AssertionError("Assertion failed")
+    if not (("effects", cfg) in events):
+        raise AssertionError("Assertion failed")
+    if not (("enabled", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (("vis", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (("labels", None) in events):
+        raise AssertionError("Assertion failed")
 
 
 def test_connect_midi_input_no_device_and_running_playback_stops_first(
@@ -587,9 +663,12 @@ def test_connect_midi_input_no_device_and_running_playback_stops_first(
 
     w._connect_midi_input()
 
-    assert ("stop", None) in events
-    assert any(e[0] == "warn" for e in events)
-    assert ("dialog", None) in events
+    if not (("stop", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (any(e[0] == "warn" for e in events)):
+        raise AssertionError("Assertion failed")
+    if not (("dialog", None) in events):
+        raise AssertionError("Assertion failed")
 
 
 def test_disconnect_midi_input_handles_worker_stop_exception(
@@ -617,10 +696,14 @@ def test_disconnect_midi_input_handles_worker_stop_exception(
 
     w._disconnect_midi_input()
 
-    assert ("release", None) in events
-    assert ("quit", None) in events
-    assert ("wait", 2000) in events
-    assert any(e[0] == "log" and "Error stopping MIDI input worker" in e[1] for e in events)
+    if not (("release", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (("quit", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (("wait", 2000) in events):
+        raise AssertionError("Assertion failed")
+    if not (any(e[0] == "log" and "Error stopping MIDI input worker" in e[1] for e in events)):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_midi_input_error_and_warning_routes_to_loggers(
@@ -636,13 +719,16 @@ def test_on_midi_input_error_and_warning_routes_to_loggers(
     w._on_midi_input_error("bad port")
     w._on_midi_input_warning("heads up")
 
-    assert errs and "MIDI input connection failed" in errs[0][0]
-    assert warns == ["MIDI input worker: heads up"]
+    if not (errs and "MIDI input connection failed" in errs[0][0]):
+        raise AssertionError("Assertion failed")
+    if not (warns == ["MIDI input worker: heads up"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_log_message_to_plain_empty_and_fallback(qtbot, monkeypatch, tmp_path):
     w = _make_window(qtbot, monkeypatch, tmp_path)
-    assert w._log_message_to_plain("") == ""
+    if not (w._log_message_to_plain("") == ""):
+        raise AssertionError("Assertion failed")
 
     import builtins
 
@@ -655,7 +741,8 @@ def test_log_message_to_plain_empty_and_fallback(qtbot, monkeypatch, tmp_path):
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     out = w._log_message_to_plain("<b>x</b>")
-    assert out == "x"
+    if not (out == "x"):
+        raise AssertionError("Assertion failed")
 
 
 def test_toggle_always_on_top_visible_reapplies_state(qtbot, monkeypatch, tmp_path):
@@ -668,7 +755,8 @@ def test_toggle_always_on_top_visible_reapplies_state(qtbot, monkeypatch, tmp_pa
     monkeypatch.setattr(w, "raise_", lambda: calls.append("raise"))
 
     w._toggle_always_on_top(True)
-    assert calls == ["show", "activate", "raise"]
+    if not (calls == ["show", "activate", "raise"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_update_playback_tab_appearance_no_tabs_attr_returns_early(
@@ -704,8 +792,10 @@ def test_on_playback_state_changed_updates_state_and_ui(
 
     w._on_playback_state_changed("paused")
 
-    assert w.playback_state == "paused"
-    assert events == ["labels", "tabs"]
+    if not (w.playback_state == "paused"):
+        raise AssertionError("Assertion failed")
+    if not (events == ["labels", "tabs"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_toggle_playback_state_returns_when_controller_missing(
@@ -721,7 +811,8 @@ def test_toggle_playback_state_returns_when_controller_missing(
 def test_create_info_icon_sets_tooltip(qtbot, monkeypatch, tmp_path):
     w = _make_window(qtbot, monkeypatch, tmp_path)
     icon = w._create_info_icon("tip")
-    assert icon.toolTip() == "tip"
+    if not (icon.toolTip() == "tip"):
+        raise AssertionError("Assertion failed")
 
 
 def test_connect_midi_input_when_already_active_noop(qtbot, monkeypatch, tmp_path):
@@ -732,7 +823,8 @@ def test_connect_midi_input_when_already_active_noop(qtbot, monkeypatch, tmp_pat
 
     w._connect_midi_input()
 
-    assert called == []
+    if not (called == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_refresh_midi_inputs_exception_path(qtbot, monkeypatch, tmp_path):
@@ -746,15 +838,18 @@ def test_refresh_midi_inputs_exception_path(qtbot, monkeypatch, tmp_path):
 
     w._refresh_midi_inputs(show_dialog=False)
 
-    assert errs and "Failed to list MIDI input devices" in errs[0][0]
-    assert errs[0][1].get("show_dialog") is False
+    if not (errs and "Failed to list MIDI input devices" in errs[0][0]):
+        raise AssertionError("Assertion failed")
+    if not (errs[0][1].get("show_dialog") is False):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_tab_changed_unlocked_updates_last_index(qtbot, monkeypatch, tmp_path):
     w = _make_window(qtbot, monkeypatch, tmp_path)
     w.playback_state = "stopped"
     w._on_tab_changed(2)
-    assert w._last_tab_index == 2
+    if not (w._last_tab_index == 2):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_timeline_seek_logs_even_when_not_running(qtbot, monkeypatch, tmp_path):
@@ -772,7 +867,8 @@ def test_on_timeline_seek_logs_even_when_not_running(qtbot, monkeypatch, tmp_pat
 
     w._on_timeline_seek(2.5)
 
-    assert logs and "Seeking to 2.50s" in logs[0]
+    if not (logs and "Seeking to 2.50s" in logs[0]):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_visual_scrub_sets_active_pitches(qtbot, monkeypatch, tmp_path):
@@ -789,7 +885,8 @@ def test_on_visual_scrub_sets_active_pitches(qtbot, monkeypatch, tmp_path):
 
     w._on_visual_scrub(0.75)
 
-    assert got[-1] == {60, 64}
+    if not (got[-1] == {60, 64}):
+        raise AssertionError("Assertion failed")
 
 
 def test_update_progress_updates_scroll_when_not_dragging(
@@ -821,8 +918,10 @@ def test_update_progress_updates_scroll_when_not_dragging(
 
     w.update_progress(2.0)
 
-    assert ("pos", 2.0) in events
-    assert any(e[0] == "scroll" for e in events)
+    if not (("pos", 2.0) in events):
+        raise AssertionError("Assertion failed")
+    if not (any(e[0] == "scroll" for e in events)):
+        raise AssertionError("Assertion failed")
 
 
 def test_update_progress_skips_when_dragging(qtbot, monkeypatch, tmp_path):
@@ -842,7 +941,8 @@ def test_update_progress_skips_when_dragging(qtbot, monkeypatch, tmp_path):
 
     w.update_progress(1.0)
 
-    assert events == []
+    if not (events == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_update_progress_no_scrollbar_branch(qtbot, monkeypatch, tmp_path):
@@ -867,8 +967,10 @@ def test_update_progress_no_scrollbar_branch(qtbot, monkeypatch, tmp_path):
 
     w.update_progress(1.0)
 
-    assert ("pos", 1.0) in events
-    assert any(e[0] == "label" for e in events)
+    if not (("pos", 1.0) in events):
+        raise AssertionError("Assertion failed")
+    if not (any(e[0] == "label" for e in events)):
+        raise AssertionError("Assertion failed")
 
 
 def test_reset_controls_to_default_logs_and_calls_resets(qtbot, monkeypatch, tmp_path):
@@ -881,15 +983,19 @@ def test_reset_controls_to_default_logs_and_calls_resets(qtbot, monkeypatch, tmp
 
     w._reset_controls_to_default()
 
-    assert any(e[0] == "log" for e in events)
-    assert ("playback", None) in events
-    assert ("human", None) in events
+    if not (any(e[0] == "log" for e in events)):
+        raise AssertionError("Assertion failed")
+    if not (("playback", None) in events):
+        raise AssertionError("Assertion failed")
+    if not (("human", None) in events):
+        raise AssertionError("Assertion failed")
 
 
 def test_current_output_mode_fallback_when_no_combo(qtbot, monkeypatch, tmp_path):
     w = _make_window(qtbot, monkeypatch, tmp_path)
     delattr(w, "output_mode_combo")
-    assert w._current_output_mode() == "key"
+    if not (w._current_output_mode() == "key"):
+        raise AssertionError("Assertion failed")
 
 
 def test_release_all_live_keys_no_backend_noop(qtbot, monkeypatch, tmp_path):
@@ -919,7 +1025,8 @@ def test_on_key_layout_changed_recreates_backend_when_active(
 
     w._on_key_layout_changed(True)
 
-    assert ("shutdown", None) in events
+    if not (("shutdown", None) in events):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_output_mode_changed_recreates_backend_when_active(
@@ -943,7 +1050,8 @@ def test_on_output_mode_changed_recreates_backend_when_active(
 
     w._on_output_mode_changed()
 
-    assert ("shutdown", None) in events
+    if not (("shutdown", None) in events):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_and_select_tracks_parse_error(qtbot, monkeypatch, tmp_path):
@@ -958,7 +1066,8 @@ def test_parse_and_select_tracks_parse_error(qtbot, monkeypatch, tmp_path):
 
     w._parse_and_select_tracks("x.mid")
 
-    assert errs and "Failed to parse MIDI" in errs[0][0]
+    if not (errs and "Failed to parse MIDI" in errs[0][0]):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_and_select_tracks_cancel_resets_file_label(
@@ -983,9 +1092,12 @@ def test_parse_and_select_tracks_cancel_resets_file_label(
 
     w._parse_and_select_tracks("x.mid")
 
-    assert w.selected_tracks_info is None
-    assert w.file_path_label.text() == "No file selected."
-    assert any("cancelled" in e[1] for e in events if e[0] == "log")
+    if not (w.selected_tracks_info is None):
+        raise AssertionError("Assertion failed")
+    if not (w.file_path_label.text() == "No file selected."):
+        raise AssertionError("Assertion failed")
+    if not (any("cancelled" in e[1] for e in events if e[0] == "log")):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_and_select_tracks_accept_builds_preview_and_updates_ui(
@@ -1021,12 +1133,18 @@ def test_parse_and_select_tracks_accept_builds_preview_and_updates_ui(
 
     w._parse_and_select_tracks("x.mid")
 
-    assert w.selected_tracks_info is not None
-    assert w.play_button.isEnabled() is True
-    assert w.reset_button.isEnabled() is True
-    assert w.total_song_duration_sec == pytest.approx(0.6)
-    assert any(ev[0] == "scrub" for ev in timeline_events)
-    assert any(ev[2] is tempo_map for ev in timeline_events if isinstance(ev, tuple) and len(ev) == 3)
+    if not (w.selected_tracks_info is not None):
+        raise AssertionError("Assertion failed")
+    if not (w.play_button.isEnabled() is True):
+        raise AssertionError("Assertion failed")
+    if not (w.reset_button.isEnabled() is True):
+        raise AssertionError("Assertion failed")
+    if not (w.total_song_duration_sec == pytest.approx(0.6)):
+        raise AssertionError("Assertion failed")
+    if not (any(ev[0] == "scrub" for ev in timeline_events)):
+        raise AssertionError("Assertion failed")
+    if not (any(ev[2] is tempo_map for ev in timeline_events if isinstance(ev, tuple) and len(ev) == 3)):
+        raise AssertionError("Assertion failed")
 
 
 def test_handle_play_running_toggles_state(qtbot, monkeypatch, tmp_path):
@@ -1044,7 +1162,8 @@ def test_handle_play_running_toggles_state(qtbot, monkeypatch, tmp_path):
 
     w.handle_play()
 
-    assert called == [True]
+    if not (called == [True]):
+        raise AssertionError("Assertion failed")
 
 
 def test_handle_play_returns_when_no_config(qtbot, monkeypatch, tmp_path):
@@ -1063,7 +1182,8 @@ def test_handle_play_returns_when_no_config(qtbot, monkeypatch, tmp_path):
 
     w.handle_play()
 
-    assert saved == []
+    if not (saved == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_handle_play_returns_when_tracks_missing_after_config(
@@ -1111,7 +1231,8 @@ def test_handle_play_prepare_error_logs(qtbot, monkeypatch, tmp_path):
 
     w.handle_play()
 
-    assert errs and "Error preparing playback" in errs[0][0]
+    if not (errs and "Error preparing playback" in errs[0][0]):
+        raise AssertionError("Assertion failed")
 
 
 def test_handle_play_success_sets_start_offset_and_starts_controller(
@@ -1160,12 +1281,16 @@ def test_handle_play_success_sets_start_offset_and_starts_controller(
 
     w.handle_play()
 
-    assert any(e[0] == "start" for e in events)
+    if not (any(e[0] == "start" for e in events)):
+        raise AssertionError("Assertion failed")
     start_call = [e for e in events if e[0] == "start"][0]
     start_cfg = start_call[1][1]
-    assert start_cfg["start_offset"] == pytest.approx(4.0)
-    assert any("KEY mode does not preserve MIDI velocity dynamics" in m for m in logs)
-    assert w.stop_button.isEnabled() is True
+    if not (start_cfg["start_offset"] == pytest.approx(4.0)):
+        raise AssertionError("Assertion failed")
+    if not (any("KEY mode does not preserve MIDI velocity dynamics" in m for m in logs)):
+        raise AssertionError("Assertion failed")
+    if not (w.stop_button.isEnabled() is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_handle_play_success_without_key_mode_skips_velocity_log(
@@ -1206,7 +1331,8 @@ def test_handle_play_success_without_key_mode_skips_velocity_log(
 
     w.handle_play()
 
-    assert not any("velocity dynamics" in m for m in logs)
+    if not (not any("velocity dynamics" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_hotkey_bound_updates_widgets(qtbot, monkeypatch, tmp_path):
@@ -1216,9 +1342,12 @@ def test_on_hotkey_bound_updates_widgets(qtbot, monkeypatch, tmp_path):
 
     w._on_hotkey_bound("f7")
 
-    assert w.hk_label.text().endswith("f7")
-    assert w.hk_btn.text() == "Change"
-    assert w.hk_btn.isEnabled() is True
+    if not (w.hk_label.text().endswith("f7")):
+        raise AssertionError("Assertion failed")
+    if not (w.hk_btn.text() == "Change"):
+        raise AssertionError("Assertion failed")
+    if not (w.hk_btn.isEnabled() is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_toggle_always_on_top_false_branch(qtbot, monkeypatch, tmp_path):
@@ -1252,8 +1381,10 @@ def test_on_input_mode_changed_forces_tab_zero_from_visualizer(
     w.input_mode_piano_radio.setChecked(True)
     w._on_input_mode_changed()
 
-    assert tabs.enabled == (1, False)
-    assert tabs.index == 0
+    if not (tabs.enabled == (1, False)):
+        raise AssertionError("Assertion failed")
+    if not (tabs.index == 0):
+        raise AssertionError("Assertion failed")
 
 
 def test_connect_midi_input_success_path(qtbot, monkeypatch, tmp_path):
@@ -1291,10 +1422,14 @@ def test_connect_midi_input_success_path(qtbot, monkeypatch, tmp_path):
 
     w._connect_midi_input()
 
-    assert w.midi_input_active is True
-    assert w.midi_input_connect_btn.isEnabled() is False
-    assert w.midi_input_disconnect_btn.isEnabled() is True
-    assert "Connecting to: P1" in w.midi_input_status_label.text()
+    if not (w.midi_input_active is True):
+        raise AssertionError("Assertion failed")
+    if not (w.midi_input_connect_btn.isEnabled() is False):
+        raise AssertionError("Assertion failed")
+    if not (w.midi_input_disconnect_btn.isEnabled() is True):
+        raise AssertionError("Assertion failed")
+    if not ("Connecting to: P1" in w.midi_input_status_label.text()):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_midi_input_connected_updates_ui_and_log(qtbot, monkeypatch, tmp_path):
@@ -1304,8 +1439,10 @@ def test_on_midi_input_connected_updates_ui_and_log(qtbot, monkeypatch, tmp_path
 
     w._on_midi_input_connected("PortA")
 
-    assert w.midi_input_status_label.text() == "Connected to: PortA"
-    assert any("Connected to MIDI input: PortA" in m for m in logs)
+    if not (w.midi_input_status_label.text() == "Connected to: PortA"):
+        raise AssertionError("Assertion failed")
+    if not (any("Connected to MIDI input: PortA" in m for m in logs)):
+        raise AssertionError("Assertion failed")
 
 
 def test_disconnect_midi_input_inactive_noop(qtbot, monkeypatch, tmp_path):
@@ -1323,7 +1460,8 @@ def test_handle_live_midi_message_guard_paths(qtbot, monkeypatch, tmp_path):
     w.live_backend = backend
     w._handle_live_midi_message(SimpleNamespace(type="note_on", note=None, velocity=100))
 
-    assert backend.calls == []
+    if not (backend.calls == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_toggle_all_humanization_and_select_all_state(qtbot, monkeypatch, tmp_path):
@@ -1331,11 +1469,13 @@ def test_toggle_all_humanization_and_select_all_state(qtbot, monkeypatch, tmp_pa
 
     w._toggle_all_humanization(True)
     checks = [c for c in w.all_humanization_checks.values() if c.text()]
-    assert all(c.isChecked() for c in checks)
+    if not (all(c.isChecked() for c in checks)):
+        raise AssertionError("Assertion failed")
 
     w.all_humanization_checks["vary_timing"].setChecked(False)
     w._update_select_all_state()
-    assert w.select_all_humanization_check.isChecked() is False
+    if not (w.select_all_humanization_check.isChecked() is False):
+        raise AssertionError("Assertion failed")
 
 
 def test_check_macos_accessibility_early_return_paths(qtbot, monkeypatch, tmp_path):
@@ -1366,9 +1506,12 @@ def test_log_warning_and_error_show_dialog_paths(qtbot, monkeypatch, tmp_path):
     w._log_warning("warn x")
     w._log_error("err x", show_dialog=True)
 
-    assert warns == ["warn x"]
-    assert errs and errs[0][0] == "err x"
-    assert dialogs == [True]
+    if not (warns == ["warn x"]):
+        raise AssertionError("Assertion failed")
+    if not (errs and errs[0][0] == "err x"):
+        raise AssertionError("Assertion failed")
+    if not (dialogs == [True]):
+        raise AssertionError("Assertion failed")
 
 
 def test_on_log_level_changed_sets_level_and_saves(qtbot, monkeypatch, tmp_path):
@@ -1380,8 +1523,10 @@ def test_on_log_level_changed_sets_level_and_saves(qtbot, monkeypatch, tmp_path)
 
     w._on_log_level_changed("DEBUG")
 
-    assert ("level", "DEBUG") in events
-    assert ("save", None) in events
+    if not (("level", "DEBUG") in events):
+        raise AssertionError("Assertion failed")
+    if not (("save", None) in events):
+        raise AssertionError("Assertion failed")
 
 
 def test_append_log_initializes_and_error_empty_details_branch(
@@ -1392,8 +1537,10 @@ def test_append_log_initializes_and_error_empty_details_branch(
 
     w._append_log("ERROR", "boom\n   ")
 
-    assert w._log_entries
-    assert "[ERROR]" in w._log_entries[-1]["html"]
+    if not (w._log_entries):
+        raise AssertionError("Assertion failed")
+    if not ("[ERROR]" in w._log_entries[-1]["html"]):
+        raise AssertionError("Assertion failed")
 
 
 def test_apply_log_filter_query_filters_out_nonmatching(qtbot, monkeypatch, tmp_path):
@@ -1406,8 +1553,10 @@ def test_apply_log_filter_query_filters_out_nonmatching(qtbot, monkeypatch, tmp_
 
     w._apply_log_filter()
 
-    assert "a" in w.log_output.toPlainText()
-    assert "b" not in w.log_output.toPlainText()
+    if not ("a" in w.log_output.toPlainText()):
+        raise AssertionError("Assertion failed")
+    if not ("b" not in w.log_output.toPlainText()):
+        raise AssertionError("Assertion failed")
 
 
 def test_update_enabled_states_ignores_non_text_check(qtbot, monkeypatch, tmp_path):
@@ -1431,8 +1580,10 @@ def test_gather_config_success_includes_midi_file(qtbot, monkeypatch, tmp_path):
 
     cfg = w.gather_config()
 
-    assert cfg is not None
-    assert cfg["midi_file"] == "C:/tmp/x.mid"
+    if not (cfg is not None):
+        raise AssertionError("Assertion failed")
+    if not (cfg["midi_file"] == "C:/tmp/x.mid"):
+        raise AssertionError("Assertion failed")
 
 
 def test_select_file_running_is_noop(qtbot, monkeypatch, tmp_path):
@@ -1452,7 +1603,8 @@ def test_select_file_running_is_noop(qtbot, monkeypatch, tmp_path):
 
     w.select_file()
 
-    assert called == []
+    if not (called == []):
+        raise AssertionError("Assertion failed")
 
 
 def test_select_file_success_calls_parser_and_updates_labels(
@@ -1477,8 +1629,10 @@ def test_select_file_success_calls_parser_and_updates_labels(
 
     w.select_file()
 
-    assert w.file_path_label.text() == "song.mid"
-    assert ("parse", "C:/tmp/song.mid") in events
+    if not (w.file_path_label.text() == "song.mid"):
+        raise AssertionError("Assertion failed")
+    if not (("parse", "C:/tmp/song.mid") in events):
+        raise AssertionError("Assertion failed")
 
 
 def test_parse_and_select_tracks_assigns_left_and_right_roles(
@@ -1510,8 +1664,10 @@ def test_parse_and_select_tracks_assigns_left_and_right_roles(
     w._parse_and_select_tracks("x.mid")
 
     hands = [n.hand for n in w.current_notes]
-    assert "left" in hands
-    assert "right" in hands
+    if not ("left" in hands):
+        raise AssertionError("Assertion failed")
+    if not ("right" in hands):
+        raise AssertionError("Assertion failed")
 
 
 def test_close_event_logs_save_config_exception(qtbot, monkeypatch, tmp_path):
@@ -1543,5 +1699,7 @@ def test_close_event_logs_save_config_exception(qtbot, monkeypatch, tmp_path):
     e = E()
     w.closeEvent(cast(Any, e))
 
-    assert e.accepted is True
-    assert any("Error during closeEvent cleanup" in m for m in logs)
+    if not (e.accepted is True):
+        raise AssertionError("Assertion failed")
+    if not (any("Error during closeEvent cleanup" in m for m in logs)):
+        raise AssertionError("Assertion failed")

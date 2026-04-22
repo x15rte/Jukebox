@@ -45,21 +45,27 @@ def test_controller_start_and_state_transitions(monkeypatch):
     monkeypatch.setattr("playback.playback_controller.Player", FakePlayer)
 
     ctrl.start([], {}, 1.0, "key", False, False)
-    assert ctrl.state == "playing"
-    assert ctrl.is_running
+    if not (ctrl.state == "playing"):
+        raise AssertionError("Assertion failed")
+    if not (ctrl.is_running):
+        raise AssertionError("Assertion failed")
 
     ctrl.toggle_pause()
-    assert ctrl.state == "paused"
+    if not (ctrl.state == "paused"):
+        raise AssertionError("Assertion failed")
     ctrl.toggle_pause()
-    assert ctrl.state == "playing"
+    if not (ctrl.state == "playing"):
+        raise AssertionError("Assertion failed")
 
     ctrl.seek(0.5)
     player = cast(Any, ctrl.player)
-    assert player.seek_calls[-1] == 0.5
+    if not (player.seek_calls[-1] == 0.5):
+        raise AssertionError("Assertion failed")
 
     ctrl.stop()
     player = cast(Any, ctrl.player)
-    assert player.stopped is True
+    if not (player.stopped is True):
+        raise AssertionError("Assertion failed")
 
 
 def test_controller_finishes_and_cleans_up(monkeypatch):
@@ -72,8 +78,11 @@ def test_controller_finishes_and_cleans_up(monkeypatch):
 
     ctrl.start([], {}, 1.0, "key", False, False)
     player = ctrl.player
-    assert player is not None
+    if not (player is not None):
+        raise AssertionError("Assertion failed")
 
     ctrl._on_playback_finished_internal()
-    assert ctrl.state == "stopped"
-    assert ctrl.player is None
+    if not (ctrl.state == "stopped"):
+        raise AssertionError("Assertion failed")
+    if not (ctrl.player is None):
+        raise AssertionError("Assertion failed")
