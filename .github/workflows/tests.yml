@@ -29,18 +29,18 @@ jobs:
           python -m pip install -r requirements-windows.txt -r requirements-test.txt
 
       - name: Run tests with coverage
-        run: |
-          python -m pytest \
-            --cov=core \
-            --cov=analysis \
-            --cov=playback \
-            --cov=output \
-            --cov=config_repository \
-            --cov=config_bindings \
-            --cov=main_window \
-            --cov=models \
-            --cov-report=term-missing \
-            --cov-report=xml
+        run: >
+          python -m pytest
+          --cov=core
+          --cov=analysis
+          --cov=playback
+          --cov=output
+          --cov=config_repository
+          --cov=config_bindings
+          --cov=main_window
+          --cov=models
+          --cov-report=term-missing
+          --cov-report=xml
 
       - name: Run static type checks
         run: |
