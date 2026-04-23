@@ -20,14 +20,10 @@ def test_compile_produces_press_release_pairs_sorted():
     ]
     events = EventCompiler.compile(notes, _section_for(notes), {"pedal_style": "none"})
 
-    if not (len(events) == 4):
-        raise AssertionError("Assertion failed")
-    if not (all(events[i].time <= events[i + 1].time for i in range(len(events) - 1))):
-        raise AssertionError("Assertion failed")
-    if not ([e.action for e in events].count("press") == 2):
-        raise AssertionError("Assertion failed")
-    if not ([e.action for e in events].count("release") == 2):
-        raise AssertionError("Assertion failed")
+    assert len(events) == 4
+    assert all(events[i].time <= events[i + 1].time for i in range(len(events) - 1))
+    assert [e.action for e in events].count("press") == 2
+    assert [e.action for e in events].count("release") == 2
 
 
 def test_compile_can_emit_mistake_notes(monkeypatch):
@@ -41,15 +37,13 @@ def test_compile_can_emit_mistake_notes(monkeypatch):
         {"enable_mistakes": True, "mistake_chance": 100, "pedal_style": "none"},
     )
     press_pitches = [e.pitch for e in events if e.action == "press"]
-    if not (press_pitches == [61]):
-        raise AssertionError("Assertion failed")
+    assert press_pitches == [61]
 
 
 def test_mistake_pitch_stays_in_bounds_for_black_key(monkeypatch):
     monkeypatch.setattr("playback.player.random.shuffle", lambda _: None)
     out = EventCompiler._mistake_pitch(1)
-    if not (out is not None and 0 <= out <= 127):
-        raise AssertionError("Assertion failed")
+    assert out is not None and 0 <= out <= 127
 
 
 def test_compile_black_box_with_original_pedal_and_note_lifecycle():
@@ -68,21 +62,15 @@ def test_compile_black_box_with_original_pedal_and_note_lifecycle():
         },
     )
 
-    if not (all(events[i].time <= events[i + 1].time for i in range(len(events) - 1))):
-        raise AssertionError("Assertion failed")
+    assert all(events[i].time <= events[i + 1].time for i in range(len(events) - 1))
 
     pedal_events = [e for e in events if e.action == "pedal"]
-    if not ([(e.time, e.key_char) for e in pedal_events] == [(0.0, "down"), (0.75, "up")]):
-        raise AssertionError("Assertion failed")
+    assert [(e.time, e.key_char) for e in pedal_events] == [(0.0, "down"), (0.75, "up")]
 
     press_events = [e for e in events if e.action == "press"]
     release_events = [e for e in events if e.action == "release"]
 
-    if not ({e.pitch for e in press_events} == {52, 55}):
-        raise AssertionError("Assertion failed")
-    if not ({e.pitch for e in release_events} == {52, 55}):
-        raise AssertionError("Assertion failed")
-    if not (len(press_events) == 2):
-        raise AssertionError("Assertion failed")
-    if not (len(release_events) == 2):
-        raise AssertionError("Assertion failed")
+    assert {e.pitch for e in press_events} == {52, 55}
+    assert {e.pitch for e in release_events} == {52, 55}
+    assert len(press_events) == 2
+    assert len(release_events) == 2

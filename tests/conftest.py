@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 import random
+from typing import Any, cast
 
 import pytest
 
+from config_repository import ConfigRepository
+from main_window import MainWindow
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -39,3 +42,16 @@ def no_real_io(monkeypatch, request):
     monkeypatch.setattr("mido.open_input", lambda *a, **k: None)
     monkeypatch.setattr("mido.get_input_names", lambda: [])
     monkeypatch.setattr("ui.hotkey_manager.keyboard.Listener", FakeListener)
+
+
+@pytest.fixture
+def window_factory(qtbot, monkeypatch, tmp_path):
+    def factory(**kwargs) -> Any:
+        repo = ConfigRepository(config_dir=tmp_path)
+        monkeypatch.setattr("main_window.ConfigRepository", lambda: repo)
+        monkeypatch.setattr("main_window.QTimer.singleShot", lambda *_a, **_k: None)
+        window = cast(Any, MainWindow(app_version=kwargs.pop("app_version", "test"), **kwargs))
+        qtbot.addWidget(window)
+        return window
+
+    return factory

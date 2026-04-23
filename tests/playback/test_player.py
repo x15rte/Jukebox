@@ -32,10 +32,8 @@ def test_execute_batch_updates_visualizer_state():
         )
     )
 
-    if not (backend.calls[0][0] == "execute_batch"):
-        raise AssertionError("Assertion failed")
-    if not (set(rec.values[-1]) == {64}):
-        raise AssertionError("Assertion failed")
+    assert backend.calls[0][0] == "execute_batch"
+    assert set(rec.values[-1]) == {64}
 
 
 def test_seek_updates_event_index_and_progress():
@@ -49,10 +47,8 @@ def test_seek_updates_event_index_and_progress():
     p.progress_updated = cast(Any, rec)
 
     p.seek(0.5)
-    if not (p.event_index == 1):
-        raise AssertionError("Assertion failed")
-    if not (rec.values[-1] == 0.5):
-        raise AssertionError("Assertion failed")
+    assert p.event_index == 1
+    assert rec.values[-1] == 0.5
 
 
 def test_toggle_pause_sets_and_clears_pause_event(monkeypatch):
@@ -61,9 +57,7 @@ def test_toggle_pause_sets_and_clears_pause_event(monkeypatch):
     monkeypatch.setattr("playback.player.time.perf_counter", lambda: 10.0)
 
     p.toggle_pause()
-    if not (p.pause_event.is_set()):
-        raise AssertionError("Assertion failed")
+    assert p.pause_event.is_set()
 
     p.toggle_pause()
-    if not (not p.pause_event.is_set()):
-        raise AssertionError("Assertion failed")
+    assert not p.pause_event.is_set()

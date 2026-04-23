@@ -4,8 +4,7 @@ from tests.helpers.builders import make_note, make_section
 
 def test_generate_none_returns_empty():
     out = PedalGenerator.generate_events({"pedal_style": "none"}, [], [])
-    if not (out == []):
-        raise AssertionError("Assertion failed")
+    assert out == []
 
 
 def test_generate_original_uses_raw_events():
@@ -14,10 +13,8 @@ def test_generate_original_uses_raw_events():
         [],
         [],
     )
-    if not ([e.action for e in out] == ["pedal", "pedal"]):
-        raise AssertionError("Assertion failed")
-    if not ([e.key_char for e in out] == ["down", "up"]):
-        raise AssertionError("Assertion failed")
+    assert [e.action for e in out] == ["pedal", "pedal"]
+    assert [e.key_char for e in out] == ["down", "up"]
 
 
 def test_generate_original_falls_back_to_hybrid_when_missing_raw():
@@ -26,12 +23,9 @@ def test_generate_original_falls_back_to_hybrid_when_missing_raw():
         make_note(2, 41, 0.5, 0.4, hand="left"),
     ]
     out = PedalGenerator.generate_events({"pedal_style": "original"}, notes, [])
-    if not (len(out) >= 2):
-        raise AssertionError("Assertion failed")
-    if not (out[0].key_char == "down"):
-        raise AssertionError("Assertion failed")
-    if not (out[-1].key_char == "up"):
-        raise AssertionError("Assertion failed")
+    assert len(out) >= 2
+    assert out[0].key_char == "down"
+    assert out[-1].key_char == "up"
 
 
 def test_harmonic_pedal_repedals_on_harmony_change():
@@ -41,16 +35,13 @@ def test_harmonic_pedal_repedals_on_harmony_change():
     ]
     sec = make_section(0.0, 1.0, notes)
     out = PedalGenerator.generate_events({"pedal_style": "legato"}, notes, [sec])
-    if not (any(e.key_char == "down" for e in out)):
-        raise AssertionError("Assertion failed")
-    if not (any(e.key_char == "up" for e in out)):
-        raise AssertionError("Assertion failed")
+    assert any(e.key_char == "down" for e in out)
+    assert any(e.key_char == "up" for e in out)
 
 
 def test_convert_raw_pedal_state_machine():
     out = PedalGenerator._convert_raw_pedal([(0.0, 127), (0.2, 100), (0.4, 0), (0.6, 0)])
-    if not ([(e.time, e.key_char) for e in out] == [(0.0, "down"), (0.4, "up")]):
-        raise AssertionError("Assertion failed")
+    assert [(e.time, e.key_char) for e in out] == [(0.0, "down"), (0.4, "up")]
 
 
 def test_generate_hybrid_uses_treble_when_no_left_hand():
@@ -59,10 +50,8 @@ def test_generate_hybrid_uses_treble_when_no_left_hand():
         make_note(2, 74, 0.4, 0.2, hand="right"),
     ]
     out = PedalGenerator.generate_events({"pedal_style": "hybrid"}, notes, [])
-    if not (out[0].key_char == "down"):
-        raise AssertionError("Assertion failed")
-    if not (out[-1].key_char == "up"):
-        raise AssertionError("Assertion failed")
+    assert out[0].key_char == "down"
+    assert out[-1].key_char == "up"
 
 
 def test_generate_legato_section_without_left_hand_holds_whole_section():
@@ -74,8 +63,7 @@ def test_generate_legato_section_without_left_hand_holds_whole_section():
 
     out = PedalGenerator.generate_events({"pedal_style": "legato"}, notes, [sec])
 
-    if not ([(e.time, e.key_char) for e in out] == [(0.0, "down"), (0.7, "up")]):
-        raise AssertionError("Assertion failed")
+    assert [(e.time, e.key_char) for e in out] == [(0.0, "down"), (0.7, "up")]
 
 
 def test_generate_rhythmic_emits_per_left_hand_group():
@@ -87,13 +75,12 @@ def test_generate_rhythmic_emits_per_left_hand_group():
 
     out = PedalGenerator.generate_events({"pedal_style": "rhythmic"}, notes, [sec])
 
-    if not ([(e.time, e.key_char) for e in out] == [
+    assert [(e.time, e.key_char) for e in out] == [
         (0.0, "down"),
         (0.2, "up"),
         (0.5, "down"),
         (0.7, "up"),
-    ]):
-        raise AssertionError("Assertion failed")
+    ]
 
 
 def test_adaptive_driver_long_gap_releases_and_restarts():
@@ -104,10 +91,8 @@ def test_adaptive_driver_long_gap_releases_and_restarts():
 
     out = PedalGenerator._generate_adaptive_pedal_driver(d, d)
 
-    if not ((0.2, "up") in [(e.time, e.key_char) for e in out]):
-        raise AssertionError("Assertion failed")
-    if not ((1.0, "down") in [(e.time, e.key_char) for e in out]):
-        raise AssertionError("Assertion failed")
+    assert (0.2, "up") in [(e.time, e.key_char) for e in out]
+    assert (1.0, "down") in [(e.time, e.key_char) for e in out]
 
 
 def test_adaptive_driver_window_unsafe_interval_triggers_repedal():
@@ -120,10 +105,8 @@ def test_adaptive_driver_window_unsafe_interval_triggers_repedal():
     out = PedalGenerator._generate_adaptive_pedal_driver(d, all_notes)
 
     repedal_pairs = [(e.time, e.key_char) for e in out if e.time in (0.31, 0.36)]
-    if not ((0.31, "up") in repedal_pairs):
-        raise AssertionError("Assertion failed")
-    if not ((0.36, "down") in repedal_pairs):
-        raise AssertionError("Assertion failed")
+    assert (0.31, "up") in repedal_pairs
+    assert (0.36, "down") in repedal_pairs
 
 
 def test_harmonic_pedal_gap_branch():
@@ -135,10 +118,8 @@ def test_harmonic_pedal_gap_branch():
 
     PedalGenerator._generate_harmonic_pedal(events, notes)
 
-    if not ((0.2, "up") in [(e.time, e.key_char) for e in events]):
-        raise AssertionError("Assertion failed")
-    if not ((0.5, "down") in [(e.time, e.key_char) for e in events]):
-        raise AssertionError("Assertion failed")
+    assert (0.2, "up") in [(e.time, e.key_char) for e in events]
+    assert (0.5, "down") in [(e.time, e.key_char) for e in events]
 
 
 def test_generate_skips_empty_section_notes():
@@ -147,15 +128,13 @@ def test_generate_skips_empty_section_notes():
 
     out = PedalGenerator.generate_events({"pedal_style": "legato"}, notes, [sec])
 
-    if not (out == []):
-        raise AssertionError("Assertion failed")
+    assert out == []
 
 
 def test_adaptive_driver_empty_driver_notes_returns_empty():
     out = PedalGenerator._generate_adaptive_pedal_driver([], [])
 
-    if not (out == []):
-        raise AssertionError("Assertion failed")
+    assert out == []
 
 
 def test_harmonic_pedal_noop_with_empty_bass_notes():
@@ -163,5 +142,4 @@ def test_harmonic_pedal_noop_with_empty_bass_notes():
 
     PedalGenerator._generate_harmonic_pedal(events, [])
 
-    if not (events == []):
-        raise AssertionError("Assertion failed")
+    assert events == []

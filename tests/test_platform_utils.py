@@ -31,8 +31,7 @@ def test_set_app_user_model_id_calls_ctypes_on_windows(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     pu.set_app_user_model_id("jukebox.test")
-    if not (called == ["jukebox.test"]):
-        raise AssertionError("Assertion failed")
+    assert called == ["jukebox.test"]
 
 
 def test_set_app_user_model_id_swallows_import_error(monkeypatch):
@@ -56,21 +55,15 @@ def test_get_capabilities_windows_and_non_windows(monkeypatch):
     monkeypatch.setattr(pu.sys, "platform", "win32")
     monkeypatch.setattr(pu, "_check_pydirectinput", lambda: True)
     caps = pu.get_capabilities()
-    if not (caps["platform"] == "win32"):
-        raise AssertionError("Assertion failed")
-    if not (caps["high_res_timer"] is True):
-        raise AssertionError("Assertion failed")
-    if not (caps["pydirectinput"] is True):
-        raise AssertionError("Assertion failed")
-    if not (caps["direct_input"] is True):
-        raise AssertionError("Assertion failed")
+    assert caps["platform"] == "win32"
+    assert caps["high_res_timer"] is True
+    assert caps["pydirectinput"] is True
+    assert caps["direct_input"] is True
 
     monkeypatch.setattr(pu.sys, "platform", "darwin")
     caps2 = pu.get_capabilities()
-    if not (caps2["pydirectinput"] is False):
-        raise AssertionError("Assertion failed")
-    if not (caps2["direct_input"] is False):
-        raise AssertionError("Assertion failed")
+    assert caps2["pydirectinput"] is False
+    assert caps2["direct_input"] is False
 
 
 def test_check_pydirectinput_true_and_exception(monkeypatch):
@@ -82,9 +75,7 @@ def test_check_pydirectinput_true_and_exception(monkeypatch):
             return 1
 
     monkeypatch.setattr(importlib, "import_module", lambda name: Mod())
-    if not (pu._check_pydirectinput() is True):
-        raise AssertionError("Assertion failed")
+    assert pu._check_pydirectinput() is True
 
     monkeypatch.setattr(importlib, "import_module", lambda name: (_ for _ in ()).throw(RuntimeError("boom")))
-    if not (pu._check_pydirectinput() is False):
-        raise AssertionError("Assertion failed")
+    assert pu._check_pydirectinput() is False

@@ -13,13 +13,9 @@ def test_track_selection_dialog_defaults_and_get_selection(qtbot):
     dlg = TrackSelectionDialog(tracks)
     qtbot.addWidget(dlg)
 
-    if not (dlg.checkboxes[0].checkState() == Qt.CheckState.Checked):
-        raise AssertionError("Assertion failed")
-    if not (dlg.checkboxes[1].checkState() == Qt.CheckState.Unchecked):
-        raise AssertionError("Assertion failed")
+    assert dlg.checkboxes[0].checkState() == Qt.CheckState.Checked
+    assert dlg.checkboxes[1].checkState() == Qt.CheckState.Unchecked
 
     sel = dlg.get_selection()
-    if not (len(sel) == 1):
-        raise AssertionError("Assertion failed")
-    if not (sel[0][0].name == "Piano"):
-        raise AssertionError("Assertion failed")
+    assert len(sel) == 1
+    assert sel[0][0].name == "Piano"

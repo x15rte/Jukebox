@@ -26,15 +26,13 @@ def test_macos_vk_initialized_on_darwin_import(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", imp)
     fresh_mod = __import__("native.macos_cgevent", fromlist=["*"])
-    if not (fresh_mod._MACOS_VK):
-        raise AssertionError("Assertion failed")
+    assert fresh_mod._MACOS_VK
 
 
 def test_accessibility_trusted_non_darwin(monkeypatch):
     mod = cast(Any, _fresh_module())
     monkeypatch.setattr(mod.sys, "platform", "win32")
-    if not (mod.is_macos_accessibility_trusted() is True):
-        raise AssertionError("Assertion failed")
+    assert mod.is_macos_accessibility_trusted() is True
 
 
 def test_accessibility_trusted_darwin_success_and_failure(monkeypatch):
@@ -72,8 +70,7 @@ def test_accessibility_trusted_darwin_success_and_failure(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", imp_ok)
-    if not (mod.is_macos_accessibility_trusted() is True):
-        raise AssertionError("Assertion failed")
+    assert mod.is_macos_accessibility_trusted() is True
 
     def imp_fail(name, *args, **kwargs):
         if name == "ctypes":
@@ -81,8 +78,7 @@ def test_accessibility_trusted_darwin_success_and_failure(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", imp_fail)
-    if not (mod.is_macos_accessibility_trusted() is True):
-        raise AssertionError("Assertion failed")
+    assert mod.is_macos_accessibility_trusted() is True
 
 
 def test_open_accessibility_preferences_paths(monkeypatch):
@@ -96,10 +92,8 @@ def test_open_accessibility_preferences_paths(monkeypatch):
     monkeypatch.setattr(mod.subprocess, "run", lambda args, **k: calls.append((args, k)))
 
     mod.open_macos_accessibility_preferences()
-    if not (calls):
-        raise AssertionError("Assertion failed")
-    if not (calls[0][0][0] == "/usr/bin/open"):
-        raise AssertionError("Assertion failed")
+    assert calls
+    assert calls[0][0][0] == "/usr/bin/open"
 
     monkeypatch.setattr(
         mod.subprocess,
@@ -112,8 +106,7 @@ def test_open_accessibility_preferences_paths(monkeypatch):
 def test_init_macos_cgevent_non_darwin(monkeypatch):
     mod = cast(Any, _fresh_module())
     monkeypatch.setattr(mod.sys, "platform", "win32")
-    if not (mod._init_macos_cgevent() is False):
-        raise AssertionError("Assertion failed")
+    assert mod._init_macos_cgevent() is False
 
 
 def test_init_macos_cgevent_success_and_cached(monkeypatch):
@@ -160,10 +153,8 @@ def test_init_macos_cgevent_success_and_cached(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", imp_ok)
 
-    if not (mod._init_macos_cgevent() is True):
-        raise AssertionError("Assertion failed")
-    if not (mod._init_macos_cgevent() is True):
-        raise AssertionError("Assertion failed")
+    assert mod._init_macos_cgevent() is True
+    assert mod._init_macos_cgevent() is True
 
 
 def test_init_macos_cgevent_failure(monkeypatch):
@@ -180,51 +171,38 @@ def test_init_macos_cgevent_failure(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", imp_fail)
-    if not (mod._init_macos_cgevent() is False):
-        raise AssertionError("Assertion failed")
+    assert mod._init_macos_cgevent() is False
 
 
 def test_get_macos_vk_for_key_and_modifier_paths(monkeypatch):
     mod = cast(Any, _fresh_module())
 
     monkeypatch.setattr(mod.sys, "platform", "win32")
-    if not (mod.get_macos_vk_for_key("a") is None):
-        raise AssertionError("Assertion failed")
-    if not (mod.get_macos_vk_for_modifier(type("K", (), {"name": "shift"})()) is None):
-        raise AssertionError("Assertion failed")
+    assert mod.get_macos_vk_for_key("a") is None
+    assert mod.get_macos_vk_for_modifier(type("K", (), {"name": "shift"})()) is None
 
     monkeypatch.setattr(mod.sys, "platform", "darwin")
     monkeypatch.setattr(mod, "_MACOS_VK", {"a": 1, "space": 2, "control": 3, "shift": 4})
 
-    if not (mod.get_macos_vk_for_key("A") == 1):
-        raise AssertionError("Assertion failed")
-    if not (mod.get_macos_vk_for_key(type("K", (), {"name": "space"})()) == 2):
-        raise AssertionError("Assertion failed")
-    if not (mod.get_macos_vk_for_key(type("K", (), {"name": "ctrl"})()) == 3):
-        raise AssertionError("Assertion failed")
-    if not (mod.get_macos_vk_for_key(type("K", (), {"name": "zzz"})()) is None):
-        raise AssertionError("Assertion failed")
+    assert mod.get_macos_vk_for_key("A") == 1
+    assert mod.get_macos_vk_for_key(type("K", (), {"name": "space"})()) == 2
+    assert mod.get_macos_vk_for_key(type("K", (), {"name": "ctrl"})()) == 3
+    assert mod.get_macos_vk_for_key(type("K", (), {"name": "zzz"})()) is None
 
-    if not (mod.get_macos_vk_for_modifier(type("K", (), {"name": "shift"})()) == 4):
-        raise AssertionError("Assertion failed")
-    if not (mod.get_macos_vk_for_modifier(type("K", (), {"name": "ctrl"})()) == 3):
-        raise AssertionError("Assertion failed")
-    if not (mod.get_macos_vk_for_modifier(type("K", (), {"name": "zzz"})()) is None):
-        raise AssertionError("Assertion failed")
-    if not (mod.get_macos_vk_for_modifier(object()) is None):
-        raise AssertionError("Assertion failed")
+    assert mod.get_macos_vk_for_modifier(type("K", (), {"name": "shift"})()) == 4
+    assert mod.get_macos_vk_for_modifier(type("K", (), {"name": "ctrl"})()) == 3
+    assert mod.get_macos_vk_for_modifier(type("K", (), {"name": "zzz"})()) is None
+    assert mod.get_macos_vk_for_modifier(object()) is None
 
 
 def test_post_macos_key_event_non_darwin_and_init_fail(monkeypatch):
     mod = cast(Any, _fresh_module())
     monkeypatch.setattr(mod.sys, "platform", "linux")
-    if not (mod.post_macos_key_event(10, True, 0) is False):
-        raise AssertionError("Assertion failed")
+    assert mod.post_macos_key_event(10, True, 0) is False
 
     monkeypatch.setattr(mod.sys, "platform", "darwin")
     monkeypatch.setattr(mod, "_init_macos_cgevent", lambda: False)
-    if not (mod.post_macos_key_event(10, True, 0) is False):
-        raise AssertionError("Assertion failed")
+    assert mod.post_macos_key_event(10, True, 0) is False
 
 
 def test_post_macos_key_event_source_or_event_missing(monkeypatch):
@@ -247,8 +225,7 @@ def test_post_macos_key_event_source_or_event_missing(monkeypatch):
 
     mod._macos_app_services = AppNoSource()
     mod._macos_core_foundation = core
-    if not (mod.post_macos_key_event(12, True, 0) is False):
-        raise AssertionError("Assertion failed")
+    assert mod.post_macos_key_event(12, True, 0) is False
 
     class AppNoEvent:
         def CGEventSourceCreate(self, _s):
@@ -258,10 +235,8 @@ def test_post_macos_key_event_source_or_event_missing(monkeypatch):
             return 0
 
     mod._macos_app_services = AppNoEvent()
-    if not (mod.post_macos_key_event(12, False, 0) is False):
-        raise AssertionError("Assertion failed")
-    if not (11 in core.released):
-        raise AssertionError("Assertion failed")
+    assert mod.post_macos_key_event(12, False, 0) is False
+    assert 11 in core.released
 
 
 def test_post_macos_key_event_success_and_exception(monkeypatch):
@@ -298,19 +273,14 @@ def test_post_macos_key_event_success_and_exception(monkeypatch):
     mod._macos_app_services = app
     mod._macos_core_foundation = core
 
-    if not (mod.post_macos_key_event(42, True, 123) is True):
-        raise AssertionError("Assertion failed")
-    if not (app.flags == [123]):
-        raise AssertionError("Assertion failed")
-    if not (app.posts):
-        raise AssertionError("Assertion failed")
-    if not (22 in core.released and 21 in core.released):
-        raise AssertionError("Assertion failed")
+    assert mod.post_macos_key_event(42, True, 123) is True
+    assert app.flags == [123]
+    assert app.posts
+    assert 22 in core.released and 21 in core.released
 
     class AppBoom(App):
         def CGEventSourceCreate(self, _s):
             raise RuntimeError("boom")
 
     mod._macos_app_services = AppBoom()
-    if not (mod.post_macos_key_event(42, False, 0) is False):
-        raise AssertionError("Assertion failed")
+    assert mod.post_macos_key_event(42, False, 0) is False

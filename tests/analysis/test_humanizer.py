@@ -9,18 +9,15 @@ def test_apply_to_hand_noop_when_all_features_off():
     hz = Humanizer(cfg)
     notes = [make_note(1, 60, 1.0, 0.5, hand="right")]
     hz.apply_to_hand(notes, "right", set())
-    if not (notes[0].start_time == 1.0):
-        raise AssertionError("Assertion failed")
-    if not (notes[0].duration == 0.5):
-        raise AssertionError("Assertion failed")
+    assert notes[0].start_time == 1.0
+    assert notes[0].duration == 0.5
 
 
 def test_prepare_shared_offsets_requires_timing_and_drift():
     hz = Humanizer({"vary_timing": True, "enable_drift_correction": False})
     notes = [make_note(1, 60, 0.0, 0.2)]
     hz.prepare_shared_offsets(notes)
-    if not (hz._shared_drift_offsets == {}):
-        raise AssertionError("Assertion failed")
+    assert hz._shared_drift_offsets == {}
 
 
 def test_apply_to_hand_applies_roll_and_duration_floor(monkeypatch):
@@ -41,12 +38,9 @@ def test_apply_to_hand_applies_roll_and_duration_floor(monkeypatch):
     ]
     hz.apply_to_hand(notes, "right", set())
 
-    if not (notes[0].start_time <= notes[1].start_time):
-        raise AssertionError("Assertion failed")
-    if not (notes[0].duration == 0.03):
-        raise AssertionError("Assertion failed")
-    if not (notes[1].duration == 0.03):
-        raise AssertionError("Assertion failed")
+    assert notes[0].start_time <= notes[1].start_time
+    assert notes[0].duration == 0.03
+    assert notes[1].duration == 0.03
 
 
 def test_apply_tempo_rubato_skips_short_sections():
@@ -55,8 +49,7 @@ def test_apply_tempo_rubato_skips_short_sections():
     n = make_note(1, 60, 0.2, 0.1)
     sec = make_section(0.0, 0.5, [n], pace="normal")
     hz.apply_tempo_rubato([n], [sec])
-    if not (n.start_time == 0.2):
-        raise AssertionError("Assertion failed")
+    assert n.start_time == 0.2
 
 
 def test_apply_tempo_rubato_changes_time_on_long_section(monkeypatch):
@@ -66,8 +59,7 @@ def test_apply_tempo_rubato_changes_time_on_long_section(monkeypatch):
     n = make_note(1, 60, 1.0, 0.1)
     sec = make_section(0.0, 2.0, [n], pace="normal")
     hz.apply_tempo_rubato([n], [sec])
-    if not (n.start_time < 1.0):
-        raise AssertionError("Assertion failed")
+    assert n.start_time < 1.0
 
 
 def test_fingering_engine_assigns_unknown_hands():
@@ -77,10 +69,8 @@ def test_fingering_engine_assigns_unknown_hands():
     ]
     eng = FingeringEngine()
     eng.assign_hands(notes)
-    if not (notes[0].hand == "left"):
-        raise AssertionError("Assertion failed")
-    if not (notes[1].hand == "right"):
-        raise AssertionError("Assertion failed")
+    assert notes[0].hand == "left"
+    assert notes[1].hand == "right"
 
 
 def test_prepare_shared_offsets_populates_and_clamps(monkeypatch):
@@ -99,11 +89,9 @@ def test_prepare_shared_offsets_populates_and_clamps(monkeypatch):
 
     hz.prepare_shared_offsets(notes)
 
-    if not (hz._shared_drift_offsets):
-        raise AssertionError("Assertion failed")
+    assert hz._shared_drift_offsets
     key = round(notes[0].start_time, 2)
-    if not (hz._shared_drift_offsets[key] == 0.03):
-        raise AssertionError("Assertion failed")
+    assert hz._shared_drift_offsets[key] == 0.03
 
 
 def test_apply_to_hand_resync_and_drift_update(monkeypatch):
@@ -124,10 +112,8 @@ def test_apply_to_hand_resync_and_drift_update(monkeypatch):
 
     hz.apply_to_hand(notes, "left", {1.0})
 
-    if not (notes[0].start_time == 1.2):
-        raise AssertionError("Assertion failed")
-    if not (hz.left_hand_drift == pytest.approx(0.3)):
-        raise AssertionError("Assertion failed")
+    assert notes[0].start_time == 1.2
+    assert hz.left_hand_drift == pytest.approx(0.3)
 
 
 def test_apply_tempo_rubato_fast_and_slow_invert(monkeypatch):
@@ -147,8 +133,7 @@ def test_apply_tempo_rubato_fast_and_slow_invert(monkeypatch):
 
     hz.apply_tempo_rubato([n_fast, n_slow], [sec_fast, sec_slow])
 
-    if not (n_fast.start_time < n_slow.start_time):
-        raise AssertionError("Assertion failed")
+    assert n_fast.start_time < n_slow.start_time
 
 
 def test_fingering_engine_chord_and_preserved_hand():
@@ -161,10 +146,8 @@ def test_fingering_engine_chord_and_preserved_hand():
     eng = FingeringEngine()
     eng.assign_hands(chord + [preset])
 
-    if not (all(n.hand == "left" for n in chord)):
-        raise AssertionError("Assertion failed")
-    if not (preset.hand == "right"):
-        raise AssertionError("Assertion failed")
+    assert all(n.hand == "left" for n in chord)
+    assert preset.hand == "right"
 
 
 def test_apply_to_hand_right_resync_decay_and_drift_update(monkeypatch):
@@ -185,10 +168,8 @@ def test_apply_to_hand_right_resync_decay_and_drift_update(monkeypatch):
 
     hz.apply_to_hand(notes, "right", {2.0})
 
-    if not (notes[0].start_time == 2.1):
-        raise AssertionError("Assertion failed")
-    if not (hz.right_hand_drift == pytest.approx(0.3)):
-        raise AssertionError("Assertion failed")
+    assert notes[0].start_time == 2.1
+    assert hz.right_hand_drift == pytest.approx(0.3)
 
 
 def test_apply_tempo_rubato_disabled_noop():
@@ -198,8 +179,7 @@ def test_apply_tempo_rubato_disabled_noop():
 
     hz.apply_tempo_rubato([n], [sec])
 
-    if not (n.start_time == 1.0):
-        raise AssertionError("Assertion failed")
+    assert n.start_time == 1.0
 
 
 def test_fingering_engine_chord_already_assigned_noop():
@@ -211,5 +191,4 @@ def test_fingering_engine_chord_already_assigned_noop():
     eng = FingeringEngine()
     eng.assign_hands(chord)
 
-    if not (all(n.hand == "left" for n in chord)):
-        raise AssertionError("Assertion failed")
+    assert all(n.hand == "left" for n in chord)

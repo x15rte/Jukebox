@@ -35,50 +35,33 @@ def test_config_from_dict_migrates_and_clamps_values():
 
     cfg = Config.from_dict(data)
 
-    if not (cfg.enable_vary_timing is True):
-        raise AssertionError("Assertion failed")
-    if not (cfg.enable_vary_articulation is True):
-        raise AssertionError("Assertion failed")
-    if not (cfg.enable_hand_drift is True):
-        raise AssertionError("Assertion failed")
-    if not (cfg.value_timing_variance == 0.1):
-        raise AssertionError("Assertion failed")
-    if not (cfg.value_articulation == 50.0):
-        raise AssertionError("Assertion failed")
-    if not (cfg.value_hand_drift_decay == 100.0):
-        raise AssertionError("Assertion failed")
-    if not (cfg.value_mistake_chance == 10.0):
-        raise AssertionError("Assertion failed")
-    if not (cfg.value_tempo_sway_intensity == 0.1):
-        raise AssertionError("Assertion failed")
-    if not (cfg.tempo == 200.0):
-        raise AssertionError("Assertion failed")
-    if not (cfg.opacity == 20):
-        raise AssertionError("Assertion failed")
-    if not (cfg.output_mode == "key"):
-        raise AssertionError("Assertion failed")
-    if not (cfg.log_level == "DEBUG"):
-        raise AssertionError("Assertion failed")
-    if not (cfg.window_geometry is None):
-        raise AssertionError("Assertion failed")
+    assert cfg.enable_vary_timing is True
+    assert cfg.enable_vary_articulation is True
+    assert cfg.enable_hand_drift is True
+    assert cfg.value_timing_variance == 0.1
+    assert cfg.value_articulation == 50.0
+    assert cfg.value_hand_drift_decay == 100.0
+    assert cfg.value_mistake_chance == 10.0
+    assert cfg.value_tempo_sway_intensity == 0.1
+    assert cfg.tempo == 200.0
+    assert cfg.opacity == 20
+    assert cfg.output_mode == "key"
+    assert cfg.log_level == "DEBUG"
+    assert cfg.window_geometry is None
 
 
 def test_config_to_runtime_playback_dict_exports_runtime_aliases():
     cfg = Config(enable_vary_timing=True, enable_vary_articulation=True, value_articulation=90)
     d = cfg.to_runtime_playback_dict()
-    if not (d["vary_timing"] is True):
-        raise AssertionError("Assertion failed")
-    if not (d["vary_articulation"] is True):
-        raise AssertionError("Assertion failed")
-    if not (d["articulation"] == 0.9):
-        raise AssertionError("Assertion failed")
+    assert d["vary_timing"] is True
+    assert d["vary_articulation"] is True
+    assert d["articulation"] == 0.9
 
 
 def test_repository_load_returns_defaults_when_missing(tmp_path: Path):
     repo = ConfigRepository(config_dir=tmp_path)
     cfg = repo.load()
-    if not (isinstance(cfg, Config)):
-        raise AssertionError("Assertion failed")
+    assert isinstance(cfg, Config)
 
 
 def test_repository_load_backs_up_corrupt_json(tmp_path: Path):
@@ -89,12 +72,9 @@ def test_repository_load_backs_up_corrupt_json(tmp_path: Path):
     with pytest.raises(ConfigLoadError) as exc:
         repo.load()
 
-    if not (exc.value.backup_path is not None):
-        raise AssertionError("Assertion failed")
-    if not (exc.value.backup_path.exists()):
-        raise AssertionError("Assertion failed")
-    if not (not repo.config_path.exists()):
-        raise AssertionError("Assertion failed")
+    assert exc.value.backup_path is not None
+    assert exc.value.backup_path.exists()
+    assert not repo.config_path.exists()
 
 
 def test_repository_save_and_load_roundtrip(tmp_path: Path):
@@ -103,16 +83,12 @@ def test_repository_save_and_load_roundtrip(tmp_path: Path):
     repo.save(cfg)
 
     loaded = repo.load()
-    if not (loaded.tempo == 123.0):
-        raise AssertionError("Assertion failed")
-    if not (loaded.pedal_style == "rhythmic"):
-        raise AssertionError("Assertion failed")
-    if not (loaded.hotkey == "k"):
-        raise AssertionError("Assertion failed")
+    assert loaded.tempo == 123.0
+    assert loaded.pedal_style == "rhythmic"
+    assert loaded.hotkey == "k"
 
     raw = json.loads(repo.config_path.read_text(encoding="utf-8"))
-    if not (raw["tempo"] == 123.0):
-        raise AssertionError("Assertion failed")
+    assert raw["tempo"] == 123.0
 
 
 def test_config_from_dict_rejects_non_object():
@@ -135,33 +111,22 @@ def test_config_from_dict_bool_coercions_and_sanitizers():
         }
     )
 
-    if not (cfg.countdown is False):
-        raise AssertionError("Assertion failed")
-    if not (cfg.use_88_key_layout is True):
-        raise AssertionError("Assertion failed")
-    if not (cfg.macos_use_pynput is False):
-        raise AssertionError("Assertion failed")
-    if not (cfg.save_log_to_file is True):
-        raise AssertionError("Assertion failed")
-    if not (cfg.pedal_style == "none"):
-        raise AssertionError("Assertion failed")
-    if not (cfg.input_mode == "piano"):
-        raise AssertionError("Assertion failed")
-    if not (cfg.log_level == "WARNING"):
-        raise AssertionError("Assertion failed")
-    if not (cfg.hotkey == "f6"):
-        raise AssertionError("Assertion failed")
-    if not (cfg.midi_input_device is None):
-        raise AssertionError("Assertion failed")
+    assert cfg.countdown is False
+    assert cfg.use_88_key_layout is True
+    assert cfg.macos_use_pynput is False
+    assert cfg.save_log_to_file is True
+    assert cfg.pedal_style == "none"
+    assert cfg.input_mode == "piano"
+    assert cfg.log_level == "WARNING"
+    assert cfg.hotkey == "f6"
+    assert cfg.midi_input_device is None
 
 
 def test_config_to_dict_omits_none_fields():
     cfg = Config(window_geometry=None, midi_input_device=None)
     d = cfg.to_dict()
-    if not ("window_geometry" not in d):
-        raise AssertionError("Assertion failed")
-    if not ("midi_input_device" not in d):
-        raise AssertionError("Assertion failed")
+    assert "window_geometry" not in d
+    assert "midi_input_device" not in d
 
 
 def test_runtime_playback_dict_contains_expected_aliases():
@@ -172,14 +137,10 @@ def test_runtime_playback_dict_contains_expected_aliases():
         value_tempo_sway_intensity=0.02,
     )
     d = cfg.to_runtime_playback_dict()
-    if not (d["enable_drift_correction"] is True):
-        raise AssertionError("Assertion failed")
-    if not (d["drift_decay_factor"] == 0.25):
-        raise AssertionError("Assertion failed")
-    if not (d["mistake_chance"] == 1.5):
-        raise AssertionError("Assertion failed")
-    if not (d["tempo_sway_intensity"] == 0.02):
-        raise AssertionError("Assertion failed")
+    assert d["enable_drift_correction"] is True
+    assert d["drift_decay_factor"] == 0.25
+    assert d["mistake_chance"] == 1.5
+    assert d["tempo_sway_intensity"] == 0.02
 
 
 def test_repository_load_raises_when_backup_fails(monkeypatch, tmp_path: Path):
@@ -191,14 +152,12 @@ def test_repository_load_raises_when_backup_fails(monkeypatch, tmp_path: Path):
     with pytest.raises(ConfigLoadError) as exc:
         repo.load()
 
-    if not (exc.value.backup_path is None):
-        raise AssertionError("Assertion failed")
+    assert exc.value.backup_path is None
 
 
 def test_backup_corrupt_config_missing_file_returns_none(tmp_path: Path):
     repo = ConfigRepository(config_dir=tmp_path)
-    if not (repo._backup_corrupt_config() is None):
-        raise AssertionError("Assertion failed")
+    assert repo._backup_corrupt_config() is None
 
 
 def test_backup_corrupt_config_handles_oserror(monkeypatch, tmp_path: Path):
@@ -211,8 +170,7 @@ def test_backup_corrupt_config_handles_oserror(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(type(repo.config_path), "replace", lambda self, p: bad_replace(p))
     out = repo._backup_corrupt_config()
-    if not (out is None):
-        raise AssertionError("Assertion failed")
+    assert out is None
 
 
 def test_repository_load_wraps_oserror(monkeypatch, tmp_path: Path):
@@ -234,42 +192,44 @@ def test_repository_load_wraps_oserror(monkeypatch, tmp_path: Path):
     with pytest.raises(ConfigLoadError) as exc:
         repo.load()
 
-    if not ("read fail" in str(exc.value)):
-        raise AssertionError("Assertion failed")
+    assert "read fail" in str(exc.value)
 
 
-def test_coerce_helpers_fallback_branches():
-    if not (_coerce_bool("maybe", True) is True):
-        raise AssertionError("Assertion failed")
-
-    if not (_coerce_float(True, 1.2) == 1.2):
-        raise AssertionError("Assertion failed")
-    if not (_coerce_float("  bad  ", 1.2) == 1.2):
-        raise AssertionError("Assertion failed")
-    if not (_coerce_float([], 1.2) == 1.2):
-        raise AssertionError("Assertion failed")
-
-    if not (_coerce_int(True, 7) == 7):
-        raise AssertionError("Assertion failed")
-    if not (_coerce_int(3.9, 7) == 3):
-        raise AssertionError("Assertion failed")
-    if not (_coerce_int("bad", 7) == 7):
-        raise AssertionError("Assertion failed")
-    if not (_coerce_int([], 7) == 7):
-        raise AssertionError("Assertion failed")
+@pytest.mark.parametrize(
+    ("value", "default", "expected"),
+    [("maybe", True, True)],
+)
+def test_coerce_bool_fallback_branches(value, default, expected):
+    assert _coerce_bool(value, default) is expected
 
 
-def test_sanitize_and_optional_str_branches():
-    if not (_sanitize_choice(1, {"a"}, "d") == "d"):
-        raise AssertionError("Assertion failed")
-    if not (_sanitize_choice(" x ", {"x"}, "d") == "x"):
-        raise AssertionError("Assertion failed")
+@pytest.mark.parametrize(
+    ("value", "default", "expected"),
+    [(True, 1.2, 1.2), ("  bad  ", 1.2, 1.2), ([], 1.2, 1.2)],
+)
+def test_coerce_float_fallback_branches(value, default, expected):
+    assert _coerce_float(value, default) == expected
 
-    if not (_coerce_optional_str(None) is None):
-        raise AssertionError("Assertion failed")
-    if not (_coerce_optional_str(1) is None):
-        raise AssertionError("Assertion failed")
-    if not (_coerce_optional_str("  ") is None):
-        raise AssertionError("Assertion failed")
-    if not (_coerce_optional_str(" x ") == "x"):
-        raise AssertionError("Assertion failed")
+
+@pytest.mark.parametrize(
+    ("value", "default", "expected"),
+    [(True, 7, 7), (3.9, 7, 3), ("bad", 7, 7), ([], 7, 7)],
+)
+def test_coerce_int_fallback_branches(value, default, expected):
+    assert _coerce_int(value, default) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "allowed", "default", "expected"),
+    [(1, {"a"}, "d", "d"), (" x ", {"x"}, "d", "x")],
+)
+def test_sanitize_choice_branches(value, allowed, default, expected):
+    assert _sanitize_choice(value, allowed, default) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(None, None), (1, None), ("  ", None), (" x ", "x")],
+)
+def test_coerce_optional_str_branches(value, expected):
+    assert _coerce_optional_str(value) == expected

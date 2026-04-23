@@ -38,12 +38,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install bandit[sarif]
 
-      - name: Run bandit
+      - name: Run bandit on app code
         run: |
-          bandit -r . -f sarif -o bandit-results.sarif || true
+          bandit -r . -x ./tests -f sarif -o bandit-results.sarif || true
 
-      - name: Upload SARIF results
+      - name: Run bandit on tests
+        run: |
+          bandit -r tests -s B101 -f sarif -o bandit-tests-results.sarif || true
+
+      - name: Upload app SARIF results
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: bandit-results.sarif
+          category: bandit-app
+
+      - name: Upload test SARIF results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: bandit-tests-results.sarif
+          category: bandit-tests
 

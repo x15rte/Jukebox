@@ -32,8 +32,7 @@ def test_keyboard_backend_uses_pydirectinput_on_windows(monkeypatch):
 
     pitch = 61
     key_data = kb._mapper.get_key_data(pitch)
-    if not (key_data is not None):
-        raise AssertionError("Assertion failed")
+    assert key_data is not None
     base_key = key_data["key"]
 
     kb.note_on(pitch, 100)
@@ -41,14 +40,10 @@ def test_keyboard_backend_uses_pydirectinput_on_windows(monkeypatch):
     kb.pedal_on()
     kb.pedal_off()
 
-    if not ("shiftleft" in kb._pdi.down):
-        raise AssertionError("Assertion failed")
-    if not (base_key in kb._pdi.down):
-        raise AssertionError("Assertion failed")
-    if not ("space" in kb._pdi.down):
-        raise AssertionError("Assertion failed")
-    if not ("space" in kb._pdi.up):
-        raise AssertionError("Assertion failed")
+    assert "shiftleft" in kb._pdi.down
+    assert base_key in kb._pdi.down
+    assert "space" in kb._pdi.down
+    assert "space" in kb._pdi.up
 
 
 def test_keyboard_backend_macos_cgevent_path(monkeypatch):
@@ -69,8 +64,7 @@ def test_keyboard_backend_macos_cgevent_path(monkeypatch):
     kb.pedal_off()
     kb.shutdown()
 
-    if not (len(events) > 0):
-        raise AssertionError("Assertion failed")
+    assert len(events) > 0
 
 
 def test_numpad_backend_delay_and_idempotent_pedal(monkeypatch):
@@ -91,10 +85,8 @@ def test_numpad_backend_delay_and_idempotent_pedal(monkeypatch):
     nb.shutdown()
 
     pedal_calls = [c for c in calls if c[0] == "pedal"]
-    if not (len(pedal_calls) == 2):
-        raise AssertionError("Assertion failed")
-    if not (sleeps):
-        raise AssertionError("Assertion failed")
+    assert len(pedal_calls) == 2
+    assert sleeps
 
 
 def test_create_backend_logs_fallback_when_no_pydirectinput(monkeypatch):
@@ -103,7 +95,5 @@ def test_create_backend_logs_fallback_when_no_pydirectinput(monkeypatch):
     logs = []
 
     backend = out.create_backend("midi_numpad", log_message=logs.append)
-    if not (backend.__class__.__name__ == "NumpadBackend"):
-        raise AssertionError("Assertion failed")
-    if not (any("falling back" in msg.lower() for msg in logs)):
-        raise AssertionError("Assertion failed")
+    assert backend.__class__.__name__ == "NumpadBackend"
+    assert any("falling back" in msg.lower() for msg in logs)

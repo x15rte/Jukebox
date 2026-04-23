@@ -40,17 +40,14 @@ def test_precise_sleep_paths(monkeypatch):
     monkeypatch.setattr(tu.time, "sleep", lambda s: sleeps.append(s))
 
     tu.precise_sleep(0.003)
-    if not (sleeps and sleeps[0] == 0.001):
-        raise AssertionError("Assertion failed")
+    assert sleeps and sleeps[0] == 0.001
 
 
 def test_has_high_res_timer_reflects_winmm(monkeypatch):
     monkeypatch.setattr(tu, "_winmm", object())
-    if not (tu.has_high_res_timer() is True):
-        raise AssertionError("Assertion failed")
+    assert tu.has_high_res_timer() is True
     monkeypatch.setattr(tu, "_winmm", None)
-    if not (tu.has_high_res_timer() is False):
-        raise AssertionError("Assertion failed")
+    assert tu.has_high_res_timer() is False
 
 
 def test_import_sets_winmm_none_on_ctypes_failure(monkeypatch):
@@ -76,7 +73,6 @@ def test_import_sets_winmm_none_on_ctypes_failure(monkeypatch):
 
     mod = importlib.reload(tu)
     try:
-        if not (mod._winmm is None):
-            raise AssertionError("Assertion failed")
+        assert mod._winmm is None
     finally:
         importlib.reload(mod)

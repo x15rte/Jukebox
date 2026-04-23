@@ -40,16 +40,11 @@ def test_prepare_playback_uses_preparsed_when_tempo_matches(monkeypatch):
     )
 
     final_notes, _, _, total_dur, tempo_map = result
-    if not (called["parse"] == 0):
-        raise AssertionError("Assertion failed")
-    if not (len(final_notes) == 1):
-        raise AssertionError("Assertion failed")
-    if not (final_notes[0].hand == "left"):
-        raise AssertionError("Assertion failed")
-    if not (total_dur > 0):
-        raise AssertionError("Assertion failed")
-    if not (tempo_map is dummy_map):
-        raise AssertionError("Assertion failed")
+    assert called["parse"] == 0
+    assert len(final_notes) == 1
+    assert final_notes[0].hand == "left"
+    assert total_dur > 0
+    assert tempo_map is dummy_map
 
 
 def test_prepare_playback_reparses_when_tempo_changes(monkeypatch):
@@ -73,8 +68,7 @@ def test_prepare_playback_reparses_when_tempo_changes(monkeypatch):
         preparsed=cast(tuple[list[MidiTrack], TempoMap], ([tr], object())),
         preparsed_tempo_scale=1.0,
     )
-    if not (called["parse"] == 1):
-        raise AssertionError("Assertion failed")
+    assert called["parse"] == 1
 
 
 def test_prepare_playback_defaults_unknown_hands_by_pitch(monkeypatch):
@@ -92,8 +86,7 @@ def test_prepare_playback_defaults_unknown_hands_by_pitch(monkeypatch):
         {"tempo": 100, "simulate_hands": False},
     )
 
-    if not ([n.hand for n in final_notes] == ["left", "right"]):
-        raise AssertionError("Assertion failed")
+    assert [n.hand for n in final_notes] == ["left", "right"]
 
 
 def test_prepare_playback_simulate_hands_uses_engine(monkeypatch):
@@ -118,10 +111,8 @@ def test_prepare_playback_simulate_hands_uses_engine(monkeypatch):
         {"tempo": 100, "simulate_hands": True},
     )
 
-    if not (Engine.called is True):
-        raise AssertionError("Assertion failed")
-    if not (final_notes[0].hand == "left"):
-        raise AssertionError("Assertion failed")
+    assert Engine.called is True
+    assert final_notes[0].hand == "left"
 
 
 def test_prepare_playback_includes_raw_pedal_events_in_config(monkeypatch):
@@ -145,8 +136,7 @@ def test_prepare_playback_includes_raw_pedal_events_in_config(monkeypatch):
         {"tempo": 100, "simulate_hands": False},
     )
 
-    if not (seen["pedals"] == [(0.5, 127), (1.0, 127), (2.0, 0)]):
-        raise AssertionError("Assertion failed")
+    assert seen["pedals"] == [(0.5, 127), (1.0, 127), (2.0, 0)]
 
 
 def test_prepare_playback_right_hand_role_assignment(monkeypatch):
@@ -163,10 +153,8 @@ def test_prepare_playback_right_hand_role_assignment(monkeypatch):
         {"tempo": 100, "simulate_hands": False},
     )
 
-    if not (len(final_notes) == 1):
-        raise AssertionError("Assertion failed")
-    if not (final_notes[0].hand == "right"):
-        raise AssertionError("Assertion failed")
+    assert len(final_notes) == 1
+    assert final_notes[0].hand == "right"
 
 
 def test_prepare_playback_black_box_real_parse_and_compile(tmp_path: Path):
@@ -186,8 +174,7 @@ def test_prepare_playback_black_box_real_parse_and_compile(tmp_path: Path):
     mid.save(str(midi_path))
 
     parsed_tracks, _tempo_map = MidiParser.parse_structure(str(midi_path), tempo_scale=1.0)
-    if not (parsed_tracks):
-        raise AssertionError("Assertion failed")
+    assert parsed_tracks
 
     final_notes, sections, events, total_dur, _ = PlaybackService.prepare_playback(
         str(midi_path),
@@ -201,26 +188,16 @@ def test_prepare_playback_black_box_real_parse_and_compile(tmp_path: Path):
         },
     )
 
-    if not (len(final_notes) == 1):
-        raise AssertionError("Assertion failed")
-    if not (final_notes[0].pitch == 64):
-        raise AssertionError("Assertion failed")
-    if not (final_notes[0].hand == "right"):
-        raise AssertionError("Assertion failed")
-    if not (sections):
-        raise AssertionError("Assertion failed")
-    if not (total_dur > 0):
-        raise AssertionError("Assertion failed")
+    assert len(final_notes) == 1
+    assert final_notes[0].pitch == 64
+    assert final_notes[0].hand == "right"
+    assert sections
+    assert total_dur > 0
 
     actions = [e.action for e in events]
-    if not ("press" in actions):
-        raise AssertionError("Assertion failed")
-    if not ("release" in actions):
-        raise AssertionError("Assertion failed")
+    assert "press" in actions
+    assert "release" in actions
     pedal_events = [e for e in events if e.action == "pedal"]
-    if not (pedal_events):
-        raise AssertionError("Assertion failed")
-    if not (any(e.key_char == "down" for e in pedal_events)):
-        raise AssertionError("Assertion failed")
-    if not (any(e.key_char == "up" for e in pedal_events)):
-        raise AssertionError("Assertion failed")
+    assert pedal_events
+    assert any(e.key_char == "down" for e in pedal_events)
+    assert any(e.key_char == "up" for e in pedal_events)

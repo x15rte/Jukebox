@@ -13,19 +13,16 @@ app_main = cast(Any, app_main)
 
 def test_resource_dir_meipass_and_source(monkeypatch, tmp_path):
     monkeypatch.setattr(version.sys, "_MEIPASS", str(tmp_path), raising=False)
-    if not (version._resource_dir() == Path(tmp_path)):
-        raise AssertionError("Assertion failed")
+    assert version._resource_dir() == Path(tmp_path)
 
     monkeypatch.delattr(version.sys, "_MEIPASS", raising=False)
     out = version._resource_dir()
-    if not (out.exists()):
-        raise AssertionError("Assertion failed")
+    assert out.exists()
 
 
 def test_get_git_version_paths(monkeypatch):
     monkeypatch.setattr(version.shutil, "which", lambda _n: None)
-    if not (version._get_git_version() == ""):
-        raise AssertionError("Assertion failed")
+    assert version._get_git_version() == ""
 
     monkeypatch.setattr(version.shutil, "which", lambda _n: "git")
 
@@ -34,20 +31,17 @@ def test_get_git_version_paths(monkeypatch):
         stdout = "abc123\n"
 
     monkeypatch.setattr(version.subprocess, "run", lambda *a, **k: R())
-    if not (version._get_git_version() == "abc123"):
-        raise AssertionError("Assertion failed")
+    assert version._get_git_version() == "abc123"
 
     class R2:
         returncode = 1
         stdout = ""
 
     monkeypatch.setattr(version.subprocess, "run", lambda *a, **k: R2())
-    if not (version._get_git_version() == ""):
-        raise AssertionError("Assertion failed")
+    assert version._get_git_version() == ""
 
     monkeypatch.setattr(version.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError("x")))
-    if not (version._get_git_version() == ""):
-        raise AssertionError("Assertion failed")
+    assert version._get_git_version() == ""
 
 
 def test_get_version_frozen_and_source(monkeypatch):
@@ -66,8 +60,7 @@ def test_get_version_frozen_and_source(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", imp_ok)
-    if not (version._get_version() == "1.2.3"):
-        raise AssertionError("Assertion failed")
+    assert version._get_version() == "1.2.3"
 
     class BuildModEmpty:
         BUILD_VERSION = ""
@@ -78,8 +71,7 @@ def test_get_version_frozen_and_source(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", imp_empty)
-    if not (version._get_version() == "packaged"):
-        raise AssertionError("Assertion failed")
+    assert version._get_version() == "packaged"
 
     def imp_fail(name, *args, **kwargs):
         if name == "_build_version":
@@ -87,13 +79,11 @@ def test_get_version_frozen_and_source(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", imp_fail)
-    if not (version._get_version() == "packaged"):
-        raise AssertionError("Assertion failed")
+    assert version._get_version() == "packaged"
 
     monkeypatch.setattr(version.sys, "frozen", False, raising=False)
     monkeypatch.setattr(version, "_get_git_version", lambda: "gitver")
-    if not (version._get_version() == "gitver"):
-        raise AssertionError("Assertion failed")
+    assert version._get_version() == "gitver"
 
 
 def test_main_wires_app_icon_window_and_exec(monkeypatch, tmp_path):
@@ -140,18 +130,12 @@ def test_main_wires_app_icon_window_and_exec(monkeypatch, tmp_path):
     (tmp_path / "icon.ico").write_text("x", encoding="utf-8")
     app_main.main()
 
-    if not (("app_id", "jukebox.id") in events):
-        raise AssertionError("Assertion failed")
-    if not ("icon_create" in events):
-        raise AssertionError("Assertion failed")
-    if not ("app_icon" in events):
-        raise AssertionError("Assertion failed")
-    if not ("window_icon" in events):
-        raise AssertionError("Assertion failed")
-    if not ("window_show" in events):
-        raise AssertionError("Assertion failed")
-    if not (("exit", 7) in events):
-        raise AssertionError("Assertion failed")
+    assert ("app_id", "jukebox.id") in events
+    assert "icon_create" in events
+    assert "app_icon" in events
+    assert "window_icon" in events
+    assert "window_show" in events
+    assert ("exit", 7) in events
 
 
 def test_main_without_icon_path(monkeypatch, tmp_path):
@@ -187,12 +171,9 @@ def test_main_without_icon_path(monkeypatch, tmp_path):
 
     app_main.main()
 
-    if not ("show" in events):
-        raise AssertionError("Assertion failed")
-    if not ("app_icon" not in events):
-        raise AssertionError("Assertion failed")
-    if not ("window_icon" not in events):
-        raise AssertionError("Assertion failed")
+    assert "show" in events
+    assert "app_icon" not in events
+    assert "window_icon" not in events
 
 
 def test_main_module_name_guard_invokes_main(monkeypatch, tmp_path):
@@ -272,9 +253,6 @@ def test_main_module_name_guard_invokes_main(monkeypatch, tmp_path):
             else:
                 sys.modules[name] = mod
 
-    if not (("app_id", "jukebox.id") in events):
-        raise AssertionError("Assertion failed")
-    if not ("show" in events):
-        raise AssertionError("Assertion failed")
-    if not (("exit", 0) in events):
-        raise AssertionError("Assertion failed")
+    assert ("app_id", "jukebox.id") in events
+    assert "show" in events
+    assert ("exit", 0) in events

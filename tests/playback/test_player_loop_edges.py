@@ -19,8 +19,7 @@ def test_loop_body_handles_pending_shutdown(monkeypatch):
     p._loop_body()
 
     shutdown_calls = [c for c in backend.calls if c[0] == "shutdown"]
-    if not (shutdown_calls):
-        raise AssertionError("Assertion failed")
+    assert shutdown_calls
 
 
 def test_loop_body_pause_branch_runs_shutdown_once(monkeypatch):
@@ -43,10 +42,8 @@ def test_loop_body_pause_branch_runs_shutdown_once(monkeypatch):
     p._loop_body()
 
     shutdown_calls = [c for c in backend.calls if c[0] == "shutdown"]
-    if not (shutdown_calls):
-        raise AssertionError("Assertion failed")
-    if not (vis.emitted[-1] == ([],)):
-        raise AssertionError("Assertion failed")
+    assert shutdown_calls
+    assert vis.emitted[-1] == ([],)
 
 
 def test_loop_body_waits_with_precise_sleep_and_batches(monkeypatch):
@@ -69,12 +66,9 @@ def test_loop_body_waits_with_precise_sleep_and_batches(monkeypatch):
 
     p._loop_body()
 
-    if not (sleeps and sleeps[0] > 0):
-        raise AssertionError("Assertion failed")
-    if not (backend.calls[0][0] == "execute_batch"):
-        raise AssertionError("Assertion failed")
-    if not (len(backend.calls[0][1]) == 2):
-        raise AssertionError("Assertion failed")
+    assert sleeps and sleeps[0] > 0
+    assert backend.calls[0][0] == "execute_batch"
+    assert len(backend.calls[0][1]) == 2
 
 
 def test_loop_body_emits_progress_periodically(monkeypatch):
@@ -101,8 +95,7 @@ def test_loop_body_emits_progress_periodically(monkeypatch):
 
     p._loop_body()
 
-    if not (progress.emitted):
-        raise AssertionError("Assertion failed")
+    assert progress.emitted
 
 
 def test_countdown_stops_early_when_stop_event_set(monkeypatch):
@@ -116,10 +109,8 @@ def test_countdown_stops_early_when_stop_event_set(monkeypatch):
     monkeypatch.setattr(pmod.time, "sleep", _sleep)
     p._countdown()
 
-    if not (status.emitted[0] == ("Get ready...",)):
-        raise AssertionError("Assertion failed")
-    if not (any(e == ("3...",) for e in status.emitted)):
-        raise AssertionError("Assertion failed")
+    assert status.emitted[0] == ("Get ready...",)
+    assert any(e == ("3...",) for e in status.emitted)
 
 
 def test_play_respects_start_offset_event_index(monkeypatch):
@@ -132,8 +123,7 @@ def test_play_respects_start_offset_event_index(monkeypatch):
 
     p.play()
 
-    if not (p.event_index == 1):
-        raise AssertionError("Assertion failed")
+    assert p.event_index == 1
 
 
 def test_player_golden_sequence_chord_with_pedal(monkeypatch):
@@ -161,7 +151,7 @@ def test_player_golden_sequence_chord_with_pedal(monkeypatch):
 
     p.play()
 
-    if not (backend.calls == [
+    assert backend.calls == [
         ("pedal_on",),
         ("note_on", 60, 95),
         ("note_on", 64, 100),
@@ -169,8 +159,7 @@ def test_player_golden_sequence_chord_with_pedal(monkeypatch):
         ("note_off", 60),
         ("note_off", 64),
         ("shutdown",),
-    ]):
-        raise AssertionError("Assertion failed")
+    ]
 
 
 def test_player_golden_sequence_same_time_release_before_press(monkeypatch):
@@ -195,9 +184,8 @@ def test_player_golden_sequence_same_time_release_before_press(monkeypatch):
 
     p.play()
 
-    if not (backend.calls[:3] == [
+    assert backend.calls[:3] == [
         ("note_on", 60, 90),
         ("note_off", 60),
         ("note_on", 67, 110),
-    ]):
-        raise AssertionError("Assertion failed")
+    ]

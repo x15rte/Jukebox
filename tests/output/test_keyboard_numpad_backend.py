@@ -43,20 +43,17 @@ def test_keyboard_backend_overlapping_same_base_key(monkeypatch):
     ctrl = cast(FakeController, kb._kb)
 
     key_data = kb._mapper.get_key_data(60)
-    if not (key_data is not None):
-        raise AssertionError("Assertion failed")
+    assert key_data is not None
     base_key = key_data["key"]
 
     kb.note_on(60, 100)
     kb.note_on(61, 100)
     kb.note_off(60)
 
-    if not (base_key not in ctrl.releases):
-        raise AssertionError("Assertion failed")
+    assert base_key not in ctrl.releases
 
     kb.note_off(61)
-    if not (base_key in ctrl.releases):
-        raise AssertionError("Assertion failed")
+    assert base_key in ctrl.releases
 
 
 def test_keyboard_backend_pedal_and_shutdown(monkeypatch):
@@ -71,10 +68,8 @@ def test_keyboard_backend_pedal_and_shutdown(monkeypatch):
     kb.note_on(60, 100)
     kb.shutdown()
 
-    if not (len(ctrl.presses) >= 2):
-        raise AssertionError("Assertion failed")
-    if not (len(ctrl.releases) >= 2):
-        raise AssertionError("Assertion failed")
+    assert len(ctrl.presses) >= 2
+    assert len(ctrl.releases) >= 2
 
 
 def test_numpad_backend_note_pedal_and_shutdown(monkeypatch):
@@ -91,12 +86,9 @@ def test_numpad_backend_note_pedal_and_shutdown(monkeypatch):
     nb.shutdown()
 
     kinds = [c[0] for c in calls]
-    if not ("note" in kinds):
-        raise AssertionError("Assertion failed")
-    if not ("pedal" in kinds):
-        raise AssertionError("Assertion failed")
-    if not ("reset" in kinds):
-        raise AssertionError("Assertion failed")
+    assert "note" in kinds
+    assert "pedal" in kinds
+    assert "reset" in kinds
 
 
 def test_keyboard_backend_note_on_off_exact_key_and_modifier_sequence(monkeypatch):
@@ -110,16 +102,12 @@ def test_keyboard_backend_note_on_off_exact_key_and_modifier_sequence(monkeypatc
     kb.note_off(61)
 
     key_data = kb._mapper.get_key_data(61)
-    if not (key_data is not None):
-        raise AssertionError("Assertion failed")
+    assert key_data is not None
     base_key = key_data["key"]
 
-    if not (ctrl.pressed_modifiers == [(out.Key.shift,)]):
-        raise AssertionError("Assertion failed")
-    if not (ctrl.presses == [base_key]):
-        raise AssertionError("Assertion failed")
-    if not (ctrl.releases == [base_key]):
-        raise AssertionError("Assertion failed")
+    assert ctrl.pressed_modifiers == [(out.Key.shift,)]
+    assert ctrl.presses == [base_key]
+    assert ctrl.releases == [base_key]
 
 
 def test_output_backend_execute_batch_matches_in_game_event_order(monkeypatch):
@@ -138,9 +126,8 @@ def test_output_backend_execute_batch_matches_in_game_event_order(monkeypatch):
         ]
     )
 
-    if not (calls == [
+    assert calls == [
         ("pedal", (127,), {}),
         ("note", (60,), {"velocity": 0, "is_note_off": True}),
         ("note", (64, 96), {"is_note_off": False}),
-    ]):
-        raise AssertionError("Assertion failed")
+    ]

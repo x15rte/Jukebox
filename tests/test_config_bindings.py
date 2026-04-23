@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 import config_bindings as cb
 from config_repository import Config
 
@@ -159,30 +161,22 @@ def test_validate_config_ui_bindings_passes_default():
 
 def test_validate_config_ui_bindings_rejects_duplicate_key():
     dup = list(cb.CONFIG_UI_BINDINGS) + [cb.CONFIG_UI_BINDINGS[0]]
-    try:
+    with pytest.raises(ValueError, match="Duplicate"):
         cb.validate_config_ui_bindings(dup)
-        if not (False):
-            raise AssertionError("expected ValueError")
-    except ValueError as e:
-        if not ("Duplicate" in str(e)):
-            raise AssertionError("Assertion failed")
 
 
 def test_apply_input_mode_effects_switches_tabs():
     w = DummyWidget()
     cb._apply_input_mode(w, "piano")
-    if not (w.tabs.enabled[1] is False):
-        raise AssertionError("Assertion failed")
+    assert w.tabs.enabled[1] is False
     cb._apply_input_mode(w, "file")
-    if not (w.tabs.enabled[1] is True):
-        raise AssertionError("Assertion failed")
+    assert w.tabs.enabled[1] is True
 
 
 def test_set_output_mode_combo_by_data_calls_visibility_update():
     w = DummyWidget()
     cb._set_output_mode_combo(w, "midi_numpad")
-    if not (w.output_mode_combo.currentText() == "Numpad"):
-        raise AssertionError("Assertion failed")
+    assert w.output_mode_combo.currentText() == "Numpad"
 
 
 def test_apply_config_effects_runs_without_error(monkeypatch):
@@ -195,41 +189,24 @@ def test_apply_config_effects_runs_without_error(monkeypatch):
 def test_set_hotkey_from_config_updates_label():
     w = DummyWidget()
     cb._set_hotkey_from_config(w, "f7")
-    if not ("f7" in w.hk_label.text):
-        raise AssertionError("Assertion failed")
+    assert "f7" in w.hk_label.text
 
 
 def test_set_log_level_combo_normalizes_invalid_value():
     w = DummyWidget()
     cb._set_log_level_combo(w, "not-a-level")
-    if not (w.log_level_combo.currentText() == "INFO"):
-        raise AssertionError("Assertion failed")
+    assert w.log_level_combo.currentText() == "INFO"
 
 
 def test_validate_config_ui_bindings_rejects_invalid_entries():
-    try:
+    with pytest.raises(ValueError, match="3-item tuple"):
         cb.validate_config_ui_bindings([("x",)])
-        if not (False):
-            raise AssertionError("expected ValueError")
-    except ValueError as e:
-        if not ("3-item tuple" in str(e)):
-            raise AssertionError("Assertion failed")
 
-    try:
+    with pytest.raises(ValueError, match="Unknown config binding key"):
         cb.validate_config_ui_bindings([("unknown_key", lambda w: None, lambda w, v: None)])
-        if not (False):
-            raise AssertionError("expected ValueError")
-    except ValueError as e:
-        if not ("Unknown config binding key" in str(e)):
-            raise AssertionError("Assertion failed")
 
-    try:
+    with pytest.raises(ValueError, match="callable"):
         cb.validate_config_ui_bindings([("tempo", 1, lambda w, v: None)])
-        if not (False):
-            raise AssertionError("expected ValueError")
-    except ValueError as e:
-        if not ("callable" in str(e)):
-            raise AssertionError("Assertion failed")
 
 
 def test_apply_input_mode_refresh_and_disconnect_paths():
@@ -237,19 +214,14 @@ def test_apply_input_mode_refresh_and_disconnect_paths():
 
     w.tabs.cur = 1
     cb._apply_input_mode(w, "piano")
-    if not (w.tabs.cur == 0):
-        raise AssertionError("Assertion failed")
-    if not (w.tabs.enabled[1] is False):
-        raise AssertionError("Assertion failed")
-    if not (w.refresh_calls == [False]):
-        raise AssertionError("Assertion failed")
+    assert w.tabs.cur == 0
+    assert w.tabs.enabled[1] is False
+    assert w.refresh_calls == [False]
 
     w.midi_input_active = True
     cb._apply_input_mode(w, "file")
-    if not (w.tabs.enabled[1] is True):
-        raise AssertionError("Assertion failed")
-    if not (w.disconnected == 1):
-        raise AssertionError("Assertion failed")
+    assert w.tabs.enabled[1] is True
+    assert w.disconnected == 1
 
 
 def test_set_output_mode_combo_no_match_still_updates_visibility(monkeypatch):
@@ -257,34 +229,29 @@ def test_set_output_mode_combo_no_match_still_updates_visibility(monkeypatch):
     called = []
     monkeypatch.setattr(w, "_update_88_key_visibility", lambda: called.append(True))
     cb._set_output_mode_combo(w, "missing")
-    if not (called == [True]):
-        raise AssertionError("Assertion failed")
+    assert called == [True]
 
 
 def test_set_hotkey_from_config_no_value_noop():
     w = DummyWidget()
     before = w.hk_label.text
     cb._set_hotkey_from_config(w, "")
-    if not (w.hk_label.text == before):
-        raise AssertionError("Assertion failed")
+    assert w.hk_label.text == before
 
 
 def test_window_geometry_get_and_set():
     w = DummyWidget()
     out = cb._get_window_geometry(w)
-    if not (out is not None):
-        raise AssertionError("Assertion failed")
+    assert out is not None
 
     cb._set_window_geometry(w, out)
-    if not (w.restore_calls):
-        raise AssertionError("Assertion failed")
+    assert w.restore_calls
 
 
 def test_set_window_geometry_empty_and_invalid(monkeypatch):
     w = DummyWidget()
     cb._set_window_geometry(w, None)
-    if not (w.restore_calls == []):
-        raise AssertionError("Assertion failed")
+    assert w.restore_calls == []
 
     class EmptyBA:
         @staticmethod
@@ -297,30 +264,25 @@ def test_set_window_geometry_empty_and_invalid(monkeypatch):
 
     monkeypatch.setattr(cb, "QByteArray", EmptyBA)
     cb._set_window_geometry(w, "QUJD")
-    if not (w.restore_calls == []):
-        raise AssertionError("Assertion failed")
+    assert w.restore_calls == []
 
 
 def test_set_save_log_checkbox_blocks_signals():
     w = DummyWidget()
     cb._set_save_log_to_file_checkbox(w, True)
-    if not (w.log_save_to_file_check.checked is True):
-        raise AssertionError("Assertion failed")
-    if not (w.log_save_to_file_check.blocked == [True, False]):
-        raise AssertionError("Assertion failed")
+    assert w.log_save_to_file_check.checked is True
+    assert w.log_save_to_file_check.blocked == [True, False]
 
 
 def test_set_log_level_combo_empty_and_existing_level_no_signal_block():
     w = DummyWidget()
     w.log_level_combo.setCurrentText("INFO")
     cb._set_log_level_combo(w, "")
-    if not (w.log_level_combo.currentText() == "INFO"):
-        raise AssertionError("Assertion failed")
+    assert w.log_level_combo.currentText() == "INFO"
 
     w.log_level_combo._blocked.clear()
     cb._set_log_level_combo(w, "info")
-    if not (w.log_level_combo._blocked == []):
-        raise AssertionError("Assertion failed")
+    assert w.log_level_combo._blocked == []
 
 
 def test_set_save_log_to_file_and_set_log_level(monkeypatch):
@@ -335,9 +297,6 @@ def test_set_save_log_to_file_and_set_log_level(monkeypatch):
     cb._set_save_log_to_file(w, False)
     cb._set_log_level(w, "debug")
 
-    if not (any(e[0] == "enable" for e in events)):
-        raise AssertionError("Assertion failed")
-    if not (any(e[0] == "disable" for e in events)):
-        raise AssertionError("Assertion failed")
-    if not (("level", "DEBUG") in events):
-        raise AssertionError("Assertion failed")
+    assert any(e[0] == "enable" for e in events)
+    assert any(e[0] == "disable" for e in events)
+    assert ("level", "DEBUG") in events

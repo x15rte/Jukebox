@@ -11,40 +11,30 @@ def test_get_time_groups_uses_threshold_boundary():
         make_note(3, 64, 0.031, 0.2),
     ]
     groups = get_time_groups(notes, threshold=0.015)
-    if not (len(groups) == 2):
-        raise AssertionError("Assertion failed")
-    if not ([n.id for n in groups[0]] == [1, 2]):
-        raise AssertionError("Assertion failed")
-    if not ([n.id for n in groups[1]] == [3]):
-        raise AssertionError("Assertion failed")
+    assert len(groups) == 2
+    assert [n.id for n in groups[0]] == [1, 2]
+    assert [n.id for n in groups[1]] == [3]
 
 
 def test_get_time_groups_empty_returns_empty():
-    if not (get_time_groups([]) == []):
-        raise AssertionError("Assertion failed")
+    assert get_time_groups([]) == []
 
 
 def test_tempo_map_round_trip_and_tempo_lookup():
     tm = TempoMap([(0.0, 500000), (2.0, 1000000)], [(0.0, 4, 4)])
     t = tm.beat_to_time(3.0)
     b = tm.time_to_beat(t)
-    if not (abs(b - 3.0) < 1e-9):
-        raise AssertionError("Assertion failed")
-    if not (tm.get_tempo_at(0.5) == 500000):
-        raise AssertionError("Assertion failed")
-    if not (tm.get_tempo_at(3.0) == 1000000):
-        raise AssertionError("Assertion failed")
+    assert abs(b - 3.0) < 1e-9
+    assert tm.get_tempo_at(0.5) == 500000
+    assert tm.get_tempo_at(3.0) == 1000000
 
 
 def test_tempo_map_measure_boundaries_default_signature():
     tm = TempoMap([(0.0, 500000)], [])
     measures = tm.get_measure_boundaries(total_duration=4.5)
-    if not (len(measures) >= 2):
-        raise AssertionError("Assertion failed")
-    if not (measures[0][0] == 0.0):
-        raise AssertionError("Assertion failed")
-    if not (measures[0][1] > measures[0][0]):
-        raise AssertionError("Assertion failed")
+    assert len(measures) >= 2
+    assert measures[0][0] == 0.0
+    assert measures[0][1] > measures[0][0]
 
 
 def test_tempo_map_measure_boundaries_breaks_on_future_time_signature():
@@ -52,10 +42,8 @@ def test_tempo_map_measure_boundaries_breaks_on_future_time_signature():
 
     measures = tm.get_measure_boundaries(total_duration=2.0)
 
-    if not (measures):
-        raise AssertionError("Assertion failed")
-    if not (measures[0][0] == 0.0):
-        raise AssertionError("Assertion failed")
+    assert measures
+    assert measures[0][0] == 0.0
 
 
 def test_global_tick_map_tick_to_time_with_tempo_change():
@@ -69,25 +57,20 @@ def test_global_tick_map_tick_to_time_with_tempo_change():
     t1 = gmap.tick_to_time(480)
     t2 = gmap.tick_to_time(960)
 
-    if not (abs(t1 - 0.5) < 1e-6):
-        raise AssertionError("Assertion failed")
-    if not (abs(t2 - 1.5) < 1e-6):
-        raise AssertionError("Assertion failed")
+    assert abs(t1 - 0.5) < 1e-6
+    assert abs(t2 - 1.5) < 1e-6
 
 
 def test_tempo_map_negative_time_and_beat_return_zero():
     tm = TempoMap([(0.0, 500000)], [(0.0, 4, 4)])
-    if not (tm.time_to_beat(-1.0) == 0.0):
-        raise AssertionError("Assertion failed")
-    if not (tm.beat_to_time(-1.0) == 0.0):
-        raise AssertionError("Assertion failed")
+    assert tm.time_to_beat(-1.0) == 0.0
+    assert tm.beat_to_time(-1.0) == 0.0
 
 
 def test_tempo_map_build_segments_inserts_zero_segment_when_first_tempo_late():
     tm = TempoMap([(1.0, 600000)], [])
 
-    if not (tm._segments[0] == (0.0, 0.0, 500000)):
-        raise AssertionError("Assertion failed")
+    assert tm._segments[0] == (0.0, 0.0, 500000)
 
 
 def test_global_tick_map_collects_time_signature_events():
@@ -97,8 +80,7 @@ def test_global_tick_map_collects_time_signature_events():
     tr.append(mido.MetaMessage("time_signature", numerator=3, denominator=4, time=0))
 
     gmap = GlobalTickMap(mid)
-    if not (gmap.time_signatures and gmap.time_signatures[0][1:] == (3, 4)):
-        raise AssertionError("Assertion failed")
+    assert gmap.time_signatures and gmap.time_signatures[0][1:] == (3, 4)
 
 
 def test_global_tick_map_tick_to_time_breaks_on_future_entry():
@@ -110,5 +92,4 @@ def test_global_tick_map_tick_to_time_breaks_on_future_entry():
 
     gmap = GlobalTickMap(mid)
 
-    if not (abs(gmap.tick_to_time(240) - 0.25) < 1e-6):
-        raise AssertionError("Assertion failed")
+    assert abs(gmap.tick_to_time(240) - 0.25) < 1e-6

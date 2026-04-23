@@ -62,6 +62,26 @@ class RecorderBackend(OutputBackend):
         self.calls.append(("shutdown",))
 
 
+class FakeLiveBackend(OutputBackend):
+    def __init__(self):
+        self.calls: list[tuple[Any, ...]] = []
+
+    def note_on(self, pitch, velocity):
+        self.calls.append(("note_on", pitch, velocity))
+
+    def note_off(self, pitch):
+        self.calls.append(("note_off", pitch))
+
+    def pedal_on(self):
+        self.calls.append(("pedal_on",))
+
+    def pedal_off(self):
+        self.calls.append(("pedal_off",))
+
+    def shutdown(self):
+        self.calls.append(("shutdown",))
+
+
 class FakeSignal:
     def __init__(self):
         self._subs: list[Any] = []
@@ -154,3 +174,35 @@ class FakeThread:
         self.wait_calls.append(timeout)
         self._running = False
         return True
+
+
+class FakePlaybackPlayer:
+    def __init__(self, events, backend, config, total_duration):
+        self.events = events
+        self.backend = backend
+        self.config = config
+        self.total_duration = total_duration
+        self.playback_finished = FakeSignal()
+        self.status_updated = FakeSignal()
+        self.progress_updated = FakeSignal()
+        self.visualizer_updated = FakeSignal()
+        self.stopped = False
+        self.stop_calls = 0
+        self.paused_toggles = 0
+        self.seek_calls: list[Any] = []
+
+    def moveToThread(self, thread):
+        self.thread = thread
+
+    def play(self):
+        return None
+
+    def stop(self):
+        self.stopped = True
+        self.stop_calls += 1
+
+    def toggle_pause(self):
+        self.paused_toggles += 1
+
+    def seek(self, target):
+        self.seek_calls.append(target)

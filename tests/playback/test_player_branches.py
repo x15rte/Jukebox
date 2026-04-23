@@ -12,10 +12,8 @@ def test_stop_sets_stop_and_clears_pause():
     p = pmod.Player([], FakeBackend(), {}, 1.0)
     p.pause_event.set()
     p.stop()
-    if not (p.stop_event.is_set()):
-        raise AssertionError("Assertion failed")
-    if not (not p.pause_event.is_set()):
-        raise AssertionError("Assertion failed")
+    assert p.stop_event.is_set()
+    assert not p.pause_event.is_set()
 
 
 def test_seek_while_paused_updates_start_and_pause_ts(monkeypatch):
@@ -29,14 +27,10 @@ def test_seek_while_paused_updates_start_and_pause_ts(monkeypatch):
 
     p.seek(0.1)
 
-    if not (p.start_time == 9.9):
-        raise AssertionError("Assertion failed")
-    if not (p._pause_ts == 10.0):
-        raise AssertionError("Assertion failed")
-    if not (prog.emitted[-1] == (0.1,)):
-        raise AssertionError("Assertion failed")
-    if not (vis.emitted[-1] == ([],)):
-        raise AssertionError("Assertion failed")
+    assert p.start_time == 9.9
+    assert p._pause_ts == 10.0
+    assert prog.emitted[-1] == (0.1,)
+    assert vis.emitted[-1] == ([],)
 
 
 def test_countdown_emits_status_and_sleeps(monkeypatch):
@@ -48,12 +42,9 @@ def test_countdown_emits_status_and_sleeps(monkeypatch):
 
     p._countdown()
 
-    if not (status.emitted[0] == ("Get ready...",)):
-        raise AssertionError("Assertion failed")
-    if not (status.emitted[1:] == [("3...",), ("2...",), ("1...",)]):
-        raise AssertionError("Assertion failed")
-    if not (sleeps == [1, 1, 1]):
-        raise AssertionError("Assertion failed")
+    assert status.emitted[0] == ("Get ready...",)
+    assert status.emitted[1:] == [("3...",), ("2...",), ("1...",)]
+    assert sleeps == [1, 1, 1]
 
 
 def test_run_loop_restores_timer_and_switch_interval(monkeypatch):
@@ -67,14 +58,10 @@ def test_run_loop_restores_timer_and_switch_interval(monkeypatch):
 
     p._run_loop()
 
-    if not (calls[0] == ("switch", 0.0005)):
-        raise AssertionError("Assertion failed")
-    if not (("set_timer", 1) in calls):
-        raise AssertionError("Assertion failed")
-    if not (("restore_timer", 1) in calls):
-        raise AssertionError("Assertion failed")
-    if not (calls[-1] == ("switch", 0.01)):
-        raise AssertionError("Assertion failed")
+    assert calls[0] == ("switch", 0.0005)
+    assert ("set_timer", 1) in calls
+    assert ("restore_timer", 1) in calls
+    assert calls[-1] == ("switch", 0.01)
 
 
 def test_loop_body_exits_after_total_duration(monkeypatch):
@@ -88,8 +75,7 @@ def test_loop_body_exits_after_total_duration(monkeypatch):
 
     p._loop_body()
 
-    if not (status.emitted[-1] == ("Playback finished.",)):
-        raise AssertionError("Assertion failed")
+    assert status.emitted[-1] == ("Playback finished.",)
 
 
 def test_play_calls_shutdown_and_finished_even_on_exception(monkeypatch):
@@ -103,12 +89,9 @@ def test_play_calls_shutdown_and_finished_even_on_exception(monkeypatch):
 
     p.play()
 
-    if not (backend.calls[-1][0] == "shutdown"):
-        raise AssertionError("Assertion failed")
-    if not (finished.emitted[-1] == ()):
-        raise AssertionError("Assertion failed")
-    if not (status.emitted[-1][0].startswith("Error: boom")):
-        raise AssertionError("Assertion failed")
+    assert backend.calls[-1][0] == "shutdown"
+    assert finished.emitted[-1] == ()
+    assert status.emitted[-1][0].startswith("Error: boom")
 
 
 def test_event_compiler_clears_played_set_when_entering_next_section(monkeypatch):
@@ -132,8 +115,7 @@ def test_event_compiler_clears_played_set_when_entering_next_section(monkeypatch
     )
 
     press_pitches = [e.pitch for e in events if e.action == "press"]
-    if not (press_pitches == [61, 61]):
-        raise AssertionError("Assertion failed")
+    assert press_pitches == [61, 61]
 
 
 def test_event_compiler_pushes_generated_pedal_events(monkeypatch):
@@ -144,8 +126,7 @@ def test_event_compiler_pushes_generated_pedal_events(monkeypatch):
 
     events = pmod.EventCompiler.compile(notes, [], {})
 
-    if not (any(e.action == "pedal" and e.key_char == "down" for e in events)):
-        raise AssertionError("Assertion failed")
+    assert any(e.action == "pedal" and e.key_char == "down" for e in events)
 
 
 def test_mistake_pitch_black_key_returns_none_when_all_candidates_out_of_range(monkeypatch):
@@ -154,8 +135,7 @@ def test_mistake_pitch_black_key_returns_none_when_all_candidates_out_of_range(m
 
     out = pmod.EventCompiler._mistake_pitch(-100)
 
-    if not (out is None):
-        raise AssertionError("Assertion failed")
+    assert out is None
 
 
 def test_play_stops_after_countdown_when_stop_event_set(monkeypatch):
@@ -166,8 +146,7 @@ def test_play_stops_after_countdown_when_stop_event_set(monkeypatch):
 
     p.play()
 
-    if not (backend.calls[-1][0] == "shutdown"):
-        raise AssertionError("Assertion failed")
+    assert backend.calls[-1][0] == "shutdown"
 
 
 def test_execute_batch_returns_immediately_when_stopped():
@@ -177,8 +156,7 @@ def test_execute_batch_returns_immediately_when_stopped():
 
     p._execute_batch([FakeEvent(0.0, 2, "press", pitch=60)])
 
-    if not (not backend.calls):
-        raise AssertionError("Assertion failed")
+    assert not backend.calls
 
 
 def test_execute_batch_ignores_events_without_pitch_values():
@@ -195,9 +173,6 @@ def test_execute_batch_ignores_events_without_pitch_values():
         ]
     )
 
-    if not (backend.calls and backend.calls[-1][0] == "execute_batch"):
-        raise AssertionError("Assertion failed")
-    if not (p._active_pitches == {60}):
-        raise AssertionError("Assertion failed")
-    if not (vis.emitted == []):
-        raise AssertionError("Assertion failed")
+    assert backend.calls and backend.calls[-1][0] == "execute_batch"
+    assert p._active_pitches == {60}
+    assert vis.emitted == []
