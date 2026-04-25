@@ -129,6 +129,35 @@ def test_load_config_success_applies_effects_and_updates(window_factory, monkeyp
     assert ("labels", None) in events
 
 
+@pytest.mark.parametrize(
+    ("direct_input", "expected"),
+    [
+        (True, "available"),
+        (False, "not available (using pynput fallback)"),
+    ],
+)
+def test_log_startup_capabilities_logs_windows_direct_input_status(
+    window_factory, monkeypatch, tmp_path, direct_input, expected
+):
+    w = window_factory()
+    logs = []
+
+    monkeypatch.setattr(
+        "main_window.get_capabilities",
+        lambda: {
+            "platform": "win32",
+            "high_res_timer": True,
+            "direct_input": direct_input,
+        },
+    )
+    monkeypatch.setattr("main_window.jukebox_logger.info", lambda m: logs.append(m))
+
+    w._log_startup_capabilities()
+
+    assert "Platform: win32; high-resolution timer: available." in logs
+    assert f"Windows direct input (pydirectinput): {expected}." in logs
+
+
 def test_close_event_logs_save_config_exception(window_factory, monkeypatch, tmp_path):
     w = window_factory()
 

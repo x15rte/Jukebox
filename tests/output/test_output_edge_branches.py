@@ -215,6 +215,35 @@ def test_keyboard_backend_windows_import_fallback_logs(monkeypatch):
     assert any("falling back to pynput" in m.lower() for m in logs)
 
 
+def test_keyboard_backend_windows_import_uses_pydirectinput(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    class _PDI:
+        PAUSE = 1
+        FAILSAFE = True
+
+    def fake_import(name, *args, **kwargs):
+        if name == "pydirectinput":
+            return _PDI
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    logs = []
+
+    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+
+    assert kb._pdi is _PDI
+    assert kb._use_pydirectinput is True
+    assert kb._kb is None
+    assert _PDI.PAUSE == 0
+    assert _PDI.FAILSAFE is False
+    assert any("using pydirectinput on windows" in m.lower() for m in logs)
+
+
 @pytest.mark.parametrize(
     ("modifier", "expected"),
     [(Key.ctrl, "ctrlleft"), (Key.alt, "altleft"), (object(), None)],

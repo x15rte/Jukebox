@@ -1,5 +1,9 @@
 import builtins
+import ctypes
 import importlib
+import platform
+import runpy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +11,10 @@ import pytest
 import output.RobloxMidiConnect_encoder as rmc
 
 pytestmark = pytest.mark.rmc_low_level
+
+_RMC_PATH = (
+    Path(__file__).resolve().parents[2] / "output" / "RobloxMidiConnect_encoder.py"
+)
 
 
 class _Key:
@@ -23,6 +31,46 @@ class _Keyboard:
 
     def tap(self, key):
         self.taps.append(key)
+
+
+class _PDIKeyBdInput(ctypes.Structure):
+    _fields_ = [
+        ("wVk", ctypes.c_ushort),
+        ("wScan", ctypes.c_ushort),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class _PDIInputUnion(ctypes.Union):
+    _fields_ = [("ki", _PDIKeyBdInput)]
+
+
+class _PDIInput(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_ulong), ("ii", _PDIInputUnion)]
+
+
+class _PDIModule:
+    def __init__(self):
+        self.PAUSE = 1
+        self.KEYBOARD_MAPPING = {}
+        self.Input = _PDIInput
+
+
+def _load_rmc_namespace(monkeypatch, *, pydirectinput=None, missing_pydirectinput=False):
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "pydirectinput":
+            if missing_pydirectinput:
+                raise ImportError("missing pydirectinput")
+            return pydirectinput
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    return runpy.run_path(str(_RMC_PATH), run_name="__rmc_import_test__")
 
 
 def test_encode_note_components_clamps_velocity():
@@ -406,22 +454,30 @@ def test_encode_note_components_note_off_and_clamped_velocity():
     assert (a, b, c, d) == (5, 0, 0, 0)
 
 
+def test_windows_import_configures_pydirectinput_batched_sendinput(monkeypatch):
+    pydirectinput = _PDIModule()
+
+    ns = _load_rmc_namespace(monkeypatch, pydirectinput=pydirectinput)
+
+    assert ns["_use_pydirectinput"] is True
+    assert ns["_use_batched_sendinput"] is True
+    assert pydirectinput.PAUSE == 0
+    assert pydirectinput.KEYBOARD_MAPPING == ns["_SCAN_CODES"]
+    assert len(ns["_frame_inputs"]) == 10
+    assert ns["_frame_sizeof"] == ctypes.sizeof(pydirectinput.Input)
+    assert ns["_frame_inputs"][0].type == ns["_INPUT_KEYBOARD"]
+    assert ns["_frame_inputs"][0].ii.ki.wVk == 0
+    assert ns["_frame_inputs"][0].ii.ki.time == 0
+    assert ns["_frame_inputs"][0].ii.ki.dwFlags == ns["_KEYEVENTF_SCANCODE"]
+    assert ns["_frame_inputs"][1].ii.ki.dwFlags == (
+        ns["_KEYEVENTF_SCANCODE"] | ns["_KEYEVENTF_KEYUP"]
+    )
+
+
 def test_import_sets_pydirectinput_false_on_import_error(monkeypatch):
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "pydirectinput":
-            raise ImportError("missing pydirectinput")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(rmc, "_platform", "Windows")
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-    mod = importlib.reload(rmc)
-    try:
-        assert mod._use_pydirectinput is False
-    finally:
-        importlib.reload(mod)
+    ns = _load_rmc_namespace(monkeypatch, missing_pydirectinput=True)
+    assert ns["_use_pydirectinput"] is False
+    assert ns["_use_batched_sendinput"] is False
 
 
 def test_import_leaves_keyboard_none_when_pynput_missing(monkeypatch):
