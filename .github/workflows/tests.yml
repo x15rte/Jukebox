@@ -7,7 +7,10 @@ on:
 
 jobs:
   test:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
@@ -20,10 +23,24 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
           cache-dependency-path: |
+            requirements.txt
             requirements-windows.txt
             requirements-test.txt
 
-      - name: Install Python dependencies
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libjack-dev
+
+      - name: Install Python dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-test.txt
+
+      - name: Install Python dependencies (Windows)
+        if: runner.os == 'Windows'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-windows.txt -r requirements-test.txt
@@ -43,11 +60,12 @@ jobs:
           --cov-report=xml
 
       - name: Run static type checks
+        if: runner.os == 'Linux'
         run: |
           python -m pyright tests
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-xml
+          name: coverage-xml-${{ runner.os }}
           path: coverage.xml

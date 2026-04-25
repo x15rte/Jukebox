@@ -92,7 +92,9 @@ def test_ensure_numlock_windows_path_taps_when_off(monkeypatch):
         def GetKeyState(_v):
             return 0
 
-    monkeypatch.setattr(rmc.ctypes, "windll", SimpleNamespace(user32=_User32()))
+    monkeypatch.setattr(
+        rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False
+    )
 
     rmc.ensure_numlock_on()
 
@@ -110,7 +112,9 @@ def test_ensure_numlock_windows_handles_exception(monkeypatch):
         def GetKeyState(_v):
             raise RuntimeError("nope")
 
-    monkeypatch.setattr(rmc.ctypes, "windll", SimpleNamespace(user32=_User32()))
+    monkeypatch.setattr(
+        rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False
+    )
 
     rmc.ensure_numlock_on()
 
@@ -193,7 +197,9 @@ def test_ensure_numlock_returns_when_already_ensured(monkeypatch):
         def GetKeyState(_v):
             raise RuntimeError("should not run")
 
-    monkeypatch.setattr(rmc.ctypes, "windll", SimpleNamespace(user32=_User32()))
+    monkeypatch.setattr(
+        rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False
+    )
     rmc.ensure_numlock_on()
 
 
@@ -307,7 +313,9 @@ def test_send_frame_batched_writes_scans_and_checks_result(monkeypatch):
         def SendInput(n, _inputs, _sz):
             return n
 
-    monkeypatch.setattr(rmc.ctypes, "windll", SimpleNamespace(user32=_User32()))
+    monkeypatch.setattr(
+        rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False
+    )
 
     ok = rmc._send_frame_batched(1, 2, 3, 4, 5)
 

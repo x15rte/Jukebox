@@ -2,14 +2,25 @@ from __future__ import annotations
 
 import os
 import random
+import sys
 from typing import Any, cast
 
 import pytest
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+try:
+    import pynput.keyboard  # noqa: F401
+except Exception:
+    for module_name in list(sys.modules):
+        if module_name == "pynput" or module_name.startswith("pynput."):
+            sys.modules.pop(module_name, None)
+    from tests.helpers import pynput_stub
+
+    pynput_stub.install()
+
 from config_repository import ConfigRepository
 from main_window import MainWindow
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
     import numpy as _np

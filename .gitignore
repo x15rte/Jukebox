@@ -621,3 +621,7 @@ skills-lock.json
 # Missing a tool? Open a PR: https://github.com/Fellowship-dev/agents-gitignore
 # =============================================================================
 pyright.out
+
+# python venv
+bin/
+pyvenv.cfg
