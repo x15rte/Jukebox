@@ -31,7 +31,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libjack-dev
+          sudo apt-get install -y libasound2-dev libjack-dev libegl1
 
       - name: Install Python dependencies (Linux)
         if: runner.os == 'Linux'
