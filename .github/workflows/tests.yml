@@ -69,3 +69,4 @@ jobs:
         with:
           name: coverage-xml-${{ runner.os }}
           path: coverage.xml
+          overwrite: true
