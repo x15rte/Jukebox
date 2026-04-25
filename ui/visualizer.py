@@ -212,10 +212,11 @@ class TimelineWidget(QWidget):
             self._cached_background = None
             return
 
-        self._cached_background = QPixmap(self.size())
-        self._cached_background.fill(self.bg_color)
+        background = QPixmap(self.size())
+        background.fill(self.bg_color)
+        self._cached_background = background
 
-        painter = QPainter(self._cached_background)
+        painter = QPainter(background)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         w = self.width()

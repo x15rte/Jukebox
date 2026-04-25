@@ -1,0 +1,27 @@
+[run]
+source =
+    analysis
+    core
+    playback
+    output
+    ui
+    native
+    config_bindings
+    config_repository
+    logger_core
+    main
+    main_window
+    models
+    platform_utils
+    theme
+    version
+omit =
+    tests/*
+    build/*
+    dist/*
+    lib/*
+    lib64/*
+
+[report]
+show_missing = True
+skip_covered = False

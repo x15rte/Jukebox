@@ -464,9 +464,7 @@ def test_parse_select_then_handle_play_workflow_uses_selected_tracks_and_seek_ra
             self._tracks = tracks
 
         def exec(self):
-            from main_window import QDialog
-
-            return QDialog.DialogCode.Accepted
+            return 1
 
         def get_selection(self):
             return [(parsed_track, "Auto")]

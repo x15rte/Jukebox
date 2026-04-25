@@ -98,6 +98,10 @@ _use_batched_sendinput = False
 _use_pydirectinput = False
 
 
+def _get_windll():
+    return getattr(ctypes, "windll", None)
+
+
 def is_using_pydirectinput() -> bool:
     """Return True if pydirectinput is available and in use for numpad input."""
     return _use_pydirectinput
@@ -217,10 +221,12 @@ def ensure_numlock_on() -> None:
     if _platform != "Windows":
         return
     try:
+        windll = _get_windll()
         if (
             _keyboard is not None
             and _kb is not None
-            and not (ctypes.windll.user32.GetKeyState(0x90) & 1)
+            and windll is not None
+            and not (windll.user32.GetKeyState(0x90) & 1)
         ):
             _keyboard.tap(_kb.Key.num_lock)
     except Exception as e:
@@ -264,6 +270,9 @@ def _tap_key(name: str) -> None:
 
 def _send_frame_batched(sc0, sc1, sc2, sc3, sc4) -> bool:
     """Send 5 key taps as 10 INPUT events in a single SendInput call."""
+    windll = _get_windll()
+    if windll is None:
+        return False
     _frame_inputs[0].ii.ki.wScan = sc0
     _frame_inputs[1].ii.ki.wScan = sc0
     _frame_inputs[2].ii.ki.wScan = sc1
@@ -274,7 +283,7 @@ def _send_frame_batched(sc0, sc1, sc2, sc3, sc4) -> bool:
     _frame_inputs[7].ii.ki.wScan = sc3
     _frame_inputs[8].ii.ki.wScan = sc4
     _frame_inputs[9].ii.ki.wScan = sc4
-    return ctypes.windll.user32.SendInput(10, _frame_inputs, _frame_sizeof) == 10
+    return windll.user32.SendInput(10, _frame_inputs, _frame_sizeof) == 10
 
 
 # ---------------------------------------------------------------------------

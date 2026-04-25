@@ -371,6 +371,12 @@ def test_send_frame_batched_writes_scans_and_checks_result(monkeypatch):
     assert [frame[i].ii.ki.wScan for i in range(10)] == [1, 1, 2, 2, 3, 3, 4, 4, 5, 5]
 
 
+def test_send_frame_batched_returns_false_without_windll(monkeypatch):
+    monkeypatch.setattr(rmc, "_get_windll", lambda: None)
+
+    assert rmc._send_frame_batched(1, 2, 3, 4, 5) is False
+
+
 def test_encode_and_send_message_clamps_indices(monkeypatch):
     sent = []
     monkeypatch.setattr(rmc, "ensure_numlock_on", lambda: None)

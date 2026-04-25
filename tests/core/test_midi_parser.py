@@ -7,6 +7,7 @@ from core.midi_parser import (
     _repair_utf8_mojibake,
     _strip_control_chars,
 )
+from tests.helpers.midi_fixtures import midi_fixture_path
 
 
 class DummyMsg:
@@ -220,3 +221,73 @@ def test_decode_midi_text_latin1_fallback_deterministic():
 
     out = _decode_midi_text(DummyMsg(data=Data(), name="n"))
     assert out == "latin-fallback"
+
+
+def test_parse_structure_real_fixture_extracts_track_name_notes_and_pedal():
+    tracks, tempo_map = MidiParser.parse_structure(
+        str(midi_fixture_path("basic_pedal.mid"))
+    )
+
+    assert tempo_map is not None
+    assert len(tracks) == 1
+
+    track = tracks[0]
+    note = track.notes[0]
+
+    assert track.name == "Main"
+    assert track.program_change == 0
+    assert track.is_drum is False
+    assert len(track.notes) == 1
+    assert note.pitch == 60
+    assert note.velocity == 90
+    assert note.channel == 0
+    assert note.start_time == pytest.approx(0.0)
+    assert note.duration == pytest.approx(0.5)
+    assert track.pedal_events == [(0.0, 127), (0.5, 0)]
+
+
+def test_parse_structure_real_fixture_applies_tempo_changes():
+    tracks, tempo_map = MidiParser.parse_structure(
+        str(midi_fixture_path("tempo_changes.mid"))
+    )
+
+    assert len(tracks) == 1
+    assert tempo_map.has_explicit_time_signatures is True
+    assert tempo_map.get_tempo_at(0.0) == 500_000
+    assert tempo_map.get_tempo_at(0.5) == 250_000
+    assert tempo_map.time_to_beat(0.75) == pytest.approx(2.0)
+    assert tempo_map.beat_to_time(2.0) == pytest.approx(0.75)
+
+    track = tracks[0]
+    assert track.name == "Tempo Lead"
+    assert [note.pitch for note in track.notes] == [60, 62]
+    assert [note.start_time for note in track.notes] == pytest.approx([0.0, 0.5])
+    assert [note.duration for note in track.notes] == pytest.approx([0.5, 0.25])
+
+
+def test_parse_structure_real_fixture_detects_drum_channel():
+    tracks, _ = MidiParser.parse_structure(str(midi_fixture_path("drum_channel_10.mid")))
+
+    assert len(tracks) == 1
+
+    track = tracks[0]
+    assert track.name == "Drums"
+    assert track.is_drum is True
+    assert track.instrument_name == "Drums/Percussion"
+    assert len(track.notes) == 1
+    assert track.notes[0].channel == 9
+
+
+def test_parse_structure_real_fixture_treats_zero_velocity_note_on_as_release():
+    tracks, _ = MidiParser.parse_structure(
+        str(midi_fixture_path("zero_velocity_release.mid"))
+    )
+
+    assert len(tracks) == 1
+
+    track = tracks[0]
+    assert track.name == "Zero Velocity Release"
+    assert len(track.notes) == 1
+    assert track.notes[0].pitch == 67
+    assert track.notes[0].start_time == pytest.approx(0.0)
+    assert track.notes[0].duration == pytest.approx(0.25)

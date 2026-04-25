@@ -72,9 +72,7 @@ def test_parse_and_select_tracks_accept_builds_preview_and_updates_ui(
             self._tracks = tracks
 
         def exec(self):
-            from main_window import QDialog
-
-            return QDialog.DialogCode.Accepted
+            return 1
 
         def get_selection(self):
             return [(track, "Auto")]
@@ -168,9 +166,7 @@ def test_parse_and_select_tracks_assigns_left_and_right_roles(
             self._tracks = tracks
 
         def exec(self):
-            from main_window import QDialog
-
-            return QDialog.DialogCode.Accepted
+            return 1
 
         def get_selection(self):
             return [(left_track, "Left Hand"), (right_track, "Right Hand")]

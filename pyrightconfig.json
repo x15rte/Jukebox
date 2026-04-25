@@ -1,0 +1,31 @@
+{
+  "include": [
+    "analysis",
+    "core",
+    "native",
+    "output",
+    "playback",
+    "ui",
+    "config_bindings.py",
+    "config_repository.py",
+    "logger_core.py",
+    "main.py",
+    "main_window.py",
+    "models.py",
+    "platform_utils.py",
+    "theme.py",
+    "version.py",
+    "tests"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "build",
+    "dist",
+    "lib",
+    "lib64"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false
+}
