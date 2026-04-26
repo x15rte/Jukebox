@@ -645,3 +645,23 @@ def test_build_pedal_sections_reuses_existing_pedal_notes_without_deepcopy(
     assert pedal_sections[0].notes == [pedal_note]
     assert pedal_sections[0].start_time == pytest.approx(0.1)
     assert pedal_sections[0].end_time == pytest.approx(0.3)
+
+
+def test_build_pedal_sections_falls_back_to_deepcopied_original_note():
+    original_note = make_note(1, 40, 0.4, 0.6, hand="left")
+    section_note = make_note(1, 40, 1.5, 0.1, hand="left")
+    sections = [make_section(0.0, 2.0, [section_note])]
+
+    pedal_sections = EventCompiler._build_pedal_sections(
+        sections,
+        [],
+        [original_note],
+    )
+
+    remapped_note = pedal_sections[0].notes[0]
+
+    assert remapped_note == original_note
+    assert remapped_note is not original_note
+    assert remapped_note is not section_note
+    assert pedal_sections[0].start_time == pytest.approx(0.4)
+    assert pedal_sections[0].end_time == pytest.approx(1.0)

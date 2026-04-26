@@ -1,11 +1,17 @@
 import pytest
 
 from analysis.pedal_generator import PedalGenerator
+from models import KeyEvent
 from tests.helpers.builders import make_note, make_section
 
 
 def test_generate_none_returns_empty():
     out = PedalGenerator.generate_events({"pedal_style": "none"}, [], [])
+    assert out == []
+
+
+def test_generate_unknown_style_returns_empty():
+    out = PedalGenerator.generate_events({"pedal_style": "unsupported"}, [], [])
     assert out == []
 
 
@@ -195,6 +201,40 @@ def test_generate_rhythmic_preserves_exact_touch_group_spans():
         (0.2, "down"),
         (0.4, "up"),
     ]
+
+
+def test_coalesce_overlapping_intervals_empty_input_returns_empty():
+    assert PedalGenerator._coalesce_overlapping_intervals([]) == []
+
+
+def test_merge_section_intervals_preserves_tail_when_overlap_starts_inside_interval():
+    intervals = [(0.9, 1.5)]
+
+    PedalGenerator._merge_section_intervals(intervals, [(0.8, 1.0)])
+
+    assert intervals == [(0.8, 1.0), (1.0, 1.5)]
+
+
+def test_intervals_to_events_skips_zero_or_negative_length_intervals():
+    events = PedalGenerator._intervals_to_events(
+        [(0.0, 0.0), (2.0, 1.0), (1.0, 1.5)]
+    )
+
+    assert [(event.time, event.key_char) for event in events] == [
+        (1.0, "down"),
+        (1.5, "up"),
+    ]
+
+
+def test_events_to_intervals_ignores_non_pedal_events():
+    events = [
+        KeyEvent(0.0, 2, "press", "", pitch=60),
+        KeyEvent(0.2, 1, "pedal", "down"),
+        KeyEvent(0.4, 4, "release", "", pitch=60),
+        KeyEvent(0.7, 0, "pedal", "up"),
+    ]
+
+    assert PedalGenerator._events_to_intervals(events) == [(0.2, 0.7)]
 
 
 def test_adaptive_driver_long_gap_releases_and_restarts():
