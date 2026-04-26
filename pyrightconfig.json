@@ -22,7 +22,9 @@
     "build",
     "dist",
     "lib",
-    "lib64"
+    "lib64",
+    "**/node_modules",
+    "**/.*"
   ],
   "pythonVersion": "3.12",
   "typeCheckingMode": "basic",

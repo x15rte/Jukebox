@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from PyQt6.QtCore import Qt
 
 from tests.helpers.builders import make_note
 from tests.helpers.fakes import FakeLiveBackend, FakeSignal, FakeThread
@@ -263,6 +264,18 @@ def test_create_info_icon_sets_tooltip(window_factory, monkeypatch, tmp_path):
     w = window_factory()
     icon = w._create_info_icon("tip")
     assert icon.toolTip() == "tip"
+
+
+def test_original_pedal_tooltip_matches_raw_pedal_humanizer_behavior(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+
+    tooltip = w.pedal_style_combo.itemData(0, Qt.ItemDataRole.ToolTipRole)
+
+    assert "Existing MIDI pedal events keep their original timing" in tooltip
+    assert "Falls back to Automatic if none found" in tooltip
+    assert "generated fallback follows the humanized performance" in tooltip
 
 
 def test_on_tab_changed_unlocked_updates_last_index(window_factory, monkeypatch, tmp_path):

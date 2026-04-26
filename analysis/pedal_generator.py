@@ -1,6 +1,6 @@
 """Pedal event generation: original, hybrid (adaptive), legato (harmonic), rhythmic, none."""
 
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 from models import Note, KeyEvent, MusicalSection
 from core import get_time_groups
@@ -23,8 +23,6 @@ class PedalGenerator:
                 return PedalGenerator._convert_raw_pedal(raw)
             style = "hybrid"
 
-        events = []
-
         if style == "hybrid":
             bass_notes = [n for n in final_notes if n.hand == "left"]
             bass_notes.sort(key=lambda n: n.start_time)
@@ -38,28 +36,129 @@ class PedalGenerator:
                 bass_notes, final_notes
             )
 
+        if style not in {"legato", "rhythmic"}:
+            return []
+
+        intervals: List[Tuple[float, float]] = []
+
         for section in sections:
-            if not section.notes:
+            section_intervals = PedalGenerator._build_section_intervals(style, section)
+            if not section_intervals:
                 continue
-            lh_notes = [n for n in section.notes if n.hand == "left"]
-            lh_notes.sort(key=lambda n: n.start_time)
-            if not lh_notes:
-                start = section.notes[0].start_time
-                end = max(n.end_time for n in section.notes)
-                events.append(KeyEvent(start, 1, "pedal", "down"))
-                events.append(KeyEvent(end, 0, "pedal", "up"))
+            PedalGenerator._merge_section_intervals(intervals, section_intervals)
+
+        return PedalGenerator._intervals_to_events(intervals)
+
+    @staticmethod
+    def _build_section_intervals(
+        style: str, section: MusicalSection
+    ) -> List[Tuple[float, float]]:
+        if not section.notes:
+            return []
+
+        lh_notes = [n for n in section.notes if n.hand == "left"]
+        lh_notes.sort(key=lambda n: n.start_time)
+        if not lh_notes:
+            start = min(n.start_time for n in section.notes)
+            end = max(n.end_time for n in section.notes)
+            return [(start, end)]
+
+        if style == "rhythmic":
+            intervals: List[Tuple[float, float]] = []
+            for group in get_time_groups(lh_notes):
+                start = group[0].start_time
+                end = max(n.end_time for n in group)
+                intervals.append((start, end))
+            return PedalGenerator._coalesce_overlapping_intervals(intervals)
+
+        section_events: List[KeyEvent] = []
+        PedalGenerator._generate_harmonic_pedal(section_events, lh_notes)
+        return PedalGenerator._events_to_intervals(section_events)
+
+    @staticmethod
+    def _coalesce_overlapping_intervals(
+        intervals: List[Tuple[float, float]]
+    ) -> List[Tuple[float, float]]:
+        if not intervals:
+            return []
+
+        merged: List[Tuple[float, float]] = []
+        for start, end in sorted(intervals):
+            if not merged:
+                merged.append((start, end))
                 continue
 
-            if style == "rhythmic":
-                groups = get_time_groups(lh_notes)
-                for g in groups:
-                    start = g[0].start_time
-                    end = max(n.end_time for n in g)
-                    events.append(KeyEvent(start, 1, "pedal", "down"))
-                    events.append(KeyEvent(end, 0, "pedal", "up"))
+            current_start, current_end = merged[-1]
+            if start < current_end:
+                merged[-1] = (current_start, max(current_end, end))
             else:
-                PedalGenerator._generate_harmonic_pedal(events, lh_notes)
+                merged.append((start, end))
+
+        return merged
+
+    @staticmethod
+    def _merge_section_intervals(
+        intervals: List[Tuple[float, float]],
+        section_intervals: List[Tuple[float, float]],
+    ) -> None:
+        remaining = intervals
+
+        for start_boundary, end_boundary in section_intervals:
+            updated: List[Tuple[float, float]] = []
+            for start, end in remaining:
+                if end <= start_boundary or start >= end_boundary:
+                    updated.append((start, end))
+                elif start < start_boundary:
+                    # Later sections take priority once overlap begins, but
+                    # unrelated later spans from earlier sections stay intact.
+                    updated.append((start, start_boundary))
+                    if end > end_boundary:
+                        updated.append((end_boundary, end))
+                elif end > end_boundary:
+                    updated.append((end_boundary, end))
+            remaining = updated
+
+        merged: List[Tuple[float, float]] = []
+        existing_idx = 0
+        section_idx = 0
+
+        while existing_idx < len(remaining) and section_idx < len(section_intervals):
+            if remaining[existing_idx][0] <= section_intervals[section_idx][0]:
+                merged.append(remaining[existing_idx])
+                existing_idx += 1
+            else:
+                merged.append(section_intervals[section_idx])
+                section_idx += 1
+
+        merged.extend(remaining[existing_idx:])
+        merged.extend(section_intervals[section_idx:])
+        intervals[:] = merged
+
+    @staticmethod
+    def _intervals_to_events(intervals: List[Tuple[float, float]]) -> List[KeyEvent]:
+        events: List[KeyEvent] = []
+        for start, end in intervals:
+            if end <= start:
+                continue
+            events.append(KeyEvent(start, 1, "pedal", "down"))
+            events.append(KeyEvent(end, 0, "pedal", "up"))
         return events
+
+    @staticmethod
+    def _events_to_intervals(events: List[KeyEvent]) -> List[Tuple[float, float]]:
+        intervals: List[Tuple[float, float]] = []
+        active_start: Optional[float] = None
+
+        for event in events:
+            if event.action != "pedal":
+                continue
+            if event.key_char == "down":
+                active_start = event.time
+            elif event.key_char == "up" and active_start is not None:
+                intervals.append((active_start, max(active_start, event.time)))
+                active_start = None
+
+        return intervals
 
     @staticmethod
     def _generate_adaptive_pedal_driver(

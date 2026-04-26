@@ -155,10 +155,14 @@ def test_prepare_playback_right_hand_role_assignment(monkeypatch):
     assert final_notes[0].hand == "right"
 
 
-def test_prepare_playback_real_fixture_preserves_original_pedal_events():
+def test_prepare_playback_real_fixture_keeps_original_pedal_literal_under_humanizer(
+    monkeypatch,
+):
     midi_path = midi_fixture_path("basic_pedal.mid")
     parsed_tracks, _tempo_map = MidiParser.parse_structure(str(midi_path), tempo_scale=1.0)
     assert parsed_tracks
+    monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *_a, **_k: 0.05)
+    monkeypatch.setattr("analysis.humanizer.random.random", lambda: 1.0)
 
     final_notes, sections, events, total_dur, _ = PlaybackService.prepare_playback(
         str(midi_path),
@@ -167,6 +171,9 @@ def test_prepare_playback_real_fixture_preserves_original_pedal_events():
             "tempo": 100,
             "simulate_hands": False,
             "pedal_style": "original",
+            "enable_vary_timing": True,
+            "vary_timing": True,
+            "timing_variance": 0.1,
             "countdown": False,
             "start_offset": 0.0,
         },
@@ -181,7 +188,7 @@ def test_prepare_playback_real_fixture_preserves_original_pedal_events():
     assert [event.time for event in events] == sorted(event.time for event in events)
     assert [(event.action, event.key_char, event.pitch, event.time) for event in events] == [
         ("pedal", "down", None, 0.0),
-        ("press", "", 60, 0.0),
+        ("press", "", 60, 0.05),
         ("pedal", "up", None, 0.5),
-        ("release", "", 60, 0.5),
+        ("release", "", 60, 0.55),
     ]

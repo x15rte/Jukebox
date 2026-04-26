@@ -1,3 +1,5 @@
+import pytest
+
 from analysis.pedal_generator import PedalGenerator
 from tests.helpers.builders import make_note, make_section
 
@@ -66,6 +68,89 @@ def test_generate_legato_section_without_left_hand_holds_whole_section():
     assert [(e.time, e.key_char) for e in out] == [(0.0, "down"), (0.7, "up")]
 
 
+@pytest.mark.parametrize("pedal_style", ["legato", "rhythmic"])
+def test_generate_treble_only_section_uses_earliest_note_start(pedal_style):
+    notes = [
+        make_note(1, 72, 0.5, 0.1, hand="right"),
+        make_note(2, 76, 0.2, 0.3, hand="right"),
+    ]
+    sec = make_section(0.0, 1.0, notes)
+
+    out = PedalGenerator.generate_events({"pedal_style": pedal_style}, notes, [sec])
+
+    assert [(e.time, e.key_char) for e in out] == [(0.2, "down"), (0.6, "up")]
+
+
+@pytest.mark.parametrize("pedal_style", ["legato", "rhythmic"])
+def test_generate_section_styles_truncate_previous_overlap(pedal_style):
+    first_note = make_note(1, 40, 0.0, 0.4, hand="left")
+    second_note = make_note(2, 43, 0.3, 0.3, hand="left")
+    sections = [
+        make_section(0.0, 0.4, [first_note]),
+        make_section(0.5, 0.8, [second_note]),
+    ]
+
+    out = PedalGenerator.generate_events(
+        {"pedal_style": pedal_style},
+        [first_note, second_note],
+        sections,
+    )
+
+    assert [(e.time, e.key_char) for e in out] == [
+        (0.0, "down"),
+        (0.3, "up"),
+        (0.3, "down"),
+        (0.6, "up"),
+    ]
+
+
+@pytest.mark.parametrize("pedal_style", ["legato", "rhythmic"])
+def test_generate_section_styles_preserve_later_non_overlapping_intervals(
+    pedal_style,
+):
+    first_early = make_note(1, 40, 0.0, 0.1, hand="left")
+    first_late = make_note(2, 40, 1.0, 0.1, hand="left")
+    second = make_note(3, 43, 0.85, 0.05, hand="left")
+    sections = [
+        make_section(0.0, 1.2, [first_early, first_late]),
+        make_section(0.8, 0.95, [second]),
+    ]
+
+    out = PedalGenerator.generate_events(
+        {"pedal_style": pedal_style},
+        [first_early, first_late, second],
+        sections,
+    )
+
+    assert [(e.time, e.key_char) for e in out] == [
+        (0.0, "down"),
+        (0.1, "up"),
+        (0.85, "down"),
+        (0.9, "up"),
+        (1.0, "down"),
+        (1.1, "up"),
+    ]
+
+
+@pytest.mark.parametrize("pedal_style", ["legato", "rhythmic"])
+def test_generate_section_styles_preserve_tail_after_partial_overlap(pedal_style):
+    first = make_note(1, 40, 0.8, 0.4, hand="left")
+    second = make_note(2, 43, 0.85, 0.05, hand="left")
+    sections = [
+        make_section(0.8, 1.2, [first]),
+        make_section(1.1, 1.2, [second]),
+    ]
+
+    out = PedalGenerator.generate_events(
+        {"pedal_style": pedal_style},
+        [first, second],
+        sections,
+    )
+
+    assert [e.key_char for e in out] == ["down", "up", "down", "up", "down", "up"]
+    assert [e.time for e in out] == pytest.approx([0.8, 0.85, 0.85, 0.9, 0.9, 1.2])
+
+
 def test_generate_rhythmic_emits_per_left_hand_group():
     notes = [
         make_note(1, 40, 0.0, 0.2, hand="left"),
@@ -80,6 +165,35 @@ def test_generate_rhythmic_emits_per_left_hand_group():
         (0.2, "up"),
         (0.5, "down"),
         (0.7, "up"),
+    ]
+
+
+def test_generate_rhythmic_merges_overlapping_group_spans():
+    notes = [
+        make_note(1, 40, 0.0, 0.2, hand="left"),
+        make_note(2, 42, 0.15, 0.2, hand="left"),
+    ]
+    sec = make_section(0.0, 1.0, notes)
+
+    out = PedalGenerator.generate_events({"pedal_style": "rhythmic"}, notes, [sec])
+
+    assert [(e.time, e.key_char) for e in out] == [(0.0, "down"), (0.35, "up")]
+
+
+def test_generate_rhythmic_preserves_exact_touch_group_spans():
+    notes = [
+        make_note(1, 40, 0.0, 0.2, hand="left"),
+        make_note(2, 42, 0.2, 0.2, hand="left"),
+    ]
+    sec = make_section(0.0, 1.0, notes)
+
+    out = PedalGenerator.generate_events({"pedal_style": "rhythmic"}, notes, [sec])
+
+    assert [(e.time, e.key_char) for e in out] == [
+        (0.0, "down"),
+        (0.2, "up"),
+        (0.2, "down"),
+        (0.4, "up"),
     ]
 
 

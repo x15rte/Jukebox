@@ -8,7 +8,7 @@ import heapq
 import random
 import bisect
 import threading
-from typing import List, Dict, Set, Optional
+from typing import List, Dict, Set, Optional, Tuple
 
 from PyQt6.QtCore import QObject, pyqtSignal as Signal
 
@@ -39,14 +39,8 @@ class EventCompiler:
         work = copy.deepcopy(notes)
 
         # --- optional humanization (delegates to analysis.py) ---
-        humanize_keys = (
-            "enable_vary_timing",
-            "enable_vary_articulation",
-            "enable_drift_correction",
-            "enable_chord_roll",
-            "enable_tempo_sway",
-        )
-        if any(config.get(k) for k in humanize_keys):
+        humanization_enabled = EventCompiler._humanization_enabled(config)
+        if humanization_enabled:
             humanizer = Humanizer(config)
             left = [n for n in work if n.hand == "left"]
             right = [n for n in work if n.hand == "right"]
@@ -58,6 +52,24 @@ class EventCompiler:
             humanizer.apply_to_hand(right, "right", resync)
             work = sorted(left + right, key=lambda n: n.start_time)
             humanizer.apply_tempo_rubato(work, sections)
+
+        effective_pedal_style = EventCompiler._effective_pedal_style(config)
+        pedal_config = config
+        if effective_pedal_style == "none":
+            pedal_notes = notes
+            pedal_sections = sections
+        elif effective_pedal_style == "original":
+            pedal_notes = notes
+            pedal_sections = sections
+        else:
+            pedal_notes = EventCompiler._build_pedal_notes(
+                notes,
+                work,
+                effective_pedal_style,
+            )
+            pedal_sections = EventCompiler._build_pedal_sections(
+                sections, pedal_notes, notes
+            )
 
         # --- build press / release events ---
         heap: list = []
@@ -122,13 +134,96 @@ class EventCompiler:
             played_in_section.add(pitch)
 
         # --- pedal events (from analysis.py) ---
-        for pe in PedalGenerator.generate_events(config, work, sections):
+        for pe in PedalGenerator.generate_events(
+            pedal_config, pedal_notes, pedal_sections
+        ):
             heapq.heappush(heap, pe)
 
         events: List[KeyEvent] = []
         while heap:
             events.append(heapq.heappop(heap))
         return events
+
+    @staticmethod
+    def _effective_pedal_style(config: Dict) -> Optional[str]:
+        style = config.get("pedal_style")
+        if style == "original" and not config.get("raw_pedal_events"):
+            return "hybrid"
+        return style
+
+    @staticmethod
+    def _humanization_enabled(config: Dict) -> bool:
+        humanize_keys = (
+            "enable_vary_timing",
+            "enable_vary_articulation",
+            "enable_drift_correction",
+            "enable_chord_roll",
+            "enable_tempo_sway",
+        )
+        return any(config.get(k) for k in humanize_keys)
+
+    @staticmethod
+    def _build_pedal_notes(
+        original_notes: List[Note],
+        humanized_notes: List[Note],
+        effective_pedal_style: Optional[str],
+    ) -> List[Note]:
+        pedal_notes = copy.deepcopy(original_notes)
+        humanized_by_id = {note.id: note for note in humanized_notes}
+
+        for note in pedal_notes:
+            humanized = humanized_by_id.get(note.id)
+            if humanized is not None:
+                note.start_time = humanized.start_time
+                if effective_pedal_style == "rhythmic":
+                    note.duration = humanized.duration
+
+        pedal_notes.sort(key=lambda note: note.start_time)
+        return pedal_notes
+
+    @staticmethod
+    def _build_pedal_sections(
+        sections: List[MusicalSection],
+        pedal_notes: List[Note],
+        original_notes: List[Note],
+    ) -> List[MusicalSection]:
+        pedal_by_id = {note.id: note for note in pedal_notes}
+        original_by_id = {note.id: note for note in original_notes}
+        pedal_sections: List[MusicalSection] = []
+
+        for section in sections:
+            remapped_notes: List[Note] = []
+            for note in section.notes:
+                pedal_note = pedal_by_id.get(note.id)
+                if pedal_note is not None:
+                    remapped_notes.append(pedal_note)
+                    continue
+
+                remapped_notes.append(
+                    copy.deepcopy(original_by_id.get(note.id, note))
+                )
+            remapped_notes.sort(key=lambda note: note.start_time)
+
+            start_time = section.start_time
+            end_time = section.end_time
+            if remapped_notes:
+                start_time = remapped_notes[0].start_time
+                end_time = max(note.end_time for note in remapped_notes)
+
+            pedal_sections.append(
+                MusicalSection(
+                    start_time=start_time,
+                    end_time=end_time,
+                    notes=remapped_notes,
+                    articulation_label=section.articulation_label,
+                    pace_label=section.pace_label,
+                    start_beat=section.start_beat,
+                    end_beat=section.end_beat,
+                )
+            )
+
+        pedal_sections.sort(key=lambda section: section.start_time)
+        return pedal_sections
 
     @staticmethod
     def _mistake_pitch(original: int) -> Optional[int]:
