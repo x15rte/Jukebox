@@ -155,7 +155,7 @@ def test_prepare_playback_right_hand_role_assignment(monkeypatch):
     assert final_notes[0].hand == "right"
 
 
-def test_prepare_playback_real_fixture_keeps_original_pedal_literal_under_humanizer(
+def test_prepare_playback_real_fixture_remaps_original_pedal_with_humanizer(
     monkeypatch,
 ):
     midi_path = midi_fixture_path("basic_pedal.mid")
@@ -187,8 +187,8 @@ def test_prepare_playback_real_fixture_keeps_original_pedal_literal_under_humani
     assert total_dur > 0
     assert [event.time for event in events] == sorted(event.time for event in events)
     assert [(event.action, event.key_char, event.pitch, event.time) for event in events] == [
-        ("pedal", "down", None, 0.0),
+        ("pedal", "down", None, 0.05),
         ("press", "", 60, 0.05),
-        ("pedal", "up", None, 0.5),
+        ("pedal", "up", None, 0.55),
         ("release", "", 60, 0.55),
     ]

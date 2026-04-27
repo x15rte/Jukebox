@@ -273,9 +273,9 @@ def test_original_pedal_tooltip_matches_raw_pedal_humanizer_behavior(
 
     tooltip = w.pedal_style_combo.itemData(0, Qt.ItemDataRole.ToolTipRole)
 
-    assert "Existing MIDI pedal events keep their original timing" in tooltip
+    assert "With Humanizer off, existing MIDI pedal events keep their original timing" in tooltip
+    assert "With Humanizer on, the same pedal pattern follows the humanized performance" in tooltip
     assert "Falls back to Automatic if none found" in tooltip
-    assert "generated fallback follows the humanized performance" in tooltip
 
 
 def test_on_tab_changed_unlocked_updates_last_index(window_factory, monkeypatch, tmp_path):

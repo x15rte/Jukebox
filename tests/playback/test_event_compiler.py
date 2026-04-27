@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from playback.player import EventCompiler
@@ -197,10 +199,10 @@ def test_compile_original_fallback_pedal_uses_humanized_start_times_and_original
     assert [e.time for e in pedal_events] == pytest.approx([0.05, 0.55])
 
 
-def test_compile_original_raw_pedal_stays_literal_with_humanizer(monkeypatch):
+def test_compile_original_raw_pedal_follows_humanized_note_timing(monkeypatch):
     notes = [make_note(1, 40, 0.0, 1.0, hand="left")]
     monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *_a, **_k: 0.05)
-    monkeypatch.setattr("analysis.humanizer.random.random", lambda: 0.0)
+    monkeypatch.setattr("analysis.humanizer.random.random", lambda: 1.0)
 
     events = EventCompiler.compile(
         notes,
@@ -213,7 +215,7 @@ def test_compile_original_raw_pedal_stays_literal_with_humanizer(monkeypatch):
             "timing_variance": 0.1,
             "enable_vary_articulation": True,
             "vary_articulation": True,
-            "articulation": 0.9,
+            "articulation": 1.0,
         },
     )
 
@@ -222,12 +224,54 @@ def test_compile_original_raw_pedal_stays_literal_with_humanizer(monkeypatch):
     release_events = [e for e in events if e.action == "release"]
 
     assert [e.key_char for e in pedal_events] == ["down", "up"]
-    assert [e.time for e in pedal_events] == pytest.approx([0.0, 1.0])
+    assert [e.time for e in pedal_events] == pytest.approx([0.05, 0.95])
     assert [e.time for e in press_events] == pytest.approx([0.05])
     assert [e.time for e in release_events] == pytest.approx([0.95])
 
 
-def test_compile_original_raw_pedal_preserves_transition_state_machine_under_humanizer(
+def test_compile_original_raw_pedal_without_transitions_does_not_fallback(monkeypatch):
+    notes = [make_note(1, 40, 0.0, 0.5, hand="left")]
+
+    class H:
+        def __init__(self, config):
+            pass
+
+        def prepare_shared_offsets(self, notes):
+            pass
+
+        def apply_to_hand(self, notes, hand, resync):
+            for note in notes:
+                note.start_time += 0.1
+
+        def apply_tempo_rubato(self, notes, sections):
+            pass
+
+    monkeypatch.setattr("playback.player.Humanizer", H)
+    raw_pedal_events = [(0.0, 0), (0.2, 0)]
+
+    without_humanizer = EventCompiler.compile(
+        notes,
+        _section_for(notes),
+        {
+            "pedal_style": "original",
+            "raw_pedal_events": raw_pedal_events,
+        },
+    )
+    with_humanizer = EventCompiler.compile(
+        notes,
+        _section_for(notes),
+        {
+            "pedal_style": "original",
+            "raw_pedal_events": raw_pedal_events,
+            "enable_vary_timing": True,
+        },
+    )
+
+    assert _pedal_events(without_humanizer) == []
+    assert _pedal_events(with_humanizer) == []
+
+
+def test_compile_original_raw_pedal_normalizes_transition_state_machine_before_remap(
     monkeypatch,
 ):
     notes = [
@@ -259,51 +303,265 @@ def test_compile_original_raw_pedal_preserves_transition_state_machine_under_hum
     pedal_events = _pedal_events(events)
 
     assert [e.key_char for e in pedal_events] == ["down", "up", "down"]
-    assert [e.time for e in pedal_events] == pytest.approx([0.0, 0.5, 1.0])
+    assert [e.time for e in pedal_events] == pytest.approx([0.05, 0.55, 1.05])
 
 
-def test_compile_original_raw_pedal_keeps_early_release_literal_under_humanizer(
-    monkeypatch,
-):
-    notes = [make_note(1, 40, 0.0, 1.0, hand="left")]
-    monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *_a, **_k: 0.05)
-    monkeypatch.setattr("analysis.humanizer.random.random", lambda: 0.0)
+def test_compile_original_raw_pedal_preserves_alternating_repedal_order(monkeypatch):
+    notes = [
+        make_note(1, 40, 0.0, 0.5, hand="left"),
+        make_note(2, 43, 1.0, 0.3, hand="left"),
+    ]
+
+    class H:
+        def __init__(self, config):
+            pass
+
+        def prepare_shared_offsets(self, notes):
+            pass
+
+        def apply_to_hand(self, notes, hand, resync):
+            for note in notes:
+                if note.id == 1:
+                    note.start_time = 0.4
+                    note.duration = 0.8
+                else:
+                    note.start_time = 0.8
+                    note.duration = 0.2
+
+        def apply_tempo_rubato(self, notes, sections):
+            pass
+
+    monkeypatch.setattr("playback.player.Humanizer", H)
 
     events = EventCompiler.compile(
         notes,
         _section_for(notes),
         {
             "pedal_style": "original",
-            "raw_pedal_events": [(0.0, 127), (0.2, 0)],
+            "raw_pedal_events": [(0.0, 127), (0.5, 0), (1.0, 127), (1.3, 0)],
             "enable_vary_timing": True,
-            "vary_timing": True,
-            "timing_variance": 0.1,
-            "enable_vary_articulation": True,
-            "vary_articulation": True,
-            "articulation": 0.3,
         },
     )
 
     pedal_events = _pedal_events(events)
-    release_events = [e for e in events if e.action == "release"]
+
+    assert [e.key_char for e in pedal_events] == ["down", "up", "down", "up"]
+    assert all(events[i].time <= events[i + 1].time for i in range(len(events) - 1))
+    assert pedal_events[0].time == pytest.approx(0.4)
+    assert pedal_events[2].time == pytest.approx(0.8)
+    assert pedal_events[3].time == pytest.approx(1.0)
+    assert pedal_events[0].time < pedal_events[1].time < pedal_events[2].time < pedal_events[3].time
+    assert pedal_events[1].time == math.nextafter(pedal_events[2].time, -math.inf)
+
+
+def test_compile_original_raw_pedal_preserves_crossed_repedal_span_with_real_humanizer(
+    monkeypatch,
+):
+    notes = [
+        make_note(1, 40, 0.0, 1.0, hand="left"),
+        make_note(2, 43, 1.2, 0.2, hand="left"),
+    ]
+    offsets = iter([0.2, -0.2])
+    monkeypatch.setattr(
+        "analysis.humanizer.random.gauss",
+        lambda *_a, **_k: next(offsets),
+    )
+
+    events = EventCompiler.compile(
+        notes,
+        _section_for(notes),
+        {
+            "pedal_style": "original",
+            "raw_pedal_events": [(0.0, 127), (1.0, 0), (1.2, 127), (1.4, 0)],
+            "enable_vary_timing": True,
+            "vary_timing": True,
+            "timing_variance": 0.2,
+        },
+    )
+
+    pedal_events = _pedal_events(events)
+
+    assert [e.key_char for e in pedal_events] == ["down", "up", "down", "up"]
+    assert all(events[i].time <= events[i + 1].time for i in range(len(events) - 1))
+    assert pedal_events[0].time == pytest.approx(0.2)
+    assert pedal_events[2].time == pytest.approx(1.0)
+    assert pedal_events[3].time == pytest.approx(1.2)
+    assert pedal_events[0].time < pedal_events[1].time < pedal_events[2].time < pedal_events[3].time
+    assert pedal_events[1].time == math.nextafter(pedal_events[2].time, -math.inf)
+    assert pedal_events[3].time - pedal_events[2].time == pytest.approx(0.2)
+
+
+def test_compile_original_raw_pedal_same_onset_chord_uses_earliest_humanized_anchor(
+    monkeypatch,
+):
+    notes = [
+        make_note(1, 72, 0.0, 1.0, hand="left"),
+        make_note(2, 60, 0.0, 1.0, hand="left"),
+    ]
+    monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *_a, **_k: 0.05)
+
+    events = EventCompiler.compile(
+        notes,
+        _section_for(notes),
+        {
+            "pedal_style": "original",
+            "raw_pedal_events": [(0.0, 127), (1.0, 0)],
+            "enable_vary_timing": True,
+            "vary_timing": True,
+            "timing_variance": 0.1,
+            "enable_chord_roll": True,
+        },
+    )
+
+    pedal_events = _pedal_events(events)
 
     assert [e.key_char for e in pedal_events] == ["down", "up"]
-    assert [e.time for e in pedal_events] == pytest.approx([0.0, 0.2])
-    assert [e.time for e in release_events] == pytest.approx([0.35])
+    assert pedal_events[0].time == pytest.approx(0.05)
 
 
-def test_compile_original_raw_pedal_keeps_mid_rest_release_literal_when_humanized(
+def test_compile_original_raw_pedal_same_release_time_uses_latest_humanized_anchor(
+    monkeypatch,
+):
+    notes = [
+        make_note(1, 72, 0.0, 1.0, hand="left"),
+        make_note(2, 60, 0.0, 1.0, hand="left"),
+    ]
+    monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *_a, **_k: 0.05)
+
+    events = EventCompiler.compile(
+        notes,
+        _section_for(notes),
+        {
+            "pedal_style": "original",
+            "raw_pedal_events": [(0.0, 127), (1.0, 0)],
+            "enable_vary_timing": True,
+            "vary_timing": True,
+            "timing_variance": 0.1,
+            "enable_chord_roll": True,
+        },
+    )
+
+    pedal_events = _pedal_events(events)
+
+    assert [e.key_char for e in pedal_events] == ["down", "up"]
+    assert pedal_events[1].time == pytest.approx(1.056)
+
+
+def test_compile_original_raw_pedal_uses_nearest_upcoming_onset_for_anticipatory_down(
     monkeypatch,
 ):
     notes = [
         make_note(1, 40, 0.0, 0.2, hand="left"),
-        make_note(2, 43, 10.0, 0.2, hand="left"),
+        make_note(2, 43, 1.0, 0.2, hand="left"),
     ]
     offsets = iter([0.0, 0.1])
     monkeypatch.setattr(
         "analysis.humanizer.random.gauss",
         lambda *_a, **_k: next(offsets),
     )
+
+    events = EventCompiler.compile(
+        notes,
+        _section_for(notes),
+        {
+            "pedal_style": "original",
+            "raw_pedal_events": [(0.92, 127), (1.2, 0)],
+            "enable_vary_timing": True,
+            "vary_timing": True,
+            "timing_variance": 0.1,
+        },
+    )
+
+    pedal_events = _pedal_events(events)
+
+    assert [e.key_char for e in pedal_events] == ["down", "up"]
+    assert pedal_events[0].time == pytest.approx(1.02)
+
+
+def test_compile_original_raw_pedal_uses_upcoming_onset_for_anticipatory_up(
+    monkeypatch,
+):
+    notes = [
+        make_note(1, 40, 0.0, 0.2, hand="left"),
+        make_note(2, 43, 1.0, 0.2, hand="left"),
+    ]
+
+    class H:
+        def __init__(self, config):
+            pass
+
+        def prepare_shared_offsets(self, notes):
+            pass
+
+        def apply_to_hand(self, notes, hand, resync):
+            for note in notes:
+                if note.id == 2:
+                    note.start_time = 1.1
+                    note.duration = 0.1
+
+        def apply_tempo_rubato(self, notes, sections):
+            pass
+
+    monkeypatch.setattr("playback.player.Humanizer", H)
+
+    events = EventCompiler.compile(
+        notes,
+        _section_for(notes),
+        {
+            "pedal_style": "original",
+            "raw_pedal_events": [(0.92, 127), (0.98, 0)],
+            "enable_vary_timing": True,
+        },
+    )
+
+    pedal_events = _pedal_events(events)
+    note2_press = next(e for e in events if e.action == "press" and e.pitch == 43)
+    note2_release = next(e for e in events if e.action == "release" and e.pitch == 43)
+
+    assert [e.key_char for e in pedal_events] == ["down", "up"]
+    assert pedal_events[0].time == pytest.approx(1.02)
+    assert pedal_events[1].time == pytest.approx(1.08)
+    assert note2_press.time == pytest.approx(1.1)
+    assert note2_release.time == pytest.approx(1.2)
+    assert all(events[i].time < events[i + 1].time for i in range(len(events) - 1))
+
+
+def test_compile_original_raw_pedal_uses_nearest_release_anchor_for_anticipatory_up(
+    monkeypatch,
+):
+    notes = [
+        make_note(1, 40, 0.0, 0.2, hand="left"),
+        make_note(2, 43, 1.0, 0.2, hand="left"),
+    ]
+    offsets = iter([0.0, 0.1])
+    monkeypatch.setattr(
+        "analysis.humanizer.random.gauss",
+        lambda *_a, **_k: next(offsets),
+    )
+
+    events = EventCompiler.compile(
+        notes,
+        _section_for(notes),
+        {
+            "pedal_style": "original",
+            "raw_pedal_events": [(0.92, 127), (1.08, 0)],
+            "enable_vary_timing": True,
+            "vary_timing": True,
+            "timing_variance": 0.1,
+        },
+    )
+
+    pedal_events = _pedal_events(events)
+
+    assert [e.key_char for e in pedal_events] == ["down", "up"]
+    assert pedal_events[1].time == pytest.approx(1.18)
+
+
+def test_compile_original_raw_pedal_nudges_same_timestamp_up_after_down(
+    monkeypatch,
+):
+    notes = [make_note(1, 40, 0.0, 1.0, hand="left")]
+    monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *_a, **_k: 0.05)
     monkeypatch.setattr("analysis.humanizer.random.random", lambda: 1.0)
 
     events = EventCompiler.compile(
@@ -311,19 +569,22 @@ def test_compile_original_raw_pedal_keeps_mid_rest_release_literal_when_humanize
         _section_for(notes),
         {
             "pedal_style": "original",
-            "raw_pedal_events": [(0.0, 127), (6.0, 0)],
+            "raw_pedal_events": [(0.0, 127), (0.0, 0)],
             "enable_vary_timing": True,
             "vary_timing": True,
             "timing_variance": 0.1,
+            "enable_vary_articulation": True,
+            "vary_articulation": True,
+            "articulation": 1.0,
         },
     )
 
     pedal_events = _pedal_events(events)
-    press_events = [e for e in events if e.action == "press"]
 
     assert [e.key_char for e in pedal_events] == ["down", "up"]
-    assert [e.time for e in pedal_events] == pytest.approx([0.0, 6.0])
-    assert [e.time for e in press_events] == pytest.approx([0.0, 10.1])
+    assert all(events[i].time <= events[i + 1].time for i in range(len(events) - 1))
+    assert pedal_events[0].time == pytest.approx(0.05)
+    assert pedal_events[1].time > pedal_events[0].time
 
 
 @pytest.mark.parametrize("pedal_style", ["legato", "rhythmic"])

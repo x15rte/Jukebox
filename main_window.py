@@ -717,7 +717,7 @@ class MainWindow(QMainWindow):
         self.pedal_style_combo.addItems(list(self.pedal_mapping.keys()))
         self.pedal_style_combo.setItemData(
             0,
-            "Uses sustain pedal data from the MIDI file when present. Existing MIDI pedal events keep their original timing, even with Humanizer on. Falls back to Automatic if none found, and that generated fallback follows the humanized performance.",
+            "Uses sustain pedal data from the MIDI file when present. With Humanizer off, existing MIDI pedal events keep their original timing. With Humanizer on, the same pedal pattern follows the humanized performance. Falls back to Automatic if none found.",
             Qt.ItemDataRole.ToolTipRole,
         )
         self.pedal_style_combo.setItemData(

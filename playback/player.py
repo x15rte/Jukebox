@@ -4,6 +4,7 @@ import sys
 import time
 import copy
 import heapq
+import math
 
 import random
 import bisect
@@ -61,6 +62,15 @@ class EventCompiler:
         elif effective_pedal_style == "original":
             pedal_notes = notes
             pedal_sections = sections
+            if humanization_enabled and config.get("raw_pedal_events"):
+                pedal_config = dict(config)
+                pedal_config["raw_pedal_events"] = (
+                    EventCompiler._remap_raw_pedal_events(
+                        config["raw_pedal_events"],
+                        notes,
+                        work,
+                    )
+                )
         else:
             pedal_notes = EventCompiler._build_pedal_notes(
                 notes,
@@ -224,6 +234,270 @@ class EventCompiler:
 
         pedal_sections.sort(key=lambda section: section.start_time)
         return pedal_sections
+
+    @staticmethod
+    def _normalize_raw_pedal_transitions(
+        raw_events: List[Tuple[float, int]],
+    ) -> List[Tuple[float, int]]:
+        transitions: List[Tuple[float, int]] = []
+        pedal_down = False
+
+        for event_time, value in raw_events:
+            is_down = value >= 64
+            if is_down and not pedal_down:
+                transitions.append((event_time, 127))
+                pedal_down = True
+            elif not is_down and pedal_down:
+                transitions.append((event_time, 0))
+                pedal_down = False
+
+        return transitions
+
+    @staticmethod
+    def _collapse_anchor_deltas(
+        anchor_deltas: List[Tuple[float, float]],
+        *,
+        prefer_latest: bool,
+    ) -> List[Tuple[float, float]]:
+        if not anchor_deltas:
+            return []
+
+        collapsed: List[Tuple[float, float]] = []
+        for original_time, delta in sorted(anchor_deltas, key=lambda item: item[0]):
+            remapped_time = original_time + delta
+            if collapsed and collapsed[-1][0] == original_time:
+                prior_original, prior_delta = collapsed[-1]
+                prior_remapped = prior_original + prior_delta
+                should_replace = remapped_time > prior_remapped
+                if not prefer_latest:
+                    should_replace = remapped_time < prior_remapped
+                if should_replace:
+                    collapsed[-1] = (original_time, delta)
+                continue
+
+            collapsed.append((original_time, delta))
+
+        return collapsed
+
+    @staticmethod
+    def _build_note_timing_deltas(
+        original_notes: List[Note],
+        humanized_notes: List[Note],
+    ) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
+        humanized_by_id = {note.id: note for note in humanized_notes}
+        onset_deltas: List[Tuple[float, float]] = []
+        release_deltas: List[Tuple[float, float]] = []
+
+        for note in original_notes:
+            humanized = humanized_by_id.get(note.id)
+            if humanized is None:
+                continue
+
+            onset_deltas.append(
+                (note.start_time, humanized.start_time - note.start_time)
+            )
+            release_deltas.append((note.end_time, humanized.end_time - note.end_time))
+
+        return (
+            EventCompiler._collapse_anchor_deltas(
+                onset_deltas,
+                prefer_latest=False,
+            ),
+            EventCompiler._collapse_anchor_deltas(
+                release_deltas,
+                prefer_latest=True,
+            ),
+        )
+
+    @staticmethod
+    def _find_anchor_delta(
+        anchor_deltas: List[Tuple[float, float]],
+        raw_time: float,
+        prefer_nearest: bool = True,
+    ) -> float:
+        match = EventCompiler._find_anchor_match(
+            anchor_deltas,
+            raw_time,
+            prefer_nearest,
+        )
+        if match is None:
+            return 0.0
+        return match[1]
+
+    @staticmethod
+    def _find_anchor_match(
+        anchor_deltas: List[Tuple[float, float]],
+        raw_time: float,
+        prefer_nearest: bool = True,
+    ) -> Optional[Tuple[float, float]]:
+        if not anchor_deltas:
+            return None
+
+        anchor_times = [time for time, _delta in anchor_deltas]
+        idx = bisect.bisect_left(anchor_times, raw_time)
+
+        if idx <= 0:
+            return anchor_deltas[0]
+        if idx >= len(anchor_deltas):
+            return anchor_deltas[-1]
+        if not prefer_nearest:
+            return anchor_deltas[idx - 1]
+
+        prev_time, prev_delta = anchor_deltas[idx - 1]
+        next_time, next_delta = anchor_deltas[idx]
+        prev_distance = raw_time - prev_time
+        next_distance = next_time - raw_time
+
+        if next_distance <= prev_distance:
+            return next_time, next_delta
+        return prev_time, prev_delta
+
+    @staticmethod
+    def _find_raw_pedal_up_delta(
+        raw_time: float,
+        onset_deltas: List[Tuple[float, float]],
+        release_deltas: List[Tuple[float, float]],
+    ) -> float:
+        release_match = EventCompiler._find_anchor_match(
+            release_deltas,
+            raw_time,
+        )
+        if release_match is None:
+            return EventCompiler._find_anchor_delta(onset_deltas, raw_time)
+
+        onset_match = EventCompiler._find_anchor_match(
+            onset_deltas,
+            raw_time,
+        )
+        if onset_match is None:
+            return release_match[1]
+
+        onset_time, onset_delta = onset_match
+        release_time, release_delta = release_match
+        onset_distance = onset_time - raw_time
+        release_distance = abs(release_time - raw_time)
+
+        if onset_time > raw_time and onset_distance < release_distance:
+            return onset_delta
+        return release_delta
+
+    @staticmethod
+    def _pair_raw_pedal_spans(
+        normalized_events: List[Tuple[float, int]],
+    ) -> Tuple[List[Tuple[float, float]], Optional[float]]:
+        spans: List[Tuple[float, float]] = []
+        trailing_down_time: Optional[float] = None
+        idx = 0
+
+        while idx < len(normalized_events):
+            down_time, _value = normalized_events[idx]
+            if idx + 1 >= len(normalized_events):
+                trailing_down_time = down_time
+                break
+
+            up_time, _next_value = normalized_events[idx + 1]
+            spans.append((down_time, up_time))
+            idx += 2
+
+        return spans, trailing_down_time
+
+    @staticmethod
+    def _normalize_remapped_pedal_spans(
+        spans: List[Tuple[float, float]],
+        trailing_down_time: Optional[float] = None,
+    ) -> Tuple[List[Tuple[float, float]], Optional[float]]:
+        normalized = [[down_time, up_time] for down_time, up_time in spans]
+
+        for idx, current in enumerate(normalized):
+            down_time, up_time = current
+            if up_time <= down_time:
+                up_time = math.nextafter(down_time, math.inf)
+                current[1] = up_time
+
+            if idx + 1 >= len(normalized):
+                continue
+
+            next_span = normalized[idx + 1]
+            next_down = next_span[0]
+            if up_time < next_down:
+                continue
+
+            earlier_up = math.nextafter(next_down, -math.inf)
+            if earlier_up > down_time:
+                current[1] = earlier_up
+                continue
+
+            current[1] = math.nextafter(down_time, math.inf)
+            next_span[0] = math.nextafter(current[1], math.inf)
+
+        if trailing_down_time is not None and normalized:
+            last_down, last_up = normalized[-1]
+            if last_up >= trailing_down_time:
+                earlier_up = math.nextafter(trailing_down_time, -math.inf)
+                if earlier_up > last_down:
+                    normalized[-1][1] = earlier_up
+                else:
+                    normalized[-1][1] = math.nextafter(last_down, math.inf)
+                    trailing_down_time = math.nextafter(normalized[-1][1], math.inf)
+
+        return [(down_time, up_time) for down_time, up_time in normalized], trailing_down_time
+
+    @staticmethod
+    def _remap_raw_pedal_events(
+        raw_events: List[Tuple[float, int]],
+        original_notes: List[Note],
+        humanized_notes: List[Note],
+    ) -> List[Tuple[float, int]]:
+        normalized = EventCompiler._normalize_raw_pedal_transitions(raw_events)
+        if not normalized:
+            return raw_events
+
+        onset_deltas, release_deltas = EventCompiler._build_note_timing_deltas(
+            original_notes,
+            humanized_notes,
+        )
+
+        spans, trailing_down_time = EventCompiler._pair_raw_pedal_spans(normalized)
+        remapped_spans = [
+            (
+                down_time
+                + EventCompiler._find_anchor_delta(
+                    onset_deltas,
+                    down_time,
+                ),
+                up_time
+                + EventCompiler._find_raw_pedal_up_delta(
+                    up_time,
+                    onset_deltas,
+                    release_deltas,
+                ),
+            )
+            for down_time, up_time in spans
+        ]
+
+        remapped_trailing_down = None
+        if trailing_down_time is not None:
+            remapped_trailing_down = trailing_down_time + EventCompiler._find_anchor_delta(
+                onset_deltas,
+                trailing_down_time,
+            )
+
+        normalized_spans, normalized_trailing_down = (
+            EventCompiler._normalize_remapped_pedal_spans(
+                remapped_spans,
+                remapped_trailing_down,
+            )
+        )
+
+        remapped: List[Tuple[float, int]] = []
+        for down_time, up_time in normalized_spans:
+            remapped.append((down_time, 127))
+            remapped.append((up_time, 0))
+
+        if normalized_trailing_down is not None:
+            remapped.append((normalized_trailing_down, 127))
+
+        return remapped
 
     @staticmethod
     def _mistake_pitch(original: int) -> Optional[int]:
