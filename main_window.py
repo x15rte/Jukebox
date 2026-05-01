@@ -517,13 +517,6 @@ class MainWindow(QMainWindow):
         self.use_88_key_check = QCheckBox("Use 88-key extended layout")
         layout.addWidget(self.use_88_key_check)
 
-        self.macos_use_pynput_check = QCheckBox("Use pynput for key output (Mac)")
-        self.macos_use_pynput_check.setToolTip(
-            "On macOS, use pynput instead of CGEvent. Turn this on only if you have trouble with the default mode."
-        )
-        layout.addWidget(self.macos_use_pynput_check)
-        self.macos_use_pynput_check.setVisible(sys.platform == "darwin")
-
         return group
 
     def _on_input_mode_changed(self):
@@ -577,7 +570,6 @@ class MainWindow(QMainWindow):
             self.live_backend = create_backend(
                 self._current_output_mode(),
                 self.use_88_key_check.isChecked(),
-                macos_use_pynput=self.macos_use_pynput_check.isChecked(),
                 log_message=self.add_log_message,
             )
         except OutputBackendUnavailableError as e:
@@ -659,8 +651,6 @@ class MainWindow(QMainWindow):
     def _update_88_key_visibility(self):
         if hasattr(self, "use_88_key_check"):
             self.use_88_key_check.setVisible(self._current_output_mode() == "key")
-        if hasattr(self, "macos_use_pynput_check"):
-            self.macos_use_pynput_check.setVisible(sys.platform == "darwin")
 
     def _on_output_mode_changed(self):
         self._update_88_key_visibility()
@@ -670,7 +660,6 @@ class MainWindow(QMainWindow):
                 self.live_backend = create_backend(
                     self._current_output_mode(),
                     self.use_88_key_check.isChecked(),
-                    macos_use_pynput=self.macos_use_pynput_check.isChecked(),
                     log_message=self.add_log_message,
                 )
             except OutputBackendUnavailableError as e:
@@ -689,7 +678,6 @@ class MainWindow(QMainWindow):
                 self.live_backend = create_backend(
                     self._current_output_mode(),
                     self.use_88_key_check.isChecked(),
-                    macos_use_pynput=self.macos_use_pynput_check.isChecked(),
                     log_message=self.add_log_message,
                 )
             except OutputBackendUnavailableError as e:
@@ -920,7 +908,6 @@ class MainWindow(QMainWindow):
         self.tempo_spinbox.setValue(100)
         self.pedal_style_combo.setCurrentText("Original (from MIDI)")
         self.use_88_key_check.setChecked(False)
-        self.macos_use_pynput_check.setChecked(False)
         self.countdown_check.setChecked(True)
 
     def _reset_humanization_group_to_default(self):
@@ -1312,7 +1299,6 @@ class MainWindow(QMainWindow):
             total_dur,
             config["output_mode"],
             config.get("use_88_key_layout", False),
-            config.get("macos_use_pynput", False),
             log_message=self.add_log_message,
         )
         if started is False:

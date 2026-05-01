@@ -1,5 +1,6 @@
 from typing import Any, cast
 
+import pytest
 from pynput.keyboard import Key
 
 import output.output as out
@@ -55,7 +56,7 @@ def test_keyboard_backend_macos_cgevent_path(monkeypatch):
     )
     monkeypatch.setattr(out, "post_macos_key_event", lambda vk, down, flags: events.append((vk, down, flags)) or True)
 
-    kb = out.KeyboardBackend(use_88_key_layout=False, macos_use_pynput=False)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
     kb.note_on(61, 100)
     kb.note_off(61)
     kb.pedal_on()
@@ -63,6 +64,20 @@ def test_keyboard_backend_macos_cgevent_path(monkeypatch):
     kb.shutdown()
 
     assert len(events) > 0
+
+
+def test_keyboard_backend_macos_does_not_create_pynput_controller(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+
+    def fail_controller():
+        raise AssertionError("pynput Controller must not be created on macOS KEY mode")
+
+    monkeypatch.setattr(out, "Controller", fail_controller)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    assert kb._use_macos_cgevent is True
+    assert kb._kb is None
 
 
 def test_numpad_backend_delay_and_idempotent_pedal(monkeypatch):
@@ -87,11 +102,17 @@ def test_numpad_backend_delay_and_idempotent_pedal(monkeypatch):
     assert sleeps
 
 
-def test_create_backend_logs_fallback_when_no_pydirectinput(monkeypatch):
+def test_create_backend_windows_numpad_requires_pydirectinput(monkeypatch):
     monkeypatch.setattr(out.rmc, "is_using_pydirectinput", lambda: False)
     monkeypatch.setattr(out.sys, "platform", "win32")
-    logs = []
 
-    backend = out.create_backend("midi_numpad", log_message=logs.append)
-    assert backend.__class__.__name__ == "NumpadBackend"
-    assert any("falling back" in msg.lower() for msg in logs)
+    with pytest.raises(out.OutputBackendUnavailableError, match="pydirectinput"):
+        out.create_backend("midi_numpad")
+
+
+def test_create_backend_linux_numpad_requires_pynput(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    monkeypatch.setattr(out.rmc, "is_using_pynput", lambda: False)
+
+    with pytest.raises(out.OutputBackendUnavailableError, match="pynput"):
+        out.create_backend("midi_numpad")

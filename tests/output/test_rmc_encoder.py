@@ -17,22 +17,6 @@ _RMC_PATH = (
 )
 
 
-class _Key:
-    num_lock = "NUMLOCK"
-
-
-class _KB:
-    Key = _Key
-
-
-class _Keyboard:
-    def __init__(self):
-        self.taps = []
-
-    def tap(self, key):
-        self.taps.append(key)
-
-
 class _PDIKeyBdInput(ctypes.Structure):
     _fields_ = [
         ("wVk", ctypes.c_ushort),
@@ -122,18 +106,43 @@ def test_encode_and_send_message_falls_back_when_batched_send_fails(monkeypatch)
     rmc.encode_and_send_message(1, 2, 3, 4)
 
     assert rmc._use_batched_sendinput is False
+    assert tapped == ["multiply", "numpad1", "numpad2", "numpad3", "numpad4"]
 
+    tapped.clear()
     rmc.encode_and_send_message(1, 2, 3, 4)
     assert tapped[0] == "multiply"
     assert tapped[1:5] == ["numpad1", "numpad2", "numpad3", "numpad4"]
 
 
+def test_encode_and_send_message_returns_after_successful_batch(monkeypatch):
+    tapped = []
+    monkeypatch.setattr(rmc, "ensure_numlock_on", lambda: None)
+    monkeypatch.setattr(rmc, "_use_batched_sendinput", True)
+    monkeypatch.setattr(rmc, "_send_frame_batched", lambda *a, **k: True)
+    monkeypatch.setattr(rmc, "_tap_key", lambda name: tapped.append(name))
+
+    rmc.encode_and_send_message(1, 2, 3, 4)
+
+    assert rmc._use_batched_sendinput is True
+    assert tapped == []
+
+
 def test_ensure_numlock_windows_path_taps_when_off(monkeypatch):
-    kb = _Keyboard()
+    calls = []
+
+    class _PDI:
+        @staticmethod
+        def keyDown(name, _pause=False):
+            calls.append(("down", name))
+
+        @staticmethod
+        def keyUp(name, _pause=False):
+            calls.append(("up", name))
+
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_numlock_ensured", False)
-    monkeypatch.setattr(rmc, "_keyboard", kb)
-    monkeypatch.setattr(rmc, "_kb", _KB)
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(rmc, "pydirectinput", _PDI, raising=False)
 
     class _User32:
         @staticmethod
@@ -146,14 +155,43 @@ def test_ensure_numlock_windows_path_taps_when_off(monkeypatch):
 
     rmc.ensure_numlock_on()
 
-    assert kb.taps == ["NUMLOCK"]
+    assert calls == [("down", "numlock"), ("up", "numlock")]
+
+
+def test_ensure_numlock_windows_returns_when_already_on(monkeypatch):
+    calls = []
+
+    class _PDI:
+        @staticmethod
+        def keyDown(name, _pause=False):
+            calls.append(("down", name))
+
+        @staticmethod
+        def keyUp(name, _pause=False):
+            calls.append(("up", name))
+
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_numlock_ensured", False)
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(rmc, "pydirectinput", _PDI, raising=False)
+
+    class _User32:
+        @staticmethod
+        def GetKeyState(_v):
+            return 1
+
+    monkeypatch.setattr(
+        rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False
+    )
+
+    rmc.ensure_numlock_on()
+
+    assert calls == []
 
 
 def test_ensure_numlock_windows_handles_exception(monkeypatch):
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_numlock_ensured", False)
-    monkeypatch.setattr(rmc, "_keyboard", object())
-    monkeypatch.setattr(rmc, "_kb", _KB)
 
     class _User32:
         @staticmethod
@@ -179,6 +217,7 @@ def test_tap_key_pydirectinput_and_pynput_paths(monkeypatch):
         def keyUp(name, _pause=False):
             pdi_calls.append(("up", name))
 
+    monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
     monkeypatch.setattr(rmc, "pydirectinput", _PDI, raising=False)
     rmc._tap_key("numpad1")
@@ -201,17 +240,46 @@ def test_tap_key_pydirectinput_and_pynput_paths(monkeypatch):
     assert presses == [("press", "KC2"), ("release", "KC2")]
 
 
-def test_set_macos_cgevent_and_is_using_pydirectinput(monkeypatch):
+def test_tap_key_windows_without_pydirectinput_does_not_use_pynput(monkeypatch):
+    logs = []
+    presses = []
+    monkeypatch.setattr(rmc.jukebox_logger, "debug", lambda m: logs.append(m))
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", False)
+    monkeypatch.setattr(rmc, "_precomputed_keys", {"numpad1": "KC1"})
+
+    class _KBCtrl:
+        def press(self, k):
+            presses.append(("press", k))
+
+        def release(self, k):
+            presses.append(("release", k))
+
+    monkeypatch.setattr(rmc, "_keyboard", _KBCtrl())
+
+    rmc._tap_key("numpad1")
+
+    assert presses == []
+    assert any("pydirectinput is unavailable" in m for m in logs)
+
+
+def test_transport_availability_helpers(monkeypatch):
     monkeypatch.setattr(rmc, "_use_pydirectinput", False)
     assert rmc.is_using_pydirectinput() is False
 
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
     assert rmc.is_using_pydirectinput() is True
 
-    rmc.set_macos_cgevent(True)
-    assert rmc._use_macos_cgevent is True
-    rmc.set_macos_cgevent(False)
-    assert rmc._use_macos_cgevent is False
+    monkeypatch.setattr(rmc, "_keyboard", object())
+    monkeypatch.setattr(
+        rmc,
+        "_precomputed_keys",
+        {"multiply": object(), **{name: object() for name in rmc.ENCODED_KEYS}},
+    )
+    assert rmc.is_using_pynput() is True
+
+    monkeypatch.setattr(rmc, "_precomputed_keys", {"multiply": object()})
+    assert rmc.is_using_pynput() is False
 
 
 def test_reset_batched_sendinput_branches(monkeypatch):
@@ -271,6 +339,7 @@ def test_tap_key_handles_pydirectinput_exception(monkeypatch):
         def keyUp(name, _pause=False):
             return None
 
+    monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
     monkeypatch.setattr(rmc, "pydirectinput", _PDI, raising=False)
 
@@ -282,7 +351,6 @@ def test_tap_key_macos_cgevent_paths(monkeypatch):
     events = []
     monkeypatch.setattr(rmc, "_use_pydirectinput", False)
     monkeypatch.setattr(rmc, "_platform", "Darwin")
-    monkeypatch.setattr(rmc, "_use_macos_cgevent", True)
     monkeypatch.setattr(rmc, "_platform_map", {"numpad1": 42})
 
     class _Native:
@@ -303,7 +371,6 @@ def test_tap_key_macos_cgevent_logs_on_exception(monkeypatch):
     monkeypatch.setattr(rmc.jukebox_logger, "debug", lambda m: logs.append(m))
     monkeypatch.setattr(rmc, "_use_pydirectinput", False)
     monkeypatch.setattr(rmc, "_platform", "Darwin")
-    monkeypatch.setattr(rmc, "_use_macos_cgevent", True)
     monkeypatch.setattr(rmc, "_platform_map", {"numpad1": 42})
 
     class _Native:
@@ -478,6 +545,8 @@ def test_windows_import_configures_pydirectinput_batched_sendinput(monkeypatch):
     assert ns["_frame_inputs"][1].ii.ki.dwFlags == (
         ns["_KEYEVENTF_SCANCODE"] | ns["_KEYEVENTF_KEYUP"]
     )
+    assert ns["_keyboard"] is None
+    assert ns["_kb"] is None
 
 
 def test_import_sets_pydirectinput_false_on_import_error(monkeypatch):

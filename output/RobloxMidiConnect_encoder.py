@@ -61,13 +61,6 @@ _SCAN_CODES = {
 
 _platform = platform.system()
 _numlock_ensured = False
-_use_macos_cgevent = False
-
-
-def set_macos_cgevent(use_cgevent: bool) -> None:
-    """On macOS: when True, send numpad keys via CGEvent; when False, use pynput. No-op on other platforms."""
-    global _use_macos_cgevent
-    _use_macos_cgevent = bool(use_cgevent)
 
 
 def reset_batched_sendinput() -> None:
@@ -87,7 +80,7 @@ def reset_batched_sendinput() -> None:
 
 # ---------------------------------------------------------------------------
 # Batched SendInput (scan codes) — sends one full RMC frame in 1 kernel call
-# Falls back to pydirectinput per-key, then pynput per-key.
+# Falls back to pydirectinput per-key on Windows.
 # ---------------------------------------------------------------------------
 
 _KEYEVENTF_SCANCODE = 0x0008
@@ -105,6 +98,13 @@ def _get_windll():
 def is_using_pydirectinput() -> bool:
     """Return True if pydirectinput is available and in use for numpad input."""
     return _use_pydirectinput
+
+
+def is_using_pynput() -> bool:
+    """Return True if pynput is available for non-Windows numpad output."""
+    return _keyboard is not None and all(
+        name in _precomputed_keys for name in ("multiply", *ENCODED_KEYS)
+    )
 
 
 if _platform == "Windows":
@@ -136,18 +136,19 @@ if _platform == "Windows":
     except ImportError:
         _use_pydirectinput = False
 
-# pynput fallback (also used for NumLock detection)
+# pynput transport for Linux/other non-Windows, non-macOS platforms.
 _kb = None
 _keyboard = None
 _precomputed_keys: dict = {}
 
-try:
-    from pynput import keyboard as _kb_mod
+if _platform not in ("Windows", "Darwin"):
+    try:
+        from pynput import keyboard as _kb_mod
 
-    _kb = _kb_mod
-    _keyboard = _kb.Controller()
-except ImportError:
-    pass
+        _kb = _kb_mod
+        _keyboard = _kb.Controller()
+    except ImportError:
+        pass
 
 VK_CODES = {
     "Windows": {
@@ -222,21 +223,24 @@ def ensure_numlock_on() -> None:
         return
     try:
         windll = _get_windll()
-        if (
-            _keyboard is not None
-            and _kb is not None
-            and windll is not None
-            and not (windll.user32.GetKeyState(0x90) & 1)
-        ):
-            _keyboard.tap(_kb.Key.num_lock)
+        if windll is None or windll.user32.GetKeyState(0x90) & 1:
+            return
+        if _use_pydirectinput:
+            pydirectinput.keyDown("numlock", _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
+            pydirectinput.keyUp("numlock", _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
     except Exception as e:
         jukebox_logger.debug(f"Failed to ensure NumLock state: {e}")
         return
 
 
 def _tap_key(name: str) -> None:
-    """Press and release a single numpad key (pydirectinput, macOS CGEvent, or pynput)."""
-    if _use_pydirectinput:
+    """Press and release a single numpad key with the platform transport."""
+    if _platform == "Windows":
+        if not _use_pydirectinput:
+            jukebox_logger.debug(
+                f"pydirectinput is unavailable; cannot send numpad key '{name}'."
+            )
+            return
         try:
             pydirectinput.keyDown(name, _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
             pydirectinput.keyUp(name, _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
@@ -244,7 +248,8 @@ def _tap_key(name: str) -> None:
             jukebox_logger.debug(f"pydirectinput key send failed for '{name}': {e}")
             return
         return
-    if _platform == "Darwin" and _use_macos_cgevent:
+
+    if _platform == "Darwin":
         vk = _platform_map.get(name)
         if vk is not None:
             try:
@@ -256,6 +261,7 @@ def _tap_key(name: str) -> None:
                 jukebox_logger.debug(f"macOS CGEvent key send failed for '{name}': {e}")
                 return
         return
+
     kc = _precomputed_keys.get(name)
     if kc is not None:
         kb = _keyboard
@@ -308,12 +314,14 @@ def encode_and_send_message(
         )
         if not ok:
             _use_batched_sendinput = False
-    else:
-        _tap_key("multiply")
-        for val in (a, b, c, d):
-            if inter_key_delay > 0:
-                time.sleep(inter_key_delay)
-            _tap_key(ENCODED_KEYS[max(0, min(11, val))])
+        else:
+            return
+
+    _tap_key("multiply")
+    for val in (a, b, c, d):
+        if inter_key_delay > 0:
+            time.sleep(inter_key_delay)
+        _tap_key(ENCODED_KEYS[max(0, min(11, val))])
 
 
 def _encode_note_components(

@@ -28,11 +28,6 @@ CONFIG_UI_BINDINGS = [
         lambda w, v: _set_output_mode_combo(w, v),
     ),
     (
-        "macos_use_pynput",
-        lambda w: w.macos_use_pynput_check.isChecked(),
-        lambda w, v: w.macos_use_pynput_check.setChecked(v),
-    ),
-    (
         "pedal_style",
         lambda w: w.pedal_mapping.get(w.pedal_style_combo.currentText(), "hybrid"),
         lambda w, v: w.pedal_style_combo.setCurrentText(

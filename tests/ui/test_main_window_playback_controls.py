@@ -376,7 +376,6 @@ def test_handle_play_success_sets_start_offset_and_starts_controller(
         "midi_file": "x.mid",
         "output_mode": "key",
         "use_88_key_layout": False,
-        "macos_use_pynput": False,
     }
     monkeypatch.setattr(w, "gather_config", lambda: dict(cfg))
     monkeypatch.setattr(w, "_save_config", lambda: events.append(("save", None)))
@@ -426,7 +425,6 @@ def test_handle_play_success_without_key_mode_skips_velocity_log(
         "midi_file": "x.mid",
         "output_mode": "midi_numpad",
         "use_88_key_layout": False,
-        "macos_use_pynput": False,
     }
     monkeypatch.setattr(w, "gather_config", lambda: dict(cfg))
     monkeypatch.setattr(w, "_save_config", lambda: None)
@@ -469,7 +467,6 @@ def test_handle_play_backend_start_failure_restores_controls(
         "midi_file": "x.mid",
         "output_mode": "key",
         "use_88_key_layout": False,
-        "macos_use_pynput": False,
     }
     monkeypatch.setattr(w, "gather_config", lambda: dict(cfg))
     monkeypatch.setattr(w, "_save_config", lambda: None)

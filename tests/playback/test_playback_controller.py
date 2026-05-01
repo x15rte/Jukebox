@@ -15,7 +15,7 @@ def test_controller_start_and_state_transitions(monkeypatch):
     monkeypatch.setattr("playback.playback_controller.QThread", FakeThread)
     monkeypatch.setattr("playback.playback_controller.Player", FakePlaybackPlayer)
 
-    assert ctrl.start([], {}, 1.0, "key", False, False) is True
+    assert ctrl.start([], {}, 1.0, "key", False) is True
     assert ctrl.state == "playing"
     assert ctrl.is_running
 
@@ -41,7 +41,7 @@ def test_controller_finishes_and_cleans_up(monkeypatch):
     monkeypatch.setattr("playback.playback_controller.QThread", FakeThread)
     monkeypatch.setattr("playback.playback_controller.Player", FakePlaybackPlayer)
 
-    assert ctrl.start([], {}, 1.0, "key", False, False) is True
+    assert ctrl.start([], {}, 1.0, "key", False) is True
     player = ctrl.player
     assert player is not None
 
@@ -62,7 +62,7 @@ def test_controller_start_backend_unavailable_returns_false(monkeypatch):
     monkeypatch.setattr("playback.playback_controller.Player", FakePlaybackPlayer)
 
     assert (
-        ctrl.start([], {}, 1.0, "key", False, False, log_message=logs.append)
+        ctrl.start([], {}, 1.0, "key", False, log_message=logs.append)
         is False
     )
     assert ctrl.state == "stopped"

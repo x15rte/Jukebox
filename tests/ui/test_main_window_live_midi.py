@@ -193,10 +193,10 @@ def test_on_output_mode_changed_recreates_backend_when_active(
     new = FakeLiveBackend()
     w.live_backend = old
     w.midi_input_active = True
+    monkeypatch.setattr("main_window.create_backend", lambda *a, **k: new)
 
     idx = w.output_mode_combo.findData("midi_numpad")
     w.output_mode_combo.setCurrentIndex(idx)
-    monkeypatch.setattr("main_window.create_backend", lambda *a, **k: new)
 
     w._on_output_mode_changed()
 

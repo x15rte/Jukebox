@@ -166,7 +166,7 @@ def test_note_off_macos_releases_only_when_no_active_pitches(monkeypatch):
     events = []
     monkeypatch.setattr(out, "post_macos_key_event", lambda vk, down, flags: events.append((vk, down, flags)) or True)
 
-    kb = out.KeyboardBackend(use_88_key_layout=False, macos_use_pynput=False)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
 
     p1 = 37
     p2 = 36
@@ -315,7 +315,7 @@ def test_note_on_macos_returns_when_vk_missing(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
     monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: None)
 
-    kb = out.KeyboardBackend(use_88_key_layout=False, macos_use_pynput=False)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
     kb.note_on(60, 100)
 
 
@@ -336,7 +336,7 @@ def test_note_on_off_macos_ctrl_alt_and_none_modifier(monkeypatch):
         lambda vk, down, flags: events.append((vk, down, flags)) or True,
     )
 
-    kb = out.KeyboardBackend(use_88_key_layout=False, macos_use_pynput=False)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
 
     class Skip:
         name = "skip"
@@ -456,7 +456,7 @@ def test_keyboard_shutdown_macos_releases_keys_pedal_and_modifiers(monkeypatch):
         lambda vk, down, flags: events.append((vk, down, flags)) or True,
     )
 
-    kb = out.KeyboardBackend(use_88_key_layout=False, macos_use_pynput=False)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
     kb._active_pitches = {"x": {60}}
     kb._state_for("x").press()
     kb._pedal_down = True
@@ -556,15 +556,12 @@ def test_output_backend_execute_batch_pedal_up_and_empty_branch():
     assert b.calls == [("pedal_off",)]
 
 
-def test_create_backend_sets_macos_cgevent_for_numpad(monkeypatch):
+def test_create_backend_macos_numpad_does_not_use_toggle(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
-    calls = []
-    monkeypatch.setattr(out.rmc, "set_macos_cgevent", lambda v: calls.append(v))
 
-    backend = out.create_backend("midi_numpad", macos_use_pynput=True)
+    backend = out.create_backend("midi_numpad")
 
     assert backend.__class__.__name__ == "NumpadBackend"
-    assert calls == [False]
 
 
 def test_note_on_returns_when_mapper_has_no_data(monkeypatch):
@@ -594,7 +591,7 @@ def test_pedal_off_macos_releases_empty_keys(monkeypatch, vk_for_key, expected_r
     monkeypatch.setattr(out, "post_macos_key_event", lambda vk, down, flags: calls.append((vk, down, flags)) or True)
     monkeypatch.setattr(out, "get_macos_vk_for_key", vk_for_key)
 
-    kb = out.KeyboardBackend(use_88_key_layout=False, macos_use_pynput=False)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
     kb._pedal_down = True
     kb._active_pitches["x"] = set()
     kb._state_for("x").press()

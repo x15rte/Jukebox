@@ -113,7 +113,7 @@ def test_config_from_dict_bool_coercions_and_sanitizers():
 
     assert cfg.countdown is False
     assert cfg.use_88_key_layout is True
-    assert cfg.macos_use_pynput is False
+    assert not hasattr(cfg, "macos_use_pynput")
     assert cfg.save_log_to_file is True
     assert cfg.pedal_style == "none"
     assert cfg.input_mode == "piano"

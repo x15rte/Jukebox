@@ -239,15 +239,14 @@ class KeyboardBackend(OutputBackend):
     """Translates note/pedal events into key output.
 
     Transport selection:
-    - macOS: CGEvent (default) or pynput (when explicitly requested)
+    - macOS: CGEvent
     - Windows: pydirectinput scan-code transport
-    - Other platforms: pynput
+    - Linux/other platforms: pynput
     """
 
     def __init__(
         self,
         use_88_key_layout: bool = False,
-        macos_use_pynput: bool = False,
         log_message: Optional[Callable[[str], None]] = None,
     ):
         self._mapper = KeyMapper(use_88_key_layout=use_88_key_layout)
@@ -260,8 +259,7 @@ class KeyboardBackend(OutputBackend):
         self._pdi = None
         self._windows_transport: Optional[_WindowsPydirectInputTransport] = None
 
-        use_cgevent = sys.platform == "darwin" and not macos_use_pynput
-        self._use_macos_cgevent = bool(use_cgevent)
+        self._use_macos_cgevent = sys.platform == "darwin"
         self._use_pydirectinput = False
 
         self._macos_modifiers: Tuple[bool, bool, bool] = (False, False, False)
@@ -797,25 +795,25 @@ def create_backend(
     output_mode: str,
     use_88_key_layout: bool = False,
     inter_message_delay: float = 0.0,
-    macos_use_pynput: bool = False,
     log_message: Optional[Callable[[str], None]] = None,
 ) -> OutputBackend:
-    """Return the appropriate backend for *output_mode* (``'key'`` or ``'midi_numpad'``).
-    On macOS, *macos_use_pynput* True forces pynput for both KEY and Numpad; False uses CGEvent.
-    """
+    """Return the appropriate backend for *output_mode* (``'key'`` or ``'midi_numpad'``)."""
     effective_log = log_message or jukebox_logger.info
     if output_mode == "midi_numpad":
-        if sys.platform == "darwin":
-            rmc.set_macos_cgevent(not macos_use_pynput)
-        elif not rmc.is_using_pydirectinput():
-            effective_log(
-                "PyDirectInput is not in use; falling back to pynput for numpad input."
+        if sys.platform == "win32" and not rmc.is_using_pydirectinput():
+            raise OutputBackendUnavailableError(
+                "Windows MIDI Numpad mode requires pydirectinput. Install the "
+                "Windows requirements and restart Jukebox."
+            )
+        if sys.platform.startswith("linux") and not rmc.is_using_pynput():
+            raise OutputBackendUnavailableError(
+                "Linux MIDI Numpad mode requires pynput. Install the runtime "
+                "requirements and restart Jukebox."
             )
         return NumpadBackend(
             inter_message_delay=inter_message_delay, log_message=effective_log
         )
     return KeyboardBackend(
         use_88_key_layout=use_88_key_layout,
-        macos_use_pynput=macos_use_pynput,
         log_message=effective_log,
     )

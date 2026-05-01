@@ -85,7 +85,6 @@ class PlaybackController(QObject):
         total_duration: float,
         output_mode: str,
         use_88_key_layout: bool,
-        macos_use_pynput: bool,
         log_message: Optional[Callable[[str], None]] = None,
     ) -> bool:
         """Start playback with the given events and configuration.
@@ -113,7 +112,6 @@ class PlaybackController(QObject):
                 output_mode,
                 use_88_key_layout,
                 inter_message_delay=inter_message_delay,
-                macos_use_pynput=macos_use_pynput,
                 log_message=log_message,
             )
         except OutputBackendUnavailableError as e:

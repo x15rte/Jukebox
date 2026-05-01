@@ -30,7 +30,6 @@ class Config:
     use_88_key_layout: bool = False
     countdown: bool = True
     output_mode: str = "key"
-    macos_use_pynput: bool = False
     input_mode: str = "file"
     midi_input_device: Optional[str] = None
 
@@ -122,7 +121,6 @@ class Config:
         bool_fields = {
             "use_88_key_layout",
             "countdown",
-            "macos_use_pynput",
             "select_all_humanization",
             "simulate_hands",
             "enable_chord_roll",
