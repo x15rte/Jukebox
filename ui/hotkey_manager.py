@@ -10,9 +10,9 @@ from logger_core import jukebox_logger
 
 
 def parse_hotkey_string(s: str | None) -> Key | KeyCode:
-    """Parse config string to pynput Key or KeyCode (special key name or single char); default Key.f6."""
+    """Parse config string to pynput Key or KeyCode (special key name or single char); default Key.f8."""
     if not s or not isinstance(s, str):
-        return Key.f6
+        return Key.f8
     s = s.strip().lower()
     special = getattr(Key, s, None)
     if special is not None:
@@ -21,9 +21,9 @@ def parse_hotkey_string(s: str | None) -> Key | KeyCode:
         try:
             return KeyCode.from_char(s)
         except Exception:
-            jukebox_logger.debug(f"Invalid hotkey character '{s}', using default F6.")
-            return Key.f6
-    return Key.f6
+            jukebox_logger.debug(f"Invalid hotkey character '{s}', using default F8.")
+            return Key.f8
+    return Key.f8
 
 
 class HotkeyManager(QObject):
@@ -34,7 +34,7 @@ class HotkeyManager(QObject):
 
     def __init__(self):
         super().__init__()
-        self.current_key = Key.f6
+        self.current_key = Key.f8
         self.listener = None
         self.listening_for_bind = False
         self._start_listener()

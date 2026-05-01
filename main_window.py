@@ -907,7 +907,7 @@ class MainWindow(QMainWindow):
     def _reset_playback_group_to_default(self):
         self.tempo_spinbox.setValue(100)
         self.pedal_style_combo.setCurrentText("Original (from MIDI)")
-        self.use_88_key_check.setChecked(False)
+        self.use_88_key_check.setChecked(True)
         self.countdown_check.setChecked(True)
 
     def _reset_humanization_group_to_default(self):

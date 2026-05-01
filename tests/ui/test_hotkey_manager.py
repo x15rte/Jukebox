@@ -13,7 +13,7 @@ def _patch_listener(monkeypatch):
 
 
 def test_parse_hotkey_string_defaults_and_char():
-    assert parse_hotkey_string(None) == Key.f6
+    assert parse_hotkey_string(None) == Key.f8
     key = cast(Any, parse_hotkey_string("x"))
     assert hasattr(key, "char") and key.char == "x"
 
@@ -40,11 +40,11 @@ def test_parse_hotkey_string_invalid_char_falls_back_to_default(monkeypatch):
         "ui.hotkey_manager.KeyCode.from_char",
         lambda _c: (_ for _ in ()).throw(ValueError("bad char")),
     )
-    assert parse_hotkey_string("x") == Key.f6
+    assert parse_hotkey_string("x") == Key.f8
 
 
 def test_parse_hotkey_string_multi_char_falls_back_to_default():
-    assert parse_hotkey_string("xx") == Key.f6
+    assert parse_hotkey_string("xx") == Key.f8
 
 
 def test_format_key_string_prefers_key_char(monkeypatch):

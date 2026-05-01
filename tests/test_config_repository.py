@@ -62,6 +62,8 @@ def test_repository_load_returns_defaults_when_missing(tmp_path: Path):
     repo = ConfigRepository(config_dir=tmp_path)
     cfg = repo.load()
     assert isinstance(cfg, Config)
+    assert cfg.use_88_key_layout is True
+    assert cfg.hotkey == "f8"
 
 
 def test_repository_load_backs_up_corrupt_json(tmp_path: Path):
@@ -118,7 +120,7 @@ def test_config_from_dict_bool_coercions_and_sanitizers():
     assert cfg.pedal_style == "none"
     assert cfg.input_mode == "piano"
     assert cfg.log_level == "WARNING"
-    assert cfg.hotkey == "f6"
+    assert cfg.hotkey == "f8"
     assert cfg.midi_input_device is None
 
 

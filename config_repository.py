@@ -27,7 +27,7 @@ class Config:
     # Playback / file
     tempo: float = 100.0
     pedal_style: str = "original"
-    use_88_key_layout: bool = False
+    use_88_key_layout: bool = True
     countdown: bool = True
     output_mode: str = "key"
     input_mode: str = "file"
@@ -52,7 +52,7 @@ class Config:
     # Window / overlay
     always_on_top: bool = False
     opacity: int = 100
-    hotkey: str = "f6"
+    hotkey: str = "f8"
     window_geometry: Optional[str] = None
 
     # Log
