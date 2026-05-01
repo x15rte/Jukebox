@@ -905,10 +905,17 @@ class MainWindow(QMainWindow):
         self._reset_humanization_group_to_default()
 
     def _reset_playback_group_to_default(self):
-        self.tempo_spinbox.setValue(100)
-        self.pedal_style_combo.setCurrentText("Original (from MIDI)")
-        self.use_88_key_check.setChecked(True)
-        self.countdown_check.setChecked(True)
+        defaults = Config()
+        self.tempo_spinbox.setValue(defaults.tempo)
+        self.pedal_style_combo.setCurrentText(
+            self.pedal_mapping_inv.get(defaults.pedal_style, "Original (from MIDI)")
+        )
+        self.use_88_key_check.setChecked(defaults.use_88_key_layout)
+        default_output_index = self.output_mode_combo.findData(defaults.output_mode)
+        if default_output_index >= 0:
+            self.output_mode_combo.setCurrentIndex(default_output_index)
+        self._update_88_key_visibility()
+        self.countdown_check.setChecked(defaults.countdown)
 
     def _reset_humanization_group_to_default(self):
         self.all_humanization_spinboxes["vary_timing"].setValue(0.010)

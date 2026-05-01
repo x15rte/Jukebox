@@ -4,6 +4,7 @@ from typing import Any, cast
 import pytest
 from PyQt6.QtCore import Qt
 
+from config_repository import Config
 from tests.helpers.builders import make_note
 from tests.helpers.fakes import FakeLiveBackend, FakeSignal, FakeThread
 
@@ -300,6 +301,17 @@ def test_reset_controls_to_default_logs_and_calls_resets(window_factory, monkeyp
     assert ("human", None) in events
 
 
+def test_reset_controls_to_default_resets_output_mode(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    idx = w.output_mode_combo.findData("midi_numpad")
+    w.output_mode_combo.setCurrentIndex(idx)
+
+    w._reset_controls_to_default()
+
+    assert w._current_output_mode() == Config().output_mode
+    assert w.use_88_key_check.isVisible() is True
+
+
 def test_current_output_mode_fallback_when_no_combo(window_factory, monkeypatch, tmp_path):
     w = window_factory()
     delattr(w, "output_mode_combo")
@@ -420,5 +432,4 @@ def test_update_enabled_states_ignores_non_text_check(window_factory, monkeypatc
 
     w.all_humanization_checks["dummy"] = Dummy()
     w._update_enabled_states()
-
 
