@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from typing import Any, cast
 
+from output import OutputBackendSendError, OutputBackendUnavailableError
 from tests.helpers.fakes import FakeLiveBackend, FakeSignal, FakeThread
 
 
@@ -275,6 +276,38 @@ def test_connect_midi_input_success_path(window_factory, monkeypatch, tmp_path):
     assert "Connecting to: P1" in w.midi_input_status_label.text()
 
 
+def test_connect_midi_input_backend_unavailable_does_not_start_worker(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    errors = []
+
+    class Ctrl:
+        is_running = False
+
+        def stop_and_wait(self, timeout_ms=None):
+            return None
+
+    def unavailable(*_args, **_kwargs):
+        raise OutputBackendUnavailableError("pydirectinput missing")
+
+    w.playback_controller = Ctrl()
+    w.midi_input_combo.clear()
+    w.midi_input_combo.addItem("P1")
+    monkeypatch.setattr("main_window.create_backend", unavailable)
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: errors.append((m, k)))
+
+    w._connect_midi_input()
+
+    assert w.midi_input_active is False
+    assert w.midi_input_thread is None
+    assert w.midi_input_worker is None
+    assert w.midi_input_connect_btn.isEnabled() is True
+    assert w.midi_input_disconnect_btn.isEnabled() is False
+    assert any("MIDI input could not start" in message for message, _ in errors)
+    assert errors[0][1]["show_dialog"] is True
+
+
 def test_on_midi_input_connected_updates_ui_and_log(window_factory, monkeypatch, tmp_path):
     w = window_factory()
     events = []
@@ -300,6 +333,28 @@ def test_handle_live_midi_message_guard_paths(window_factory, monkeypatch, tmp_p
 
     w.live_backend = FakeLiveBackend()
     w._handle_live_midi_message(SimpleNamespace(type="control_change", control=1, value=127))
+
+
+def test_handle_live_midi_message_output_error_is_visible_and_disconnects(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    errors = []
+    disconnects = []
+
+    class BadBackend(FakeLiveBackend):
+        def note_on(self, pitch, velocity):
+            raise OutputBackendSendError("send failed")
+
+    w.live_backend = BadBackend()
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: errors.append((m, k)))
+    monkeypatch.setattr(w, "_disconnect_midi_input", lambda: disconnects.append(True))
+
+    w._handle_live_midi_message(SimpleNamespace(type="note_on", note=60, velocity=90))
+
+    assert any("Live MIDI output failed" in message for message, _ in errors)
+    assert errors[0][1]["show_dialog"] is True
+    assert disconnects == [True]
 
 
 def test_handle_live_midi_message_missing_note_is_ignored(window_factory, monkeypatch, tmp_path):
@@ -372,3 +427,53 @@ def test_live_midi_backend_recreation_workflow(window_factory, monkeypatch, tmp_
     assert w.midi_input_worker.stop_calls == 1
     assert w.midi_input_thread.quit_called is True
     assert w.midi_input_thread.wait_calls[-1] == 2000
+
+
+def test_live_midi_output_mode_recreate_failure_disconnects(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    errors = []
+    disconnects = []
+    backend = FakeLiveBackend()
+    w.live_backend = backend
+    w.midi_input_active = True
+
+    def unavailable(*_args, **_kwargs):
+        raise OutputBackendUnavailableError("pydirectinput missing")
+
+    monkeypatch.setattr("main_window.create_backend", unavailable)
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: errors.append((m, k)))
+    monkeypatch.setattr(w, "_disconnect_midi_input", lambda: disconnects.append(True))
+
+    w._on_output_mode_changed()
+
+    assert ("shutdown",) in backend.calls
+    assert w.live_backend is None
+    assert any("MIDI input output unavailable" in message for message, _ in errors)
+    assert disconnects == [True]
+
+
+def test_live_midi_key_layout_recreate_failure_disconnects(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    errors = []
+    disconnects = []
+    backend = FakeLiveBackend()
+    w.live_backend = backend
+    w.midi_input_active = True
+
+    def unavailable(*_args, **_kwargs):
+        raise OutputBackendUnavailableError("pydirectinput missing")
+
+    monkeypatch.setattr("main_window.create_backend", unavailable)
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: errors.append((m, k)))
+    monkeypatch.setattr(w, "_disconnect_midi_input", lambda: disconnects.append(True))
+
+    w._on_key_layout_changed()
+
+    assert ("shutdown",) in backend.calls
+    assert w.live_backend is None
+    assert any("MIDI input output unavailable" in message for message, _ in errors)
+    assert disconnects == [True]

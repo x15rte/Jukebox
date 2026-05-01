@@ -444,6 +444,56 @@ def test_handle_play_success_without_key_mode_skips_velocity_log(
     assert not any("velocity dynamics" in m for m in logs)
 
 
+def test_handle_play_backend_start_failure_restores_controls(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    events = []
+
+    class Ctrl:
+        is_running = False
+
+        def start(self, *args, **kwargs):
+            events.append(("start", args, kwargs))
+            return False
+
+        def stop_and_wait(self, timeout_ms=None):
+            return None
+
+    w.playback_controller = Ctrl()
+    w.selected_tracks_info = [(SimpleNamespace(notes=[]), "Left Hand")]
+    w.parsed_tracks = []
+    w.parsed_tempo_map = object()
+
+    cfg = {
+        "midi_file": "x.mid",
+        "output_mode": "key",
+        "use_88_key_layout": False,
+        "macos_use_pynput": False,
+    }
+    monkeypatch.setattr(w, "gather_config", lambda: dict(cfg))
+    monkeypatch.setattr(w, "_save_config", lambda: None)
+    monkeypatch.setattr(
+        w,
+        "set_controls_enabled",
+        lambda enabled: events.append(("controls", enabled)),
+    )
+    monkeypatch.setattr(
+        "main_window.PlaybackService.prepare_playback",
+        lambda *_a, **_k: ([make_note(1, 60, 0.0, 1.0)], [], [], 1.0, object()),
+    )
+
+    w.handle_play()
+
+    assert any(event[0] == "start" for event in events)
+    assert [event for event in events if event[0] == "controls"] == [
+        ("controls", False),
+        ("controls", True),
+    ]
+    assert w.stop_button.isEnabled() is False
+    assert w.play_button.isEnabled() is True
+
+
 def test_parse_select_then_handle_play_workflow_uses_selected_tracks_and_seek_ratio(
     window_factory, monkeypatch, tmp_path
 ):

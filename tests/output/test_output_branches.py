@@ -3,6 +3,7 @@ from typing import Any, cast
 from pynput.keyboard import Key
 
 import output.output as out
+from tests.helpers import pydirectinput_stub
 from tests.helpers.fakes import FakeController
 
 out = cast(Any, out)
@@ -23,12 +24,9 @@ class _PDI:
 
 def test_keyboard_backend_uses_pydirectinput_on_windows(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "win32")
-    monkeypatch.setattr(out, "Controller", FakeController)
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
 
     kb = out.KeyboardBackend(use_88_key_layout=False)
-    kb._pdi = cast(Any, _PDI())
-    kb._use_pydirectinput = True
-    kb._kb = None
 
     pitch = 61
     key_data = kb._mapper.get_key_data(pitch)
@@ -40,10 +38,10 @@ def test_keyboard_backend_uses_pydirectinput_on_windows(monkeypatch):
     kb.pedal_on()
     kb.pedal_off()
 
-    assert "shiftleft" in kb._pdi.down
-    assert base_key in kb._pdi.down
-    assert "space" in kb._pdi.down
-    assert "space" in kb._pdi.up
+    assert "shiftleft" in fake_pdi.down
+    assert base_key in fake_pdi.down
+    assert "space" in fake_pdi.down
+    assert "space" in fake_pdi.up
 
 
 def test_keyboard_backend_macos_cgevent_path(monkeypatch):

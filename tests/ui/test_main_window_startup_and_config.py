@@ -133,7 +133,7 @@ def test_load_config_success_applies_effects_and_updates(window_factory, monkeyp
     ("direct_input", "expected"),
     [
         (True, "available"),
-        (False, "not available (using pynput fallback)"),
+        (False, "not available"),
     ],
 )
 def test_log_startup_capabilities_logs_windows_direct_input_status(

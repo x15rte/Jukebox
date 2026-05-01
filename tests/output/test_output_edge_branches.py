@@ -5,6 +5,7 @@ from pynput.keyboard import Key
 
 import output.output as out
 from output.output import OutputBackend
+from tests.helpers import pydirectinput_stub
 from tests.helpers.fakes import FakeController, FakeEvent
 
 out = cast(Any, out)
@@ -26,6 +27,18 @@ class _PDITypeFallback:
         self.up.append(name)
 
 
+class _PDITypeFallbackFailure:
+    def keyDown(self, _name, _pause=None):
+        if _pause is False:
+            raise TypeError("no _pause")
+        raise RuntimeError("fallback down failed")
+
+    def keyUp(self, _name, _pause=None):
+        if _pause is False:
+            raise TypeError("no _pause")
+        raise RuntimeError("fallback up failed")
+
+
 class _PDINormal:
     def __init__(self):
         self.down = []
@@ -40,7 +53,7 @@ class _PDINormal:
 
 
 def test_pdi_key_down_up_typeerror_fallback(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "win32")
+    monkeypatch.setattr(out.sys, "platform", "linux")
     monkeypatch.setattr(out, "Controller", FakeController)
 
     kb = out.KeyboardBackend(use_88_key_layout=False)
@@ -51,6 +64,19 @@ def test_pdi_key_down_up_typeerror_fallback(monkeypatch):
 
     assert kb._pdi.down == ["x"]
     assert kb._pdi.up == ["x"]
+
+
+def test_pdi_key_down_up_typeerror_fallback_errors_raise(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    monkeypatch.setattr(out, "Controller", FakeController)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._pdi = cast(Any, _PDITypeFallbackFailure())
+
+    with pytest.raises(out.OutputBackendSendError, match="fallback down failed"):
+        kb._pdi_key_down("x")
+    with pytest.raises(out.OutputBackendSendError, match="fallback up failed"):
+        kb._pdi_key_up("x")
 
 
 def test_release_key_if_unused_handles_backend_exception(monkeypatch):
@@ -87,7 +113,7 @@ def test_note_on_with_unknown_pitch_noop(monkeypatch):
 
 
 def test_note_on_pydirectinput_modifier_none_branch(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "win32")
+    monkeypatch.setattr(out.sys, "platform", "linux")
     monkeypatch.setattr(out, "Controller", FakeController)
 
     kb = out.KeyboardBackend(use_88_key_layout=False)
@@ -102,6 +128,24 @@ def test_note_on_pydirectinput_modifier_none_branch(monkeypatch):
     assert key_data is not None
     base = key_data["key"]
     assert base in kb._pdi.down
+
+
+def test_note_on_pydirectinput_modifier_branch_releases_modifier(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    monkeypatch.setattr(out, "Controller", FakeController)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._pdi = cast(Any, _PDINormal())
+    kb._use_pydirectinput = True
+    kb._kb = None
+
+    kb.note_on(61, 100)
+
+    key_data = kb._mapper.get_key_data(61)
+    assert key_data is not None
+    base = key_data["key"]
+    assert kb._pdi.down == ["shiftleft", base]
+    assert kb._pdi.up == ["shiftleft"]
 
 
 def test_note_off_macos_releases_only_when_no_active_pitches(monkeypatch):
@@ -193,55 +237,56 @@ def test_numpad_backend_shutdown_logs_errors(monkeypatch):
     assert any("shutdown pedal release error" in m for m in logs)
 
 
-def test_keyboard_backend_windows_import_fallback_logs(monkeypatch):
+def test_keyboard_backend_windows_missing_pydirectinput_raises(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "win32")
-    monkeypatch.setattr(out, "Controller", FakeController)
+    pydirectinput_stub.block(monkeypatch, ImportError("missing"))
 
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "pydirectinput":
-            raise ImportError("missing")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    logs = []
-    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
-
-    assert kb._use_pydirectinput is False
-    assert kb._kb is not None
-    assert any("falling back to pynput" in m.lower() for m in logs)
+    with pytest.raises(out.OutputBackendUnavailableError):
+        out.KeyboardBackend(use_88_key_layout=False)
 
 
 def test_keyboard_backend_windows_import_uses_pydirectinput(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "win32")
-
-    import builtins
-
-    real_import = builtins.__import__
-
-    class _PDI:
-        PAUSE = 1
-        FAILSAFE = True
-
-    def fake_import(name, *args, **kwargs):
-        if name == "pydirectinput":
-            return _PDI
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
     logs = []
 
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
 
-    assert kb._pdi is _PDI
+    assert kb._pdi is fake_pdi
     assert kb._use_pydirectinput is True
     assert kb._kb is None
-    assert _PDI.PAUSE == 0
-    assert _PDI.FAILSAFE is False
-    assert any("using pydirectinput on windows" in m.lower() for m in logs)
+    assert fake_pdi.PAUSE == 0
+    assert fake_pdi.FAILSAFE is False
+    assert any("scan-code transport" in m.lower() for m in logs)
+
+
+def test_keyboard_backend_windows_mapping_failure_is_unavailable(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    fake_pdi.KEYBOARD_MAPPING = cast(Any, None)
+
+    with pytest.raises(out.OutputBackendUnavailableError, match="configure"):
+        out.KeyboardBackend(use_88_key_layout=False)
+
+
+def test_keyboard_backend_windows_missing_sendinput_is_unavailable(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    pydirectinput_stub.install(monkeypatch)
+    monkeypatch.setattr(out.ctypes, "windll", None, raising=False)
+
+    with pytest.raises(out.OutputBackendUnavailableError, match="SendInput"):
+        out.KeyboardBackend(use_88_key_layout=False)
+
+
+def test_windows_transport_unknown_scan_code_raises(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    pydirectinput_stub.install(monkeypatch)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    assert kb._windows_transport is not None
+    with pytest.raises(out.OutputBackendSendError, match="no scan code"):
+        kb._windows_transport.send_batch([("unknown", True)])
 
 
 @pytest.mark.parametrize(
@@ -357,6 +402,30 @@ def test_pedal_on_off_extra_branches(monkeypatch):
     assert any("pedal_off error" in m for m in logs)
 
 
+def test_pedal_on_off_pydirectinput_errors_raise(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    monkeypatch.setattr(out, "Controller", FakeController)
+
+    class BadPDI:
+        def keyDown(self, *_a, **_k):
+            raise RuntimeError("down boom")
+
+        def keyUp(self, *_a, **_k):
+            raise RuntimeError("up boom")
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._use_pydirectinput = True
+    kb._pdi = cast(Any, BadPDI())
+    kb._kb = None
+
+    with pytest.raises(out.OutputBackendSendError, match="down boom"):
+        kb.pedal_on()
+
+    kb._pedal_down = True
+    with pytest.raises(out.OutputBackendSendError, match="up boom"):
+        kb.pedal_off()
+
+
 def test_pedal_off_releases_empty_active_keys(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "linux")
     monkeypatch.setattr(out, "Controller", FakeController)
@@ -401,7 +470,7 @@ def test_keyboard_shutdown_macos_releases_keys_pedal_and_modifiers(monkeypatch):
 
 
 def test_keyboard_shutdown_pdi_and_pynput_exception_branches(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "win32")
+    monkeypatch.setattr(out.sys, "platform", "linux")
     monkeypatch.setattr(out, "Controller", FakeController)
 
     logs = []
@@ -435,6 +504,24 @@ def test_keyboard_shutdown_pdi_and_pynput_exception_branches(monkeypatch):
     kb2.shutdown()
 
     assert any("shutdown modifier release error" in m for m in logs)
+
+
+def test_keyboard_shutdown_windows_transport_failure_is_logged(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    logs = []
+
+    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+    kb._active_pitches = {"x": {60}}
+    kb._state_for("x").press()
+    kb._pedal_down = True
+    fake_pdi.send_exception = RuntimeError("shutdown boom")
+
+    kb.shutdown()
+
+    assert any("shutdown release error" in m for m in logs)
+    assert kb._active_pitches == {}
+    assert kb._pedal_down is False
 
 
 def test_output_backend_execute_batch_pedal_up_and_empty_branch():

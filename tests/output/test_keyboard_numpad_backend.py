@@ -1,8 +1,11 @@
 from typing import Any, cast
 
+import pytest
+
 import output.output as out
 
 out = cast(Any, out)
+from tests.helpers import pydirectinput_stub
 from tests.helpers.fakes import FakeEvent
 
 
@@ -131,3 +134,220 @@ def test_output_backend_execute_batch_matches_in_game_event_order(monkeypatch):
         ("note", (60,), {"velocity": 0, "is_note_off": True}),
         ("note", (64, 96), {"is_note_off": False}),
     ]
+
+
+def test_windows_key_backend_configures_scan_codes(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+
+    out.KeyboardBackend(use_88_key_layout=True)
+
+    mapped_keys = {
+        data["key"] for data in out.KeyMapper(use_88_key_layout=True).key_map.values()
+    }
+    required_keys = mapped_keys | {"space", "shiftleft", "ctrlleft", "altleft"}
+
+    assert required_keys <= set(out._WINDOWS_KEY_SCAN_CODES)
+    assert fake_pdi.PAUSE == 0
+    assert fake_pdi.FAILSAFE is False
+    for key_name, scan_code in out._WINDOWS_KEY_SCAN_CODES.items():
+        assert fake_pdi.KEYBOARD_MAPPING[key_name] == scan_code
+
+
+def test_windows_key_backend_does_not_use_pynput_fallback(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    pydirectinput_stub.install(monkeypatch)
+
+    def bad_controller():
+        raise AssertionError("pynput Controller must not be created on Windows KEY mode")
+
+    monkeypatch.setattr(out, "Controller", bad_controller)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    assert kb._kb is None
+    assert kb._use_pydirectinput is True
+
+
+def test_windows_key_backend_note_sequences(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+
+    kb = out.KeyboardBackend(use_88_key_layout=True)
+    normal_data = kb._mapper.get_key_data(60)
+    shift_data = kb._mapper.get_key_data(61)
+    ctrl_data = kb._mapper.get_key_data(21)
+    assert normal_data is not None
+    assert shift_data is not None
+    assert ctrl_data is not None
+
+    normal_base = normal_data["key"]
+    shift_base = shift_data["key"]
+    ctrl_base = ctrl_data["key"]
+
+    kb.note_on(60, 100)
+    kb.note_off(60)
+    kb.note_on(61, 100)
+    kb.note_off(61)
+    kb.note_on(21, 100)
+    kb.note_off(21)
+
+    assert fake_pdi.sent_batches == [
+        [(normal_base, True)],
+        [(normal_base, False)],
+        [("shiftleft", True), (shift_base, True), ("shiftleft", False)],
+        [(shift_base, False)],
+        [("ctrlleft", True), (ctrl_base, True), ("ctrlleft", False)],
+        [(ctrl_base, False)],
+    ]
+    assert fake_pdi.down == [
+        normal_base,
+        "shiftleft",
+        shift_base,
+        "ctrlleft",
+        ctrl_base,
+    ]
+    assert fake_pdi.up == [
+        normal_base,
+        "shiftleft",
+        shift_base,
+        "ctrlleft",
+        ctrl_base,
+    ]
+
+
+def test_windows_key_backend_overlapping_same_base_release(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    sleeps = []
+    monkeypatch.setattr(out.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    key_data = kb._mapper.get_key_data(36)
+    assert key_data is not None
+    base = key_data["key"]
+
+    kb.note_on(36, 100)
+    kb.note_on(37, 100)
+    kb.note_off(36)
+
+    assert fake_pdi.up.count(base) == 1
+    assert sleeps == [out._WINDOWS_KEY_REPRESS_DELAY]
+
+    kb.note_off(37)
+
+    assert fake_pdi.up.count(base) == 2
+
+
+def test_windows_key_backend_execute_batch_inserts_release_press_gap(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    sleeps = []
+    monkeypatch.setattr(out.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    first_data = kb._mapper.get_key_data(60)
+    second_data = kb._mapper.get_key_data(67)
+    assert first_data is not None
+    assert second_data is not None
+    first_base = first_data["key"]
+    second_base = second_data["key"]
+
+    kb.note_on(60, 100)
+    fake_pdi.sent_batches.clear()
+
+    kb.execute_batch(
+        [
+            FakeEvent(0.0, 4, "release", key_char="", pitch=60, velocity=0),
+            FakeEvent(0.0, 2, "press", key_char="", pitch=67, velocity=100),
+        ]
+    )
+
+    assert sleeps == [out._WINDOWS_KEY_REPRESS_DELAY]
+    assert fake_pdi.sent_batches == [
+        [(first_base, False)],
+        [(second_base, True)],
+    ]
+
+
+def test_windows_key_backend_execute_batch_routes_pedals(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    kb.execute_batch(
+        [
+            FakeEvent(0.0, 0, "pedal", key_char="down"),
+            FakeEvent(0.0, 1, "pedal", key_char="up"),
+        ]
+    )
+
+    assert fake_pdi.sent_batches == [
+        [("space", True)],
+        [("space", False)],
+    ]
+
+
+def test_windows_key_backend_pedal_idempotency_and_shutdown(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    key_data = kb._mapper.get_key_data(61)
+    assert key_data is not None
+    base = key_data["key"]
+
+    kb.pedal_on()
+    kb.pedal_on()
+    kb.pedal_off()
+    kb.pedal_off()
+
+    assert fake_pdi.down.count("space") == 1
+    assert fake_pdi.up.count("space") == 1
+
+    kb.note_on(61, 100)
+    kb.pedal_on()
+    kb.shutdown()
+
+    assert fake_pdi.sent_batches[-1] == [
+        (base, False),
+        ("space", False),
+        ("shiftleft", False),
+        ("ctrlleft", False),
+        ("altleft", False),
+    ]
+    assert base in fake_pdi.up
+    assert fake_pdi.up.count("space") == 2
+    assert "shiftleft" in fake_pdi.up
+    assert "ctrlleft" in fake_pdi.up
+    assert "altleft" in fake_pdi.up
+
+
+def test_windows_key_backend_missing_pydirectinput_is_unavailable(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    pydirectinput_stub.block(monkeypatch)
+
+    with pytest.raises(out.OutputBackendUnavailableError):
+        out.KeyboardBackend(use_88_key_layout=False)
+
+
+def test_windows_key_backend_send_failure_raises(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    fake_pdi.send_exception = RuntimeError("send failed")
+
+    with pytest.raises(out.OutputBackendSendError, match="send failed"):
+        kb.note_on(60, 100)
+
+
+def test_windows_key_backend_partial_send_raises(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    fake_pdi.send_result = 0
+
+    with pytest.raises(out.OutputBackendSendError, match="sent 0 of 1"):
+        kb.note_on(60, 100)

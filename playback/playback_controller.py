@@ -12,7 +12,8 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal as Signal
 
 from models import KeyEvent
 from .player import Player
-from output import OutputBackend, create_backend
+from logger_core import jukebox_logger
+from output import OutputBackend, OutputBackendUnavailableError, create_backend
 
 
 PlaybackState = str  # "stopped" | "playing" | "paused"
@@ -86,7 +87,7 @@ class PlaybackController(QObject):
         use_88_key_layout: bool,
         macos_use_pynput: bool,
         log_message: Optional[Callable[[str], None]] = None,
-    ) -> None:
+    ) -> bool:
         """Start playback with the given events and configuration.
 
         This method is intended to be called from the GUI thread.
@@ -100,20 +101,28 @@ class PlaybackController(QObject):
                 log_message(
                     "Playback is still stopping; please wait a moment before starting again."
                 )
-            return
+            return False
 
         self._total_duration = total_duration
 
         # Small inter-message delay for midi_numpad spreads RMC bursts so the game
         # can process input smoothly (avoids stutter from back-to-back frames).
         inter_message_delay = 0.001 if output_mode == "midi_numpad" else 0.0
-        backend = create_backend(
-            output_mode,
-            use_88_key_layout,
-            inter_message_delay=inter_message_delay,
-            macos_use_pynput=macos_use_pynput,
-            log_message=log_message,
-        )
+        try:
+            backend = create_backend(
+                output_mode,
+                use_88_key_layout,
+                inter_message_delay=inter_message_delay,
+                macos_use_pynput=macos_use_pynput,
+                log_message=log_message,
+            )
+        except OutputBackendUnavailableError as e:
+            message = f"Playback could not start: {e}"
+            jukebox_logger.error(message)
+            if log_message is not None:
+                log_message(message)
+            self._backend = None
+            return False
         self._backend = backend
 
         thread = QThread()
@@ -130,6 +139,7 @@ class PlaybackController(QObject):
         self._player = player
         thread.start()
         self._set_state("playing")
+        return True
 
     def stop(self) -> None:
         """Request playback stop; returns immediately."""

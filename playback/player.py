@@ -591,8 +591,15 @@ class Player(QObject):
             jukebox_logger.error(f"Playback thread failed: {e}", exc_info=True)
             self.status_updated.emit(f"Error: {e}")
         finally:
-            self.backend.shutdown()
-            self.playback_finished.emit()
+            try:
+                self.backend.shutdown()
+            except Exception as e:
+                jukebox_logger.error(
+                    f"Playback output shutdown failed: {e}", exc_info=True
+                )
+                self.status_updated.emit(f"Error: {e}")
+            finally:
+                self.playback_finished.emit()
 
     def stop(self):
         if not self.stop_event.is_set():

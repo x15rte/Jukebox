@@ -1,6 +1,7 @@
 from typing import Any, cast
 
 from playback.playback_controller import PlaybackController
+from output import OutputBackendUnavailableError
 from tests.helpers.fakes import FakeBackend, FakePlaybackPlayer, FakeThread
 
 PlaybackController = cast(Any, PlaybackController)
@@ -14,7 +15,7 @@ def test_controller_start_and_state_transitions(monkeypatch):
     monkeypatch.setattr("playback.playback_controller.QThread", FakeThread)
     monkeypatch.setattr("playback.playback_controller.Player", FakePlaybackPlayer)
 
-    ctrl.start([], {}, 1.0, "key", False, False)
+    assert ctrl.start([], {}, 1.0, "key", False, False) is True
     assert ctrl.state == "playing"
     assert ctrl.is_running
 
@@ -40,10 +41,31 @@ def test_controller_finishes_and_cleans_up(monkeypatch):
     monkeypatch.setattr("playback.playback_controller.QThread", FakeThread)
     monkeypatch.setattr("playback.playback_controller.Player", FakePlaybackPlayer)
 
-    ctrl.start([], {}, 1.0, "key", False, False)
+    assert ctrl.start([], {}, 1.0, "key", False, False) is True
     player = ctrl.player
     assert player is not None
 
     ctrl._on_playback_finished_internal()
     assert ctrl.state == "stopped"
     assert ctrl.player is None
+
+
+def test_controller_start_backend_unavailable_returns_false(monkeypatch):
+    ctrl = PlaybackController()
+    logs = []
+
+    def unavailable(*_args, **_kwargs):
+        raise OutputBackendUnavailableError("pydirectinput missing")
+
+    monkeypatch.setattr("playback.playback_controller.create_backend", unavailable)
+    monkeypatch.setattr("playback.playback_controller.QThread", FakeThread)
+    monkeypatch.setattr("playback.playback_controller.Player", FakePlaybackPlayer)
+
+    assert (
+        ctrl.start([], {}, 1.0, "key", False, False, log_message=logs.append)
+        is False
+    )
+    assert ctrl.state == "stopped"
+    assert ctrl.player is None
+    assert ctrl._thread is None
+    assert any("Playback could not start" in m for m in logs)

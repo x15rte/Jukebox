@@ -44,7 +44,7 @@ from ui import (
     TrackSelectionDialog,
     MidiInputWorker,
 )
-from output import create_backend
+from output import OutputBackendError, OutputBackendUnavailableError, create_backend
 from playback import PlaybackController, PlaybackService
 from logger_core import jukebox_logger
 from config_repository import Config, ConfigRepository, ConfigLoadError
@@ -573,12 +573,22 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No Device", "No MIDI input device selected.")
             return
 
-        self.live_backend = create_backend(
-            self._current_output_mode(),
-            self.use_88_key_check.isChecked(),
-            macos_use_pynput=self.macos_use_pynput_check.isChecked(),
-            log_message=self.add_log_message,
-        )
+        try:
+            self.live_backend = create_backend(
+                self._current_output_mode(),
+                self.use_88_key_check.isChecked(),
+                macos_use_pynput=self.macos_use_pynput_check.isChecked(),
+                log_message=self.add_log_message,
+            )
+        except OutputBackendUnavailableError as e:
+            self.live_backend = None
+            self.midi_input_status_label.setText("Piano input disconnected.")
+            self._log_error(
+                f"MIDI input could not start: {e}",
+                show_dialog=True,
+                dialog_title="Output Unavailable",
+            )
+            return
 
         self.midi_input_thread = QThread()
         self.midi_input_worker = MidiInputWorker(port_name)
@@ -656,22 +666,40 @@ class MainWindow(QMainWindow):
         self._update_88_key_visibility()
         if self.live_backend and self.midi_input_active:
             self.live_backend.shutdown()
-            self.live_backend = create_backend(
-                self._current_output_mode(),
-                self.use_88_key_check.isChecked(),
-                macos_use_pynput=self.macos_use_pynput_check.isChecked(),
-                log_message=self.add_log_message,
-            )
+            try:
+                self.live_backend = create_backend(
+                    self._current_output_mode(),
+                    self.use_88_key_check.isChecked(),
+                    macos_use_pynput=self.macos_use_pynput_check.isChecked(),
+                    log_message=self.add_log_message,
+                )
+            except OutputBackendUnavailableError as e:
+                self.live_backend = None
+                self._log_error(
+                    f"MIDI input output unavailable: {e}",
+                    show_dialog=True,
+                    dialog_title="Output Unavailable",
+                )
+                self._disconnect_midi_input()
 
     def _on_key_layout_changed(self, _checked: bool = False):
         if self.live_backend and self.midi_input_active:
             self.live_backend.shutdown()
-            self.live_backend = create_backend(
-                self._current_output_mode(),
-                self.use_88_key_check.isChecked(),
-                macos_use_pynput=self.macos_use_pynput_check.isChecked(),
-                log_message=self.add_log_message,
-            )
+            try:
+                self.live_backend = create_backend(
+                    self._current_output_mode(),
+                    self.use_88_key_check.isChecked(),
+                    macos_use_pynput=self.macos_use_pynput_check.isChecked(),
+                    log_message=self.add_log_message,
+                )
+            except OutputBackendUnavailableError as e:
+                self.live_backend = None
+                self._log_error(
+                    f"MIDI input output unavailable: {e}",
+                    show_dialog=True,
+                    dialog_title="Output Unavailable",
+                )
+                self._disconnect_midi_input()
 
     def _handle_live_midi_message(self, msg):
         if not self.live_backend:
@@ -679,24 +707,34 @@ class MainWindow(QMainWindow):
 
         msg_type = getattr(msg, "type", None)
 
-        if msg_type in ("note_on", "note_off"):
-            note = getattr(msg, "note", None)
-            velocity = getattr(msg, "velocity", 0)
-            if note is None:
+        try:
+            if msg_type in ("note_on", "note_off"):
+                note = getattr(msg, "note", None)
+                velocity = getattr(msg, "velocity", 0)
+                if note is None:
+                    return
+                is_off = msg_type == "note_off" or (
+                    msg_type == "note_on" and velocity == 0
+                )
+                if is_off:
+                    self.live_backend.note_off(note)
+                else:
+                    self.live_backend.note_on(note, velocity)
                 return
-            is_off = msg_type == "note_off" or (msg_type == "note_on" and velocity == 0)
-            if is_off:
-                self.live_backend.note_off(note)
-            else:
-                self.live_backend.note_on(note, velocity)
-            return
 
-        if msg_type == "control_change" and getattr(msg, "control", None) == 64:
-            value = getattr(msg, "value", 0)
-            if value >= 64:
-                self.live_backend.pedal_on()
-            else:
-                self.live_backend.pedal_off()
+            if msg_type == "control_change" and getattr(msg, "control", None) == 64:
+                value = getattr(msg, "value", 0)
+                if value >= 64:
+                    self.live_backend.pedal_on()
+                else:
+                    self.live_backend.pedal_off()
+        except OutputBackendError as e:
+            self._log_error(
+                f"Live MIDI output failed: {e}",
+                show_dialog=True,
+                dialog_title="Output Error",
+            )
+            self._disconnect_midi_input()
 
     def _create_settings_group(self):
         group = QGroupBox("Settings")
@@ -925,7 +963,7 @@ class MainWindow(QMainWindow):
             direct = (
                 "available"
                 if caps.get("direct_input")
-                else "not available (using pynput fallback)"
+                else "not available"
             )
             jukebox_logger.info(f"Windows direct input (pydirectinput): {direct}.")
 
@@ -1268,7 +1306,7 @@ class MainWindow(QMainWindow):
 
         self.tabs.setCurrentIndex(1)
 
-        self.playback_controller.start(
+        started = self.playback_controller.start(
             compiled_events,
             config,
             total_dur,
@@ -1277,6 +1315,10 @@ class MainWindow(QMainWindow):
             config.get("macos_use_pynput", False),
             log_message=self.add_log_message,
         )
+        if started is False:
+            self.set_controls_enabled(True)
+            self.stop_button.setEnabled(False)
+            self.play_button.setEnabled(True)
 
     def handle_stop(self):
         if self.playback_controller.is_running:

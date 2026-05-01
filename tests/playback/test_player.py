@@ -61,3 +61,29 @@ def test_toggle_pause_sets_and_clears_pause_event(monkeypatch):
 
     p.toggle_pause()
     assert not p.pause_event.is_set()
+
+
+def test_play_reports_shutdown_error(monkeypatch):
+    class BadShutdownBackend(FakeBackend):
+        def shutdown(self):
+            raise RuntimeError("shutdown boom")
+
+    class FinishedRecorder:
+        def __init__(self):
+            self.count = 0
+
+        def emit(self):
+            self.count += 1
+
+    backend = BadShutdownBackend()
+    p = Player([], backend, {}, 1.0)
+    statuses = Recorder()
+    finished = FinishedRecorder()
+    p.status_updated = cast(Any, statuses)
+    p.playback_finished = cast(Any, finished)
+    monkeypatch.setattr(p, "_run_loop", lambda: None)
+
+    p.play()
+
+    assert any("shutdown boom" in value for value in statuses.values)
+    assert finished.count == 1
