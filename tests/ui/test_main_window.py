@@ -309,7 +309,7 @@ def test_reset_controls_to_default_resets_output_mode(window_factory, monkeypatc
     w._reset_controls_to_default()
 
     assert w._current_output_mode() == Config().output_mode
-    assert w.use_88_key_check.isVisible() is True
+    assert w.use_88_key_check.isVisibleTo(w) is True
 
 
 def test_current_output_mode_fallback_when_no_combo(window_factory, monkeypatch, tmp_path):
