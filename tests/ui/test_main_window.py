@@ -147,19 +147,18 @@ def test_update_playback_tab_appearance_locked_and_unlocked(window_factory, monk
     assert w.tabs.tabToolTip(0) == ""
 
 
-def test_on_tab_changed_when_locked_shows_dialog_and_redirects(
+def test_on_tab_changed_when_locked_stops_and_switches(
     window_factory, monkeypatch, tmp_path
 ):
     w = window_factory()
-    infos = []
-    monkeypatch.setattr("main_window.QMessageBox.information", lambda *a, **k: infos.append(True))
+    stop_calls = []
+    monkeypatch.setattr(w, "handle_stop", lambda: stop_calls.append(True))
 
     w.playback_state = "paused"
     w.tabs.setCurrentIndex(2)
     w._on_tab_changed(0)
 
-    assert infos == [True]
-    assert w.tabs.currentIndex() == 1
+    assert stop_calls == [True]
 
 
 def test_on_log_save_to_file_toggled_enables_and_disables(window_factory, monkeypatch, tmp_path):

@@ -325,15 +325,7 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         if index == 0 and self._is_playback_locked():
-            QMessageBox.information(
-                self,
-                "Playback Locked",
-                "Playback options cannot be changed while the song is playing or paused.\n"
-                "Please press Stop before modifying settings.",
-            )
-            if self.tabs.count() > 1:
-                self.tabs.setCurrentIndex(1)
-            return
+            self.handle_stop()
         self._last_tab_index = index
 
     def _on_playback_state_changed(self, state: str) -> None:
