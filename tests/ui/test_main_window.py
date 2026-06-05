@@ -155,8 +155,11 @@ def test_on_tab_changed_when_locked_stops_and_switches(
     monkeypatch.setattr(w, "handle_stop", lambda: stop_calls.append(True))
 
     w.playback_state = "paused"
-    w.tabs.setCurrentIndex(2)
-    w._on_tab_changed(0)
+    # Block signals so setCurrentIndex doesn't trigger _on_tab_changed as a side effect
+    w.tabs.blockSignals(True)
+    w.tabs.setCurrentIndex(1)  # Visualizer tab (index 1) — not in stop list
+    w.tabs.blockSignals(False)
+    w._on_tab_changed(0)  # Switching to Playback tab while locked
 
     assert stop_calls == [True]
 

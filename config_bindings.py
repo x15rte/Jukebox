@@ -209,13 +209,10 @@ def _apply_input_mode(widget, value):
         widget.piano_input_widget.setVisible(use_piano)
     if hasattr(widget, "_playback_file_only_widget"):
         widget._playback_file_only_widget.setVisible(not use_piano)
-    if hasattr(widget, "humanization_group"):
-        widget.humanization_group.setVisible(not use_piano)
-    if hasattr(widget, "settings_group"):
-        widget.settings_group.setVisible(not use_piano)
     if hasattr(widget, "tabs"):
         widget.tabs.setTabEnabled(1, not use_piano)
-        if use_piano and widget.tabs.currentIndex() == 1:
+        widget.tabs.setTabEnabled(2, not use_piano)
+        if use_piano and widget.tabs.currentIndex() in (1, 2):
             widget.tabs.setCurrentIndex(0)
     if use_piano and hasattr(widget, "_refresh_midi_inputs"):
         widget._refresh_midi_inputs(show_dialog=False)

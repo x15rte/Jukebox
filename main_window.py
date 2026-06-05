@@ -69,7 +69,7 @@ MAX_LOG_ENTRIES = 5000
 
 
 class MainWindow(QMainWindow):
-    """Tabs: Playback (file, tracks, humanization), Visualizer (timeline + piano), Settings (hotkey, overlay), Output (log). Saves/loads config.json; optional log to file."""
+    """Tabs: Playback (file, input/output), Humanization (humanization settings), Visualizer (timeline + piano), Settings (hotkey, overlay, playback defaults), Output (log). Saves/loads config.json; optional log to file."""
 
     log_record_received = Signal(str, str)
 
@@ -157,9 +157,15 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
-        controls_tab, visual_tab, log_tab = QWidget(), QWidget(), QWidget()
+        controls_tab = QWidget()
+        humanization_tab = QWidget()
+        visual_tab = QWidget()
+        settings_tab = QWidget()
+        log_tab = QWidget()
         self.tabs.addTab(controls_tab, "Playback")
         self.tabs.addTab(visual_tab, "Visualizer")
+        self.tabs.addTab(humanization_tab, "Humanization")
+        self.tabs.addTab(settings_tab, "Settings")
         self.tabs.addTab(log_tab, "Output")
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -186,20 +192,25 @@ class MainWindow(QMainWindow):
         self.piano_widget = PianoWidget()
         vis_layout.addWidget(self.piano_widget)
 
-        controls_main = QHBoxLayout(controls_tab)
-        controls_main.setSpacing(theme.SECTION_SPACING)
-        left_column = QWidget()
-        left_layout = QVBoxLayout(left_column)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(theme.SECTION_SPACING)
-        left_layout.addWidget(self._create_input_output_group())
+        controls_main_layout = QVBoxLayout(controls_tab)
+        controls_main_layout.setContentsMargins(5, 5, 5, 5)
+        controls_main_layout.setSpacing(theme.SECTION_SPACING)
+        controls_main_layout.addWidget(self._create_input_output_group())
+        controls_main_layout.addStretch()
+
+        humanization_layout = QVBoxLayout(humanization_tab)
+        humanization_layout.setContentsMargins(5, 5, 5, 5)
+        humanization_layout.setSpacing(theme.SECTION_SPACING)
         self.humanization_group = self._create_humanization_group()
-        left_layout.addWidget(self.humanization_group)
-        left_layout.addStretch()
-        controls_main.addWidget(left_column, 1)
+        humanization_layout.addWidget(self.humanization_group)
+        humanization_layout.addStretch()
+
+        settings_layout = QVBoxLayout(settings_tab)
+        settings_layout.setContentsMargins(5, 5, 5, 5)
+        settings_layout.setSpacing(theme.SECTION_SPACING)
         self.settings_group = self._create_settings_group()
-        self.settings_group.setMinimumWidth(260)
-        controls_main.addWidget(self.settings_group, 0)
+        settings_layout.addWidget(self.settings_group)
+        settings_layout.addStretch()
 
         self.log_output = QTextBrowser()
         self.log_output.setOpenExternalLinks(True)
@@ -314,17 +325,18 @@ class MainWindow(QMainWindow):
             return
         locked = self._is_playback_locked()
         color = QColor(150, 150, 150) if locked else QColor(235, 235, 240)
-        tab_bar.setTabTextColor(0, color)
         tooltip = (
-            "Playback options are locked while the song is playing or paused. "
+            "Settings are locked while the song is playing or paused. "
             "Press Stop to adjust settings."
             if locked
             else ""
         )
-        self.tabs.setTabToolTip(0, tooltip)
+        for idx in (0, 2, 3):
+            tab_bar.setTabTextColor(idx, color)
+            self.tabs.setTabToolTip(idx, tooltip)
 
     def _on_tab_changed(self, index: int) -> None:
-        if index == 0 and self._is_playback_locked():
+        if index in (0, 2, 3) and self._is_playback_locked():
             self.handle_stop()
         self._last_tab_index = index
 
@@ -516,10 +528,9 @@ class MainWindow(QMainWindow):
         self.file_input_widget.setVisible(not use_piano)
         self.piano_input_widget.setVisible(use_piano)
         self._playback_file_only_widget.setVisible(not use_piano)
-        self.humanization_group.setVisible(not use_piano)
-        self.settings_group.setVisible(not use_piano)
         self.tabs.setTabEnabled(1, not use_piano)
-        if use_piano and self.tabs.currentIndex() == 1:
+        self.tabs.setTabEnabled(2, not use_piano)
+        if use_piano and self.tabs.currentIndex() in (1, 2):
             self.tabs.setCurrentIndex(0)
 
         if use_piano:

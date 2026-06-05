@@ -212,11 +212,11 @@ def test_on_input_mode_changed_forces_tab_zero_from_visualizer(
 
     class FakeTabs:
         def __init__(self):
-            self.enabled = None
-            self.index = 1
+            self.enabled: dict[int, bool] = {}
+            self.index = 1  # Visualizer tab (index 1 in new layout)
 
         def setTabEnabled(self, idx, enabled):
-            self.enabled = (idx, enabled)
+            self.enabled[idx] = enabled
 
         def currentIndex(self):
             return self.index
@@ -229,7 +229,8 @@ def test_on_input_mode_changed_forces_tab_zero_from_visualizer(
     w.input_mode_piano_radio.setChecked(True)
     w._on_input_mode_changed()
 
-    assert tabs.enabled == (1, False)
+    assert tabs.enabled[1] is False  # Visualizer tab disabled
+    assert tabs.enabled[2] is False  # Humanization tab disabled
     assert tabs.index == 0
 
 

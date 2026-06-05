@@ -1,5 +1,7 @@
 """Data models for MIDI parsing and playback (notes, tracks, key events, sections, key state)."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
