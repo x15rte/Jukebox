@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from core.tempo_map import TempoMap
 from models import KeyEvent, MidiTrack, Note, MusicalSection
+
+if TYPE_CHECKING:
+    from core.tempo_map import TempoMap
 
 
 def make_note(
@@ -106,6 +108,8 @@ def make_tempo_map(
     >>> make_tempo_map().get_tempo_at(0.0)
     500000
     """
+    from core.tempo_map import TempoMap
+
     return TempoMap(
         tempo_events or [(0.0, 500000)],
         time_sigs or [(0.0, 4, 4)],
