@@ -82,7 +82,7 @@ def test_set_autoplay_folder_path_sets_path(
 ):
     w = window_factory()
     saved: list[Any] = []
-    monkeypatch.setattr(w, "_save_config", lambda: saved.append(True))
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: saved.append(True))
 
     w.autoplay_folder = None
     w._set_autoplay_folder_path("/some/folder")
@@ -98,7 +98,7 @@ def test_set_autoplay_folder_path_clears_path(
 ):
     w = window_factory()
     saved: list[Any] = []
-    monkeypatch.setattr(w, "_save_config", lambda: saved.append(True))
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: saved.append(True))
 
     w.autoplay_folder = "/some/folder"
     w._set_autoplay_folder_path(None)
@@ -797,12 +797,12 @@ def test_config_autoplay_folder_persisted(
 ):
     w = window_factory()
     saved = []
-    monkeypatch.setattr(w, "_save_config", lambda: saved.append(True))
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: saved.append(True))
 
     w._set_autoplay_folder_path("/test/folder")
     config = w._config_from_ui()
     assert config.autoplay_folder == "/test/folder"
-    assert saved == [True]  # _save_config called by _set_autoplay_folder_path
+    assert saved == [True]  # _mark_config_dirty called by _set_autoplay_folder_path
 
 
 def test_config_autoplay_mode_field(

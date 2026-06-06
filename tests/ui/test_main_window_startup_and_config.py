@@ -47,6 +47,7 @@ def test_close_event_stops_everything(window_factory, monkeypatch, tmp_path):
     monkeypatch.setattr(w, "_save_config", lambda: events.append(("save", None)))
     monkeypatch.setattr(w, "_disconnect_midi_input", lambda: events.append(("disconnect", None)))
     w.midi_input_active = True
+    w._config_dirty = True  # simulate unsaved changes so close flushes them
 
     class E:
         def __init__(self):
@@ -183,6 +184,7 @@ def test_close_event_logs_save_config_exception(window_factory, monkeypatch, tmp
     w.hotkey_manager = HK()
     monkeypatch.setattr(w, "_save_config", lambda: (_ for _ in ()).throw(RuntimeError("x")))
     monkeypatch.setattr("main_window.jukebox_logger.error", lambda m, **k: logs.append(m))
+    w._config_dirty = True
 
     e = E()
     w.closeEvent(cast(Any, e))

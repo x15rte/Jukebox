@@ -2,219 +2,118 @@
 
 Config is stored as JSON; versioning is git-based (no version field in the file).
 Defaults and key names are backward-compatible so old configs still load.
+
+Field metadata system
+---------------------
+Each dataclass field can carry metadata keys that control serialization,
+migration, coercion, and runtime mapping:
+
+    ``old_names``      tuple[str, ...]   Names used in previous config versions
+    ``range``          (min, max)        Clamp numeric values on load
+    ``choices``        set[str]          Allowed string values (sanitized on load)
+    ``omit_if_none``   bool              Skip field in JSON when None (default False)
+    ``runtime_alias``  str               Name to use in the runtime playback config
+    ``runtime_scale``  float             Multiplier for the runtime value (default 1.0)
+
+Adding a new config field is a single-line dataclass field declaration with
+optional metadata — no manual from_dict/to_dict glue required.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, fields
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, ClassVar, Dict, Iterator, List, Optional, Set, Tuple, Union, get_type_hints
 
 
 CONFIG_DIR_NAME = ".jukebox_piano"
 CONFIG_FILENAME = "config.json"
 
 
-@dataclass
-class Config:
-    """All user preferences persisted to config.json.
+# ---------------------------------------------------------------------------
+# Field metadata helpers
+# ---------------------------------------------------------------------------
 
-    Version is tracked by git; users re-pull to get updates. No in-file version migration.
-    """
 
-    # Playback / file
-    tempo: float = 100.0
-    pedal_style: str = "original"
-    use_88_key_layout: bool = True
-    countdown: bool = True
-    output_mode: str = "key"
-    input_mode: str = "file"
-    midi_input_device: Optional[str] = None
+class _FieldMeta:
+    """Resolved metadata for one Config field, built from field annotations and field() metadata."""
 
-    # Autoplay
-    autoplay_folder: Optional[str] = None
-    autoplay_mode: bool = False
-    autoplay_delay: float = 0.0
-    autoplay_random_delay: float = 0.0
+    __slots__ = (
+        "old_names",
+        "cls_type",
+        "range_",
+        "choices",
+        "is_optional",
+        "omit_if_none",
+        "runtime_alias",
+        "runtime_scale",
+    )
 
-    # Humanization
-    select_all_humanization: bool = False
-    simulate_hands: bool = False
-    enable_chord_roll: bool = False
-    enable_vary_timing: bool = False
-    value_timing_variance: float = 0.01
-    enable_vary_articulation: bool = False
-    value_articulation: float = 95.0
-    enable_hand_drift: bool = False
-    value_hand_drift_decay: float = 25.0
-    enable_mistakes: bool = False
-    value_mistake_chance: float = 0.5
-    enable_tempo_sway: bool = False
-    value_tempo_sway_intensity: float = 0.015
-    invert_tempo_sway: bool = False
+    def __init__(
+        self,
+        *,
+        old_names: Tuple[str, ...] = (),
+        cls_type: type = str,
+        range_: Optional[Tuple[float, float]] = None,
+        choices: Optional[Set[str]] = None,
+        is_optional: bool = False,
+        omit_if_none: bool = False,
+        runtime_alias: Optional[str] = None,
+        runtime_scale: float = 1.0,
+    ) -> None:
+        self.old_names = old_names
+        self.cls_type = cls_type
+        self.range_ = range_
+        self.choices = choices
+        self.is_optional = is_optional
+        self.omit_if_none = omit_if_none
+        self.runtime_alias = runtime_alias
+        self.runtime_scale = runtime_scale
 
-    # Window / overlay
-    always_on_top: bool = False
-    opacity: int = 100
-    hotkey: str = "f8"
-    window_geometry: Optional[str] = None
 
-    # Log
-    save_log_to_file: bool = False
-    log_level: str = "INFO"
+def _resolve_type(tp: type) -> type:
+    """Resolve a type annotation to a simple type, unwrapping Optional."""
+    origin = getattr(tp, "__origin__", None)
+    if origin is Union:
+        args = getattr(tp, "__args__", ())
+        non_none = [a for a in args if a is not type(None)]
+        return non_none[0] if non_none else str
+    if origin is list or origin is dict:
+        return str
+    return tp
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Export for JSON; omit None geometry so we don't store empty."""
-        d = asdict(self)
-        if d.get("window_geometry") is None:
-            d.pop("window_geometry", None)
-        if d.get("midi_input_device") is None:
-            d.pop("midi_input_device", None)
-        if d.get("autoplay_folder") is None:
-            d.pop("autoplay_folder", None)
-        return d
 
-    def to_runtime_playback_dict(self) -> Dict[str, Any]:
-        config = self.to_dict()
-        config["vary_timing"] = bool(self.enable_vary_timing)
-        config["vary_articulation"] = bool(self.enable_vary_articulation)
-        config["timing_variance"] = self.value_timing_variance
-        config["articulation"] = self.value_articulation / 100.0
-        config["enable_drift_correction"] = bool(self.enable_hand_drift)
-        config["drift_decay_factor"] = self.value_hand_drift_decay / 100.0
-        config["mistake_chance"] = self.value_mistake_chance
-        config["tempo_sway_intensity"] = self.value_tempo_sway_intensity
-        return config
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> Config:
-        """Build Config from dict; unknown keys are ignored, missing keys use defaults."""
-        if not isinstance(data, dict):
-            raise TypeError("Config JSON must be an object")
-
-        migrated = dict(data)
-        if "enable_vary_timing" not in migrated and "vary_timing" in migrated:
-            migrated["enable_vary_timing"] = migrated["vary_timing"]
-        if "enable_vary_articulation" not in migrated and "vary_articulation" in migrated:
-            migrated["enable_vary_articulation"] = migrated["vary_articulation"]
-        if "enable_hand_drift" not in migrated and "enable_drift_correction" in migrated:
-            migrated["enable_hand_drift"] = migrated["enable_drift_correction"]
-        if "value_timing_variance" not in migrated and "timing_variance" in migrated:
-            migrated["value_timing_variance"] = migrated["timing_variance"]
-        if "value_articulation" not in migrated and "articulation" in migrated:
-            articulation = migrated["articulation"]
-            migrated["value_articulation"] = (
-                articulation * 100.0
-                if isinstance(articulation, (int, float)) and articulation <= 1.0
-                else articulation
-            )
-        if "value_hand_drift_decay" not in migrated and "drift_decay_factor" in migrated:
-            drift_decay_factor = migrated["drift_decay_factor"]
-            migrated["value_hand_drift_decay"] = (
-                drift_decay_factor * 100.0
-                if isinstance(drift_decay_factor, (int, float))
-                else drift_decay_factor
-            )
-        if "value_mistake_chance" not in migrated and "mistake_chance" in migrated:
-            migrated["value_mistake_chance"] = migrated["mistake_chance"]
-        if "value_tempo_sway_intensity" not in migrated and "tempo_sway_intensity" in migrated:
-            migrated["value_tempo_sway_intensity"] = migrated["tempo_sway_intensity"]
-
-        defaults = cls()
-        known = {f.name for f in fields(cls)}
-        filtered = {k: v for k, v in migrated.items() if k in known}
-
-        bool_fields = {
-            "use_88_key_layout",
-            "countdown",
-            "select_all_humanization",
-            "simulate_hands",
-            "enable_chord_roll",
-            "enable_vary_timing",
-            "enable_vary_articulation",
-            "enable_hand_drift",
-            "enable_mistakes",
-            "enable_tempo_sway",
-            "invert_tempo_sway",
-            "always_on_top",
-            "save_log_to_file",
-        }
-        for key in bool_fields:
-            if key in filtered:
-                filtered[key] = _coerce_bool(filtered[key], getattr(defaults, key))
-
-        float_fields = {
-            "tempo",
-            "value_timing_variance",
-            "value_articulation",
-            "value_hand_drift_decay",
-            "value_mistake_chance",
-            "value_tempo_sway_intensity",
-            "autoplay_delay",
-            "autoplay_random_delay",
-        }
-        for key in float_fields:
-            if key in filtered:
-                filtered[key] = _coerce_float(filtered[key], getattr(defaults, key))
-
-        if "opacity" in filtered:
-            filtered["opacity"] = _coerce_int(filtered["opacity"], defaults.opacity)
-
-        if "pedal_style" in filtered:
-            filtered["pedal_style"] = _sanitize_choice(
-                filtered["pedal_style"],
-                {"original", "hybrid", "legato", "rhythmic", "none"},
-                defaults.pedal_style,
-            )
-        if "output_mode" in filtered:
-            filtered["output_mode"] = _sanitize_choice(
-                filtered["output_mode"],
-                {"key", "midi_numpad"},
-                defaults.output_mode,
-            )
-        if "input_mode" in filtered:
-            filtered["input_mode"] = _sanitize_choice(
-                filtered["input_mode"],
-                {"file", "piano"},
-                defaults.input_mode,
-            )
-        if "log_level" in filtered:
-            filtered["log_level"] = _sanitize_choice(
-                str(filtered["log_level"]).upper(),
-                {"DEBUG", "INFO", "WARNING", "ERROR"},
-                defaults.log_level,
-            )
-
-        if "hotkey" in filtered:
-            hotkey = str(filtered["hotkey"]).strip()
-            filtered["hotkey"] = hotkey or defaults.hotkey
-
-        if "window_geometry" in filtered:
-            filtered["window_geometry"] = _coerce_optional_str(filtered["window_geometry"])
-        if "midi_input_device" in filtered:
-            filtered["midi_input_device"] = _coerce_optional_str(
-                filtered["midi_input_device"]
-            )
-        if "autoplay_folder" in filtered:
-            filtered["autoplay_folder"] = _coerce_optional_str(
-                filtered["autoplay_folder"]
-            )
-
-        config = cls(**filtered)
-        config.tempo = _clamp(config.tempo, 10.0, 200.0)
-        config.value_timing_variance = _clamp(config.value_timing_variance, 0.0, 0.1)
-        config.value_articulation = _clamp(config.value_articulation, 50.0, 100.0)
-        config.value_hand_drift_decay = _clamp(config.value_hand_drift_decay, 0.0, 100.0)
-        config.value_mistake_chance = _clamp(config.value_mistake_chance, 0.0, 10.0)
-        config.value_tempo_sway_intensity = _clamp(
-            config.value_tempo_sway_intensity, 0.0, 0.1
+def _build_field_meta(cls: type) -> Dict[str, _FieldMeta]:
+    """Build a dict of field_name → _FieldMeta from dataclass field metadata and annotations."""
+    meta: Dict[str, _FieldMeta] = {}
+    try:
+        hints = get_type_hints(cls)
+    except Exception:
+        hints = {}
+    for f in fields(cls):
+        if f.name.startswith("_"):
+            continue
+        raw = f.metadata or {}
+        resolved_type = _resolve_type(hints.get(f.name, str))
+        meta[f.name] = _FieldMeta(
+            old_names=raw.get("old_names", ()),
+            cls_type=resolved_type,
+            range_=raw.get("range"),
+            choices=raw.get("choices"),
+            is_optional=raw.get("optional", False),
+            omit_if_none=raw.get("omit_if_none", False),
+            runtime_alias=raw.get("runtime_alias"),
+            runtime_scale=raw.get("runtime_scale", 1.0),
         )
-        config.autoplay_delay = _clamp(config.autoplay_delay, 0.0, 600.0)
-        config.autoplay_random_delay = _clamp(config.autoplay_random_delay, 0.0, 60.0)
-        config.opacity = int(_clamp(config.opacity, 20, 100))
-        return config
+    return meta
+
+
+# ---------------------------------------------------------------------------
+# Coercion helpers  (kept as module-level for testability)
+# ---------------------------------------------------------------------------
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:
@@ -259,7 +158,7 @@ def _coerce_int(value: Any, default: int) -> int:
     return default
 
 
-def _sanitize_choice(value: Any, allowed: set[str], default: str) -> str:
+def _sanitize_choice(value: Any, allowed: Set[str], default: str) -> str:
     if not isinstance(value, str):
         return default
     candidate = value.strip()
@@ -277,6 +176,436 @@ def _coerce_optional_str(value: Any) -> Optional[str]:
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
+
+
+def _coerce_field(value: Any, meta: _FieldMeta, default: Any) -> Any:
+    """Coerce *value* according to the field's type metadata, falling back to *default*."""
+    tp = meta.cls_type
+
+    if tp is bool:
+        return _coerce_bool(value, default)
+
+    if tp is float:
+        result = _coerce_float(value, default)
+        if meta.range_:
+            result = _clamp(result, meta.range_[0], meta.range_[1])
+        return result
+
+    if tp is int:
+        result = _coerce_int(value, default)
+        if meta.range_:
+            result = int(_clamp(float(result), meta.range_[0], meta.range_[1]))
+        return result
+
+    if tp is str:
+        if isinstance(value, str):
+            val = value.strip()
+            if meta.choices:
+                # Case-fold for choice matching (e.g. "warning" → "WARNING")
+                for choice in meta.choices:
+                    if val.upper() == choice.upper():
+                        return choice
+                return default
+            if meta.is_optional:
+                return val if val else None
+            return val
+        return default
+
+    # Optional[str] — resolved type is str but we handle None separately
+    if tp is type(None) or tp is str:
+        coerced = _coerce_optional_str(value)
+        return coerced if coerced is not None else default
+
+    return value if isinstance(value, tp) else default
+
+
+# ---------------------------------------------------------------------------
+# Config dataclass
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Config:
+    """All user preferences persisted to config.json.
+
+    Each field can carry metadata that drives loading, coercion, migration,
+    and runtime-export behaviour.  See module docstring for the metadata keys.
+    """
+
+    _field_meta: ClassVar[Optional[Dict[str, _FieldMeta]]] = None
+
+    # Playback / file
+    tempo: float = field(default=100.0, metadata={"range": (10.0, 200.0)})
+    pedal_style: str = field(
+        default="original",
+        metadata={"choices": {"original", "hybrid", "legato", "rhythmic", "none"}},
+    )
+    use_88_key_layout: bool = field(default=True)
+    countdown: bool = field(default=True)
+    output_mode: str = field(
+        default="key",
+        metadata={"choices": {"key", "midi_numpad"}},
+    )
+    input_mode: str = field(
+        default="file",
+        metadata={"choices": {"file", "piano"}},
+    )
+    midi_input_device: Optional[str] = field(
+        default=None,
+        metadata={"omit_if_none": True, "optional": True},
+    )
+
+    # Autoplay
+    autoplay_folder: Optional[str] = field(
+        default=None,
+        metadata={"omit_if_none": True, "optional": True},
+    )
+    autoplay_mode: bool = field(default=False)
+    autoplay_delay: float = field(default=0.0, metadata={"range": (0.0, 600.0)})
+    autoplay_random_delay: float = field(
+        default=0.0, metadata={"range": (0.0, 60.0)}
+    )
+
+    # Humanization
+    select_all_humanization: bool = field(default=False)
+    simulate_hands: bool = field(default=False)
+    enable_chord_roll: bool = field(default=False)
+    enable_vary_timing: bool = field(
+        default=False,
+        metadata={
+            "old_names": ("vary_timing",),
+            "runtime_alias": "vary_timing",
+        },
+    )
+    value_timing_variance: float = field(
+        default=0.01,
+        metadata={
+            "old_names": ("timing_variance",),
+            "range": (0.0, 0.1),
+            "runtime_alias": "timing_variance",
+        },
+    )
+    enable_vary_articulation: bool = field(
+        default=False,
+        metadata={
+            "old_names": ("vary_articulation",),
+            "runtime_alias": "vary_articulation",
+        },
+    )
+    value_articulation: float = field(
+        default=95.0,
+        metadata={
+            "old_names": ("articulation",),
+            "range": (50.0, 100.0),
+            "runtime_alias": "articulation",
+            "runtime_scale": 0.01,
+        },
+    )
+    enable_hand_drift: bool = field(
+        default=False,
+        metadata={
+            "old_names": ("enable_drift_correction",),
+            "runtime_alias": "enable_drift_correction",
+        },
+    )
+    value_hand_drift_decay: float = field(
+        default=25.0,
+        metadata={
+            "old_names": ("drift_decay_factor",),
+            "range": (0.0, 100.0),
+            "runtime_alias": "drift_decay_factor",
+            "runtime_scale": 0.01,
+        },
+    )
+    enable_mistakes: bool = field(default=False)
+    value_mistake_chance: float = field(
+        default=0.5,
+        metadata={
+            "old_names": ("mistake_chance",),
+            "range": (0.0, 10.0),
+            "runtime_alias": "mistake_chance",
+        },
+    )
+    enable_tempo_sway: bool = field(default=False)
+    value_tempo_sway_intensity: float = field(
+        default=0.015,
+        metadata={
+            "old_names": ("tempo_sway_intensity",),
+            "range": (0.0, 0.1),
+            "runtime_alias": "tempo_sway_intensity",
+        },
+    )
+    invert_tempo_sway: bool = field(default=False)
+
+    # Window / overlay
+    always_on_top: bool = field(default=False)
+    opacity: int = field(default=100, metadata={"range": (20, 100)})
+    hotkey: str = field(default="f8")
+    window_geometry: Optional[str] = field(
+        default=None,
+        metadata={"omit_if_none": True, "optional": True},
+    )
+
+    # Log
+    save_log_to_file: bool = field(default=False)
+    log_level: str = field(
+        default="INFO",
+        metadata={"choices": {"DEBUG", "INFO", "WARNING", "ERROR"}},
+    )
+
+    # ------------------------------------------------------------------
+    # Metadata access
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def field_meta(cls) -> Dict[str, _FieldMeta]:
+        """Lazily build and cache the field-metadata dict."""
+        if cls._field_meta is None:
+            cls._field_meta = _build_field_meta(cls)
+        return cls._field_meta
+
+    @classmethod
+    def known_field_names(cls) -> Set[str]:
+        """Return the set of all known Config field names."""
+        return set(cls.field_meta().keys())
+
+    # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Export for JSON; omit fields whose metadata marks them omit_if_none when None."""
+        d = asdict(self)
+        meta = self.field_meta()
+        to_pop = [k for k, v in d.items() if v is None and meta.get(k, _FieldMeta()).omit_if_none]
+        for k in to_pop:
+            d.pop(k, None)
+        return d
+
+    def to_runtime_playback_dict(self) -> "PlaybackConfig":
+        """Build a typed PlaybackConfig suitable for the analysis / playback pipeline.
+
+        Fields with a ``runtime_alias`` in their metadata are renamed, scaled,
+        and included alongside the original fields so both old and new consumers
+        work without changes.
+        """
+        raw = self.to_dict()
+        meta = self.field_meta()
+
+        # Apply runtime aliases and scaling
+        runtime_overrides: Dict[str, Any] = {}
+        for key, fm in meta.items():
+            if fm.runtime_alias:
+                val = raw.get(key, getattr(self, key))
+                if fm.runtime_scale != 1.0 and isinstance(val, (int, float)):
+                    val = val * fm.runtime_scale
+                runtime_overrides[fm.runtime_alias] = val
+
+        # Merge and return as a PlaybackConfig (which behaves like a dict)
+        merged = dict(raw)
+        merged.update(runtime_overrides)
+        return PlaybackConfig(**merged)
+
+    # ------------------------------------------------------------------
+    # Deserialization
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Config":
+        """Build Config from dict; unknown keys are ignored, missing keys use defaults.
+
+        Handles:
+        - Migration of old key names
+        - Type coercion (bool, float, int, str, Optional[str])
+        - Range clamping
+        - Choice sanitization
+        - Optional-string stripping
+        """
+        if not isinstance(data, dict):
+            raise TypeError("Config JSON must be an object")
+
+        meta = cls.field_meta()
+        migrated = dict(data)
+        original_keys: Set[str] = set(data.keys())
+
+        # Phase 1: migrate old key names
+        for key, fm in meta.items():
+            for old_name in fm.old_names:
+                if old_name in migrated and key not in original_keys:
+                    migrated[key] = migrated[old_name]
+
+        # Phase 2: handle backward-compat scaling for articulation & drift_decay
+        # (old persisted values might be 0-1 range rather than our new 0-100)
+        # Only applies when the new key was NOT in the original data (i.e. the
+        # value came from an old-name migration above or was the raw old key).
+        if "articulation" in migrated and "value_articulation" not in original_keys:
+            val = migrated["articulation"]
+            if isinstance(val, (int, float)) and val <= 1.0:
+                migrated["value_articulation"] = val * 100.0
+            else:
+                migrated["value_articulation"] = val
+        if "drift_decay_factor" in migrated and "value_hand_drift_decay" not in original_keys:
+            val = migrated["drift_decay_factor"]
+            if isinstance(val, (int, float)):
+                migrated["value_hand_drift_decay"] = val * 100.0
+
+        # Phase 3: filter to known fields only
+        known = cls.known_field_names()
+        filtered: Dict[str, Any] = {}
+        for k, v in migrated.items():
+            if k in known:
+                filtered[k] = v
+
+        # Phase 4: coerce each field
+        defaults = cls()
+        coerced: Dict[str, Any] = {}
+        for k, v in filtered.items():
+            default_val = getattr(defaults, k)
+            coerced[k] = _coerce_field(v, meta[k], default_val)
+
+        # Phase 5: build instance
+        config = cls(**coerced)
+
+        # Phase 6: post-coercion clamping for hotkey
+        if "hotkey" in coerced and not coerced["hotkey"]:
+            config.hotkey = defaults.hotkey
+
+        return config
+
+
+# ---------------------------------------------------------------------------
+# PlaybackConfig — typed runtime config with dict-like compatibility
+# ---------------------------------------------------------------------------
+
+
+class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
+    """Typed runtime playback configuration with Mapping backward compatibility.
+
+    This is the return type of ``Config.to_runtime_playback_dict()`` and flows
+    through the analysis and playback pipeline (Humanizer, PedalGenerator,
+    EventCompiler, Player).
+
+    Because it inherits from ``collections.abc.Mapping``, it can be passed to
+    any function annotated with ``Mapping[str, Any]`` and ``dict(config)``
+    produces a plain dict copy.
+    """
+
+    # ---- All known runtime fields (with defaults) ----
+    tempo: float = 100.0
+    pedal_style: str = "original"
+    use_88_key_layout: bool = True
+    countdown: bool = True
+    output_mode: str = "key"
+    input_mode: str = "file"
+    midi_input_device: Optional[str] = None
+
+    autoplay_folder: Optional[str] = None
+    autoplay_mode: bool = False
+    autoplay_delay: float = 0.0
+    autoplay_random_delay: float = 0.0
+
+    select_all_humanization: bool = False
+    simulate_hands: bool = False
+    enable_chord_roll: bool = False
+    enable_vary_timing: bool = False
+    value_timing_variance: float = 0.01
+    enable_vary_articulation: bool = False
+    value_articulation: float = 95.0
+    enable_hand_drift: bool = False
+    value_hand_drift_decay: float = 25.0
+    enable_mistakes: bool = False
+    value_mistake_chance: float = 0.5
+    enable_tempo_sway: bool = False
+    value_tempo_sway_intensity: float = 0.015
+    invert_tempo_sway: bool = False
+
+    always_on_top: bool = False
+    opacity: int = 100
+    hotkey: str = "f8"
+    window_geometry: Optional[str] = None
+
+    save_log_to_file: bool = False
+    log_level: str = "INFO"
+
+    # Runtime aliases
+    vary_timing: bool = False
+    vary_articulation: bool = False
+    timing_variance: float = 0.01
+    articulation: float = 0.95
+    enable_drift_correction: bool = False
+    drift_decay_factor: float = 0.25
+    mistake_chance: float = 0.5
+    tempo_sway_intensity: float = 0.015
+
+    # Runtime-only keys (not persisted, injected during playback setup).
+    # Mutable default is safe here — playback configs are short-lived transient objects.
+    midi_file: str = ""
+    start_offset: float = 0.0
+    raw_pedal_events: list = []
+
+    def __init__(self, **kwargs: Any) -> None:
+        """Accept arbitrary keyword arguments, including non-annotated extras."""
+        known = set(type(self).__annotations__)
+        for k, v in kwargs.items():
+            if k in known:
+                setattr(self, k, v)
+            else:
+                object.__setattr__(self, k, v)
+
+    # ---- Mapping protocol ----
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError as e:
+            raise KeyError(key) from e
+
+    def __iter__(self) -> Iterator[str]:
+        return (k for k in self.__annotations__ if hasattr(self, k))
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
+            return False
+        return hasattr(self, key)
+
+    # ---- Mutability ----
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        setattr(self, key, value)
+
+    # ---- Additional helpers ----
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __copy__(self) -> "PlaybackConfig":
+        result = PlaybackConfig()
+        for k in self.__annotations__:
+            if hasattr(self, k):
+                setattr(result, k, getattr(self, k))
+        for k in self.__dict__:
+            if k not in self.__annotations__:
+                object.__setattr__(result, k, getattr(self, k))
+        return result
+
+    def __repr__(self) -> str:
+        items = ", ".join(
+            f"{k}={getattr(self, k)!r}"
+            for k in self.__annotations__
+            if hasattr(self, k)
+        )
+        return f"PlaybackConfig({items})"
+
+
+# ---------------------------------------------------------------------------
+# Repository
+# ---------------------------------------------------------------------------
 
 
 class ConfigRepository:

@@ -1,7 +1,8 @@
 """Humanization: timing variance, articulation, chord roll, drift correction, tempo rubato, and hand assignment."""
 
 import random
-from typing import List, Set, Dict
+from collections.abc import Mapping
+from typing import Any, Dict, List, Set
 
 import numpy as np
 
@@ -15,7 +16,7 @@ _DRIFT_SHARED_FACTOR = 0.3
 class Humanizer:
     """Applies timing variance, articulation, chord roll, drift correction, and tempo rubato per section pace."""
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: Mapping[str, Any]):
         self.config = config
         self.left_hand_drift = 0.0
         self.right_hand_drift = 0.0

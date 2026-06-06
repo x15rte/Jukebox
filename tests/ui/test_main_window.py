@@ -172,14 +172,14 @@ def test_on_log_save_to_file_toggled_enables_and_disables(window_factory, monkey
     monkeypatch.setattr("main_window.jukebox_logger.enable_file_logging", lambda p: events.append(("enable", p)))
     monkeypatch.setattr("main_window.jukebox_logger.disable_file_logging", lambda: events.append(("disable", None)))
     monkeypatch.setattr(w, "add_log_message", lambda m: events.append(("log", m)))
-    monkeypatch.setattr(w, "_save_config", lambda: events.append(("save", None)))
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append(("dirty", None)))
 
     w._on_log_save_to_file_toggled(True)
     w._on_log_save_to_file_toggled(False)
 
     assert any(e[0] == "enable" for e in events)
     assert any(e[0] == "disable" for e in events)
-    assert [e for e in events if e[0] == "save"]
+    assert [e for e in events if e[0] == "dirty"]
 
 
 def test_on_status_updated_routes_levels(window_factory, monkeypatch, tmp_path):
@@ -389,12 +389,12 @@ def test_on_log_level_changed_sets_level_and_saves(window_factory, monkeypatch, 
     events = []
 
     monkeypatch.setattr("main_window.jukebox_logger.set_level", lambda l: events.append(("level", l)))
-    monkeypatch.setattr(w, "_save_config", lambda: events.append(("save", None)))
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append(("dirty", None)))
 
     w._on_log_level_changed("DEBUG")
 
     assert ("level", "DEBUG") in events
-    assert ("save", None) in events
+    assert ("dirty", None) in events
 
 
 def test_append_log_initializes_and_error_empty_details_branch(

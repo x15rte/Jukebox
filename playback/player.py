@@ -9,7 +9,8 @@ import math
 import random
 import bisect
 import threading
-from typing import List, Dict, Set, Optional, Tuple
+from collections.abc import Mapping
+from typing import Any, List, Set, Optional, Tuple
 
 from PyQt6.QtCore import QObject, pyqtSignal as Signal
 
@@ -35,7 +36,7 @@ class EventCompiler:
 
     @staticmethod
     def compile(
-        notes: List[Note], sections: List[MusicalSection], config: Dict
+        notes: List[Note], sections: List[MusicalSection], config: Mapping[str, Any]
     ) -> List[KeyEvent]:
         work = copy.deepcopy(notes)
 
@@ -155,14 +156,14 @@ class EventCompiler:
         return events
 
     @staticmethod
-    def _effective_pedal_style(config: Dict) -> Optional[str]:
+    def _effective_pedal_style(config: Mapping[str, Any]) -> Optional[str]:
         style = config.get("pedal_style")
         if style == "original" and not config.get("raw_pedal_events"):
             return "hybrid"
         return style
 
     @staticmethod
-    def _humanization_enabled(config: Dict) -> bool:
+    def _humanization_enabled(config: Mapping[str, Any]) -> bool:
         humanize_keys = (
             "enable_vary_timing",
             "enable_vary_articulation",
@@ -541,7 +542,7 @@ class Player(QObject):
         self,
         compiled_events: List[KeyEvent],
         backend: OutputBackend,
-        config: Dict,
+        config: Mapping[str, Any],
         total_duration: float,
     ):
         super().__init__()

@@ -1,14 +1,14 @@
 """Config-to-UI binding helpers for Jukebox MainWindow.
 
-NOTE: This module tightly couples to MainWindow internals by referencing widget
-attribute names (e.g. w.tempo_spinbox, w.all_humanization_checks). Any rename
-of a widget attribute in MainWindow will silently break config save/load.
-The binding list below is the single source of truth, but there is no
-compile-time or type-time check that these attributes exist.
+Each ``ConfigBinding`` declares the getter/setter lambdas that bridge a
+``Config`` field to a MainWindow widget.  The ``is_effectful`` flag marks
+fields whose setter triggers side-effects beyond the widget itself
+(log-level change, input-mode visibility toggling, etc.) — these are
+applied after a full config load but skipped during normal UI→Config reads.
 """
 
-from dataclasses import fields
-from typing import Iterable
+from dataclasses import dataclass, fields
+from typing import Any, Callable, Iterable, Optional
 
 from PyQt6.QtCore import QByteArray
 
@@ -16,185 +16,213 @@ from config_repository import Config
 from logger_core import jukebox_logger
 from ui import parse_hotkey_string
 
-CONFIG_UI_BINDINGS = [
-    (
+
+@dataclass(frozen=True)
+class ConfigBinding:
+    """Declarative mapping from a Config field to a MainWindow widget pair.
+
+    Attributes:
+        key: The ``Config`` field name (must match a dataclass field exactly).
+        getter: Callable[MainWindow] → value — reads the widget state.
+        setter: Callable[MainWindow, value] → None — writes the widget state.
+        is_effectful: If True, the setter has side-effects beyond the widget
+            (e.g. toggling visibility, starting/stopping a service). These
+            are applied on config load but skipped during UI-only reads.
+    """
+
+    key: str
+    getter: Callable[[Any], Any]
+    setter: Callable[[Any, Any], None]
+    is_effectful: bool = False
+
+
+CONFIG_UI_BINDINGS: list[ConfigBinding] = [
+    ConfigBinding(
         "tempo",
         lambda w: w.tempo_spinbox.value(),
         lambda w, v: w.tempo_spinbox.setValue(v),
     ),
-    (
+    ConfigBinding(
         "output_mode",
         lambda w: w._current_output_mode(),
         lambda w, v: _set_output_mode_combo(w, v),
     ),
-    (
+    ConfigBinding(
         "pedal_style",
         lambda w: w.pedal_mapping.get(w.pedal_style_combo.currentText(), "hybrid"),
         lambda w, v: w.pedal_style_combo.setCurrentText(
             w.pedal_mapping_inv.get(v, "Original (from MIDI)")
         ),
     ),
-    (
+    ConfigBinding(
         "use_88_key_layout",
         lambda w: w.use_88_key_check.isChecked(),
         lambda w, v: w.use_88_key_check.setChecked(v),
     ),
-    (
+    ConfigBinding(
         "countdown",
         lambda w: w.countdown_check.isChecked(),
         lambda w, v: w.countdown_check.setChecked(v),
     ),
-    (
+    ConfigBinding(
         "input_mode",
         lambda w: "piano" if w.input_mode_piano_radio.isChecked() else "file",
         lambda w, v: _set_input_mode(w, v),
+        is_effectful=True,
     ),
-    (
+    ConfigBinding(
         "midi_input_device",
         lambda w: w.midi_input_combo.currentText().strip() or None,
         lambda w, v: w.midi_input_combo.setCurrentText(v or ""),
     ),
-    (
+    ConfigBinding(
         "autoplay_folder",
         lambda w: w.autoplay_folder,
         lambda w, v: w._set_autoplay_folder_path(v),
     ),
-    (
+    ConfigBinding(
         "autoplay_mode",
         lambda w: w.input_mode_playlist_radio.isChecked(),
         lambda w, v: _set_file_submode(w, v),
     ),
-    (
+    ConfigBinding(
         "autoplay_delay",
         lambda w: w.autoplay_delay_spinbox.value(),
         lambda w, v: w.autoplay_delay_spinbox.setValue(v),
     ),
-    (
+    ConfigBinding(
         "autoplay_random_delay",
         lambda w: w.autoplay_random_delay_spinbox.value(),
         lambda w, v: w.autoplay_random_delay_spinbox.setValue(v),
     ),
-    (
+    ConfigBinding(
         "select_all_humanization",
         lambda w: w.select_all_humanization_check.isChecked(),
         lambda w, v: w.select_all_humanization_check.setChecked(v),
     ),
-    (
+    ConfigBinding(
         "simulate_hands",
         lambda w: w.all_humanization_checks["simulate_hands"].isChecked(),
         lambda w, v: w.all_humanization_checks["simulate_hands"].setChecked(v),
     ),
-    (
+    ConfigBinding(
         "enable_chord_roll",
         lambda w: w.all_humanization_checks["enable_chord_roll"].isChecked(),
         lambda w, v: w.all_humanization_checks["enable_chord_roll"].setChecked(v),
     ),
-    (
+    ConfigBinding(
         "enable_vary_timing",
         lambda w: w.all_humanization_checks["vary_timing"].isChecked(),
         lambda w, v: w.all_humanization_checks["vary_timing"].setChecked(v),
     ),
-    (
+    ConfigBinding(
         "value_timing_variance",
         lambda w: w.all_humanization_spinboxes["vary_timing"].value(),
         lambda w, v: w.all_humanization_spinboxes["vary_timing"].setValue(v),
     ),
-    (
+    ConfigBinding(
         "enable_vary_articulation",
         lambda w: w.all_humanization_checks["vary_articulation"].isChecked(),
         lambda w, v: w.all_humanization_checks["vary_articulation"].setChecked(v),
     ),
-    (
+    ConfigBinding(
         "value_articulation",
         lambda w: w.all_humanization_spinboxes["vary_articulation"].value(),
         lambda w, v: w.all_humanization_spinboxes["vary_articulation"].setValue(v),
     ),
-    (
+    ConfigBinding(
         "enable_hand_drift",
         lambda w: w.all_humanization_checks["hand_drift"].isChecked(),
         lambda w, v: w.all_humanization_checks["hand_drift"].setChecked(v),
     ),
-    (
+    ConfigBinding(
         "value_hand_drift_decay",
         lambda w: w.all_humanization_spinboxes["hand_drift"].value(),
         lambda w, v: w.all_humanization_spinboxes["hand_drift"].setValue(v),
     ),
-    (
+    ConfigBinding(
         "enable_mistakes",
         lambda w: w.all_humanization_checks["mistake_chance"].isChecked(),
         lambda w, v: w.all_humanization_checks["mistake_chance"].setChecked(v),
     ),
-    (
+    ConfigBinding(
         "value_mistake_chance",
         lambda w: w.all_humanization_spinboxes["mistake_chance"].value(),
         lambda w, v: w.all_humanization_spinboxes["mistake_chance"].setValue(v),
     ),
-    (
+    ConfigBinding(
         "enable_tempo_sway",
         lambda w: w.all_humanization_checks["tempo_sway"].isChecked(),
         lambda w, v: w.all_humanization_checks["tempo_sway"].setChecked(v),
     ),
-    (
+    ConfigBinding(
         "value_tempo_sway_intensity",
         lambda w: w.all_humanization_spinboxes["tempo_sway"].value(),
         lambda w, v: w.all_humanization_spinboxes["tempo_sway"].setValue(v),
     ),
-    (
+    ConfigBinding(
         "invert_tempo_sway",
         lambda w: w.all_humanization_checks["invert_tempo_sway"].isChecked(),
         lambda w, v: w.all_humanization_checks["invert_tempo_sway"].setChecked(v),
     ),
-    (
+    ConfigBinding(
         "always_on_top",
         lambda w: w.always_top_check.isChecked(),
         lambda w, v: w.always_top_check.setChecked(v),
     ),
-    (
+    ConfigBinding(
         "opacity",
         lambda w: w.opacity_slider.value(),
-        lambda w, v: (w.opacity_slider.setValue(v), w._change_opacity(v)),
+        lambda w, v: w.opacity_slider.setValue(v) or w._change_opacity(v),
     ),
-    (
+    ConfigBinding(
         "hotkey",
         lambda w: w.hotkey_manager.format_key_string(w.hotkey_manager.current_key),
         lambda w, v: _set_hotkey_from_config(w, v),
     ),
-    (
+    ConfigBinding(
         "window_geometry",
         lambda w: _get_window_geometry(w),
         lambda w, v: _set_window_geometry(w, v),
     ),
-    (
+    ConfigBinding(
         "save_log_to_file",
         lambda w: w.log_save_to_file_check.isChecked(),
         lambda w, v: _set_save_log_to_file_checkbox(w, v),
+        is_effectful=True,
     ),
-    (
+    ConfigBinding(
         "log_level",
         lambda w: w.log_level_combo.currentText(),
         lambda w, v: _set_log_level_combo(w, v),
+        is_effectful=True,
     ),
 ]
 
 
-EFFECTFUL_CONFIG_KEYS = {"input_mode", "save_log_to_file", "log_level"}
+# Utility helpers ------------------------------------------------------------
+
+def effectful_keys() -> set[str]:
+    """Return the set of binding keys that have side-effects."""
+    return {b.key for b in CONFIG_UI_BINDINGS if b.is_effectful}
 
 
-def validate_config_ui_bindings(bindings: Iterable = CONFIG_UI_BINDINGS) -> None:
+def validate_config_ui_bindings(bindings: Iterable[ConfigBinding] = CONFIG_UI_BINDINGS) -> None:
+    """Validate every binding: known field, callable getter/setter, no duplicates."""
     known_fields = {f.name for f in fields(Config)}
     seen: set[str] = set()
     duplicates: set[str] = set()
 
     for entry in bindings:
-        if not isinstance(entry, tuple) or len(entry) != 3:
-            raise ValueError("Each binding must be a 3-item tuple")
-        key, get_fn, set_fn = entry
+        if not isinstance(entry, ConfigBinding):
+            raise ValueError("Each binding must be a ConfigBinding instance")
+        key = entry.key
         if key in seen:
             duplicates.add(key)
         seen.add(key)
         if key not in known_fields:
             raise ValueError(f"Unknown config binding key: {key}")
-        if not callable(get_fn) or not callable(set_fn):
+        if not callable(entry.getter) or not callable(entry.setter):
             raise ValueError(f"Binding functions must be callable for key: {key}")
 
     if duplicates:

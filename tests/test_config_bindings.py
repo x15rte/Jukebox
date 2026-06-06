@@ -1,8 +1,12 @@
+"""Config binding tests."""
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest
 
 import config_bindings as cb
+from config_bindings import ConfigBinding
 from config_repository import Config
 
 
@@ -176,6 +180,14 @@ def test_validate_config_ui_bindings_rejects_duplicate_key():
         cb.validate_config_ui_bindings(dup)
 
 
+def test_effectful_keys_returns_expected_set():
+    keys = cb.effectful_keys()
+    assert "input_mode" in keys
+    assert "save_log_to_file" in keys
+    assert "log_level" in keys
+    assert "tempo" not in keys
+
+
 def test_apply_input_mode_effects_switches_tabs():
     w = DummyWidget()
     cb._apply_input_mode(w, "piano")
@@ -210,14 +222,18 @@ def test_set_log_level_combo_normalizes_invalid_value():
 
 
 def test_validate_config_ui_bindings_rejects_invalid_entries():
-    with pytest.raises(ValueError, match="3-item tuple"):
-        cb.validate_config_ui_bindings([("x",)])
+    with pytest.raises(ValueError, match="ConfigBinding instance"):
+        cb.validate_config_ui_bindings([("x",)])  # type: ignore[list-item]
 
     with pytest.raises(ValueError, match="Unknown config binding key"):
-        cb.validate_config_ui_bindings([("unknown_key", lambda w: None, lambda w, v: None)])
+        cb.validate_config_ui_bindings(
+            [ConfigBinding("unknown_key", lambda w: None, lambda w, v: None)]
+        )
 
     with pytest.raises(ValueError, match="callable"):
-        cb.validate_config_ui_bindings([("tempo", 1, lambda w, v: None)])
+        cb.validate_config_ui_bindings(
+            [ConfigBinding("tempo", 42, lambda w, v: None)]  # type: ignore[arg-type]
+        )
 
 
 def test_apply_input_mode_refresh_and_disconnect_paths():

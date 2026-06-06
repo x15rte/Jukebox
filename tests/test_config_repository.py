@@ -8,6 +8,7 @@ from config_repository import (
     Config,
     ConfigLoadError,
     ConfigRepository,
+    PlaybackConfig,
     _coerce_bool,
     _coerce_float,
     _coerce_int,
@@ -235,3 +236,71 @@ def test_sanitize_choice_branches(value, allowed, default, expected):
 )
 def test_coerce_optional_str_branches(value, expected):
     assert _coerce_optional_str(value) == expected
+
+
+# ---------------------------------------------------------------------------
+# PlaybackConfig tests
+# ---------------------------------------------------------------------------
+
+
+def test_playback_config_dict_access():
+    pc = PlaybackConfig(tempo=120.0, output_mode="midi_numpad")
+    assert pc["tempo"] == 120.0
+    assert pc["output_mode"] == "midi_numpad"
+    assert pc.get("tempo") == 120.0
+    assert pc.get("missing_key", "fallback") == "fallback"
+    assert "tempo" in pc
+    assert "missing_key" not in pc
+
+
+def test_playback_config_attribute_access():
+    pc = PlaybackConfig(tempo=80.0, countdown=False)
+    assert pc.tempo == 80.0
+    assert pc.countdown is False
+    pc.tempo = 150.0
+    assert pc.tempo == 150.0
+
+
+def test_playback_config_dict_setitem():
+    pc = PlaybackConfig()
+    pc["vary_timing"] = True
+    assert pc.vary_timing is True
+    pc["unknown_extra"] = 42
+    assert pc["unknown_extra"] == 42
+
+
+def test_playback_config_copy():
+    pc = PlaybackConfig(tempo=120.0, vary_timing=True)
+    pc["raw_pedal_events"] = [(0.0, 64)]
+    copied = pc.__copy__()
+    assert copied.tempo == 120.0
+    assert copied.vary_timing is True
+    assert copied["raw_pedal_events"] == [(0.0, 64)]
+
+
+def test_playback_config_len():
+    pc = PlaybackConfig(tempo=100.0)
+    assert len(pc) > 0
+
+
+def test_playback_config_repr():
+    pc = PlaybackConfig(tempo=120.0)
+    r = repr(pc)
+    assert "tempo=120.0" in r
+
+
+def test_playback_config_contains_extra():
+    pc = PlaybackConfig(output_mode="key")
+    pc["runtime_only"] = "value"
+    assert "runtime_only" in pc
+    assert pc["runtime_only"] == "value"
+
+
+def test_playback_config_from_roundtrip():
+    cfg = Config(tempo=150.0, enable_vary_timing=True, value_articulation=80.0)
+    pc = cfg.to_runtime_playback_dict()
+    assert pc.tempo == 150.0
+    assert pc.vary_timing is True
+    assert pc.articulation == 0.8
+    assert pc.enable_vary_timing is True
+    assert pc["articulation"] == 0.8

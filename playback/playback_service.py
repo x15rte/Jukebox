@@ -6,7 +6,8 @@ Decouples orchestration logic from the GUI so it can be tested and reused (e.g. 
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List, Tuple, Optional
+from collections.abc import Mapping
+from typing import Any, List, Tuple, Optional
 
 from models import Note, KeyEvent, MusicalSection
 from core import MidiParser, TempoMap
@@ -22,7 +23,7 @@ class PlaybackService:
     def prepare_playback(
         midi_file: str,
         selected_tracks_info: List[Tuple[MidiTrack, str]],
-        config: Dict[str, Any],
+        config: Mapping[str, Any],
         preparsed: Optional[Tuple[List[MidiTrack], TempoMap]] = None,
         preparsed_tempo_scale: float = 1.0,
     ) -> Tuple[List[Note], List[MusicalSection], List[KeyEvent], float, TempoMap]:

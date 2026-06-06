@@ -6,7 +6,8 @@ to deal with high-level playback commands and signals.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Callable
+from collections.abc import Mapping
+from typing import Any, List, Optional, Callable
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal as Signal
 
@@ -81,7 +82,7 @@ class PlaybackController(QObject):
     def start(
         self,
         compiled_events: List[KeyEvent],
-        config: Dict[str, Any],
+        config: Mapping[str, Any],
         total_duration: float,
         output_mode: str,
         use_88_key_layout: bool,

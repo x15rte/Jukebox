@@ -1,6 +1,7 @@
 """Pedal event generation: original, hybrid (adaptive), legato (harmonic), rhythmic, none."""
 
-from typing import Dict, List, Optional, Tuple
+from collections.abc import Mapping
+from typing import Any, List, Optional, Tuple
 
 from models import Note, KeyEvent, MusicalSection
 from core import get_time_groups
@@ -11,7 +12,7 @@ class PedalGenerator:
 
     @staticmethod
     def generate_events(
-        config: Dict, final_notes: List[Note], sections: List[MusicalSection]
+        config: Mapping[str, Any], final_notes: List[Note], sections: List[MusicalSection]
     ) -> List[KeyEvent]:
         style = config.get("pedal_style")
         if style == "none":

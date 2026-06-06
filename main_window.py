@@ -58,7 +58,7 @@ from native import (
 from platform_utils import get_capabilities
 from config_bindings import (
     CONFIG_UI_BINDINGS,
-    EFFECTFUL_CONFIG_KEYS,
+    effectful_keys,
     apply_config_effects,
     validate_config_ui_bindings,
 )
@@ -94,6 +94,10 @@ class MainWindow(QMainWindow):
         self.config_dir = self.config_repo.config_dir
         self.config_path = self.config_repo.config_path
         self.config_repo.ensure_config_dir()
+        self._config_dirty: bool = False
+        self._config_save_timer: QTimer = QTimer()
+        self._config_save_timer.setSingleShot(True)
+        self._config_save_timer.timeout.connect(self._save_config)
         self.selected_tracks_info = None
         self.parsed_tempo_map = None
         self.parsed_tracks = None
@@ -646,7 +650,7 @@ class MainWindow(QMainWindow):
             self.autoplay_folder_label.setToolTip("")
             self.autoplay_reload_btn.setEnabled(False)
             self.autoplay_shuffle_btn.setEnabled(False)
-        self._save_config()
+        self._mark_config_dirty()
 
     def _autoplay_scan_folder(self):
         self.autoplay_next_timer.stop()
@@ -894,7 +898,7 @@ class MainWindow(QMainWindow):
         if not is_playlist:
             self.autoplay_current_index = -1
             self._update_autoplay_highlight()
-        self._save_config()
+        self._mark_config_dirty()
 
     def _on_input_mode_changed(self):
         use_piano = self.input_mode_piano_radio.isChecked()
@@ -1387,7 +1391,7 @@ class MainWindow(QMainWindow):
     def _on_log_level_changed(self, level: str) -> None:
         if level:
             jukebox_logger.set_level(level)
-            self._save_config()
+            self._mark_config_dirty()
 
     def _on_log_save_to_file_toggled(self, checked: bool):
         path = self._get_log_file_path()
@@ -1398,7 +1402,7 @@ class MainWindow(QMainWindow):
         else:
             jukebox_logger.disable_file_logging()
             self.add_log_message("Log file saving disabled.")
-        self._save_config()
+        self._mark_config_dirty()
 
     def _on_status_updated(self, message: str) -> None:
         lowered = message.lstrip().lower()
@@ -1470,13 +1474,33 @@ class MainWindow(QMainWindow):
         for groupbox in self.findChildren(QGroupBox):
             groupbox.setEnabled(enabled)
 
+    def _mark_config_dirty(self) -> None:
+        """Debounce-triggered save: marks config dirty and starts a 500 ms timer.
+
+        Multiple rapid UI changes (slider drags, checkbox clicks) coalesce into
+        a single disk write.  Call ``_flush_config()`` before any operation that
+        needs the saved config to be current (e.g. playback start, window close).
+        """
+        self._config_dirty = True
+        if not self._config_save_timer.isActive():
+            self._config_save_timer.start(500)
+
+    def _flush_config(self) -> None:
+        """Immediately persist the current UI state if it is dirty."""
+        if self._config_dirty:
+            self._config_save_timer.stop()
+            self._save_config()
+            self._config_dirty = False
+
     def _config_from_ui(self) -> Config:
         data = {}
-        for key, get_fn, _ in CONFIG_UI_BINDINGS:
-            data[key] = get_fn(self)
+        for binding in CONFIG_UI_BINDINGS:
+            data[binding.key] = binding.getter(self)
         return Config.from_dict(data)
 
     def _save_config(self) -> None:
+        """Immediate config persist to disk."""
+        self._config_dirty = False
         try:
             config = self._config_from_ui()
             self.config_repo.save(config)
@@ -1502,11 +1526,12 @@ class MainWindow(QMainWindow):
         )
 
     def _apply_config_to_ui(self, config: Config) -> None:
-        for key, _, set_fn in CONFIG_UI_BINDINGS:
-            if key in EFFECTFUL_CONFIG_KEYS:
+        effectful = effectful_keys()
+        for binding in CONFIG_UI_BINDINGS:
+            if binding.key in effectful:
                 continue
-            if hasattr(config, key):
-                set_fn(self, getattr(config, key))
+            if hasattr(config, binding.key):
+                binding.setter(self, getattr(config, binding.key))
 
     def _load_config(self) -> None:
         try:
@@ -1526,12 +1551,16 @@ class MainWindow(QMainWindow):
             )
             self._reset_controls_to_default()
             self._update_enabled_states()
+            self._config_save_timer.stop()
+            self._config_dirty = False
             return
         self._apply_config_to_ui(config)
         apply_config_effects(self, config)
         self._update_enabled_states()
         self._update_88_key_visibility()
         self._update_play_stop_labels()
+        self._config_save_timer.stop()
+        self._config_dirty = False  # loading config doesn't count as "dirty"
 
     def _set_current_file_labels(self, filepath: str | None) -> None:
         if filepath:
@@ -1768,7 +1797,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, a0: QCloseEvent) -> None:  # type: ignore[override]  # noqa: N802
         self.autoplay_next_timer.stop()
         try:
-            self._save_config()
+            self._flush_config()
         except Exception as e:
             jukebox_logger.error(f"Error during closeEvent cleanup: {e}", exc_info=True)
         if self.midi_input_active:
