@@ -28,19 +28,11 @@ _fake_names = {
     "RecorderBackend",
 }
 
+# Only statically-imported names are listed in __all__; fake names
+# are resolved at runtime via __getattr__ to avoid triggering
+# output.output → pynput at import time (which breaks conftest's
+# pynput-stub logic on headless CI).
 __all__ = [
-    "FakeBackend",
-    "FakeEvent",
-    "FakeHumanizer",
-    "FakeInPort",
-    "FakeListener",
-    "FakeLiveBackend",
-    "FakePedalGenerator",
-    "FakePlaybackPlayer",
-    "FakeSectionAnalyzer",
-    "FakeSignal",
-    "FakeThread",
-    "RecorderBackend",
     "make_config",
     "make_key_event",
     "make_midi_track",
@@ -51,8 +43,7 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Lazy-load fakes so ``tests.helpers`` can be imported without triggering
-    ``output.output`` → ``pynput``, which breaks conftest's pynput-stub logic."""
+    """Lazy-load fakes (see module docstring for rationale)."""
     if name in _fake_names:
         import tests.helpers.fakes as _fakes  # noqa: PLC0415
 
