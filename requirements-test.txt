@@ -3,4 +3,5 @@ pytest-qt
 pytest-mock
 pytest-cov
 pytest-timeout
+pytest-randomly
 pyright

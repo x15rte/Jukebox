@@ -16,22 +16,45 @@ class DummyMsg:
         self.name = name
 
 
-def test_strip_control_chars_removes_nulls():
-    assert _strip_control_chars("ab\x00c\n") == "abc\n"
+@pytest.mark.parametrize(
+    ("input_text", "expected"),
+    [
+        pytest.param("ab\x00c\n", "abc\n", id="removes_nulls"),
+        pytest.param("", "", id="empty_input"),
+    ],
+)
+def test_strip_control_chars(input_text, expected):
+    assert _strip_control_chars(input_text) == expected
 
 
-def test_repair_utf8_mojibake_keeps_normal_text():
-    assert _repair_utf8_mojibake("hello") == "hello"
+@pytest.mark.parametrize(
+    ("input_text", "expected"),
+    [
+        pytest.param("hello", "hello", id="normal_text"),
+        pytest.param("", "", id="empty_input"),
+        pytest.param("ã\x81\x82", "あ", id="japanese_mojibake"),
+        pytest.param("ÿ", "ÿ", id="decode_error_returns_original"),
+    ],
+)
+def test_repair_utf8_mojibake(input_text, expected):
+    assert _repair_utf8_mojibake(input_text) == expected
 
 
-def test_decode_midi_text_uses_name_when_data_missing():
-    msg = DummyMsg(data=None, name="Track\x00Name")
-    assert _decode_midi_text(msg) == "TrackName"
-
-
-def test_decode_midi_text_ascii_fast_path():
-    msg = DummyMsg(data=b"Piano")
-    assert _decode_midi_text(msg) == "Piano"
+@pytest.mark.parametrize(
+    ("msg", "expected"),
+    [
+        pytest.param(DummyMsg(data=None, name="Track\x00Name"), "TrackName", id="no_data_uses_name"),
+        pytest.param(DummyMsg(data=b"Piano"), "Piano", id="ascii_fast_path"),
+        pytest.param(DummyMsg(data=b"", name="ignored"), "ignored", id="empty_bytes_uses_name"),
+        pytest.param(
+            type("Msg", (), {"data": object(), "name": "Name\x00X"})(),
+            "NameX",
+            id="invalid_data_object_uses_name",
+        ),
+    ],
+)
+def test_decode_midi_text_simple_cases(msg, expected):
+    assert _decode_midi_text(msg) == expected
 
 
 def test_decode_midi_text_latin_fallback():
@@ -82,11 +105,6 @@ def test_parse_structure_treats_note_on_zero_velocity_as_note_off(monkeypatch):
     monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda *a, **k: mid)
     tracks, _ = MidiParser.parse_structure("ok.mid")
     assert len(tracks[0].notes) == 1
-
-
-def test_strip_and_repair_empty_inputs():
-    assert _strip_control_chars("") == ""
-    assert _repair_utf8_mojibake("") == ""
 
 
 def test_decode_midi_text_data_object_invalid_uses_name():

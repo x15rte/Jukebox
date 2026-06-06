@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 import pytest
 
 from analysis.humanizer import FingeringEngine, Humanizer
@@ -5,7 +9,7 @@ from tests.helpers.builders import make_note, make_section
 
 
 def test_apply_to_hand_noop_when_all_features_off():
-    cfg = {}
+    cfg: dict[str, Any] = {}
     hz = Humanizer(cfg)
     notes = [make_note(1, 60, 1.0, 0.5, hand="right")]
     hz.apply_to_hand(notes, "right", set())
@@ -43,13 +47,29 @@ def test_apply_to_hand_applies_roll_and_duration_floor(monkeypatch):
     assert notes[1].duration == 0.03
 
 
-def test_apply_tempo_rubato_skips_short_sections():
-    cfg = {"enable_tempo_sway": True, "tempo_sway_intensity": 0.02}
+@pytest.mark.parametrize(
+    ("cfg", "note_start", "section_len"),
+    [
+        pytest.param(
+            {"enable_tempo_sway": True, "tempo_sway_intensity": 0.02},
+            0.2,
+            0.5,
+            id="short_section",
+        ),
+        pytest.param(
+            {"enable_tempo_sway": False, "tempo_sway_intensity": 0.1},
+            1.0,
+            2.0,
+            id="disabled",
+        ),
+    ],
+)
+def test_apply_tempo_rubato_noop(cfg, note_start, section_len):
     hz = Humanizer(cfg)
-    n = make_note(1, 60, 0.2, 0.1)
-    sec = make_section(0.0, 0.5, [n], pace="normal")
+    n = make_note(1, 60, note_start, 0.1)
+    sec = make_section(0.0, section_len, [n], pace="normal")
     hz.apply_tempo_rubato([n], [sec])
-    assert n.start_time == 0.2
+    assert n.start_time == note_start
 
 
 def test_apply_tempo_rubato_changes_time_on_long_section(monkeypatch):
@@ -62,15 +82,24 @@ def test_apply_tempo_rubato_changes_time_on_long_section(monkeypatch):
     assert n.start_time < 1.0
 
 
-def test_fingering_engine_assigns_unknown_hands():
-    notes = [
-        make_note(1, 50, 0.0, 0.2, hand="unknown"),
-        make_note(2, 70, 0.2, 0.2, hand="unknown"),
-    ]
-    eng = FingeringEngine()
-    eng.assign_hands(notes)
-    assert notes[0].hand == "left"
-    assert notes[1].hand == "right"
+def test_apply_tempo_rubato_fast_and_slow_invert(monkeypatch):
+    monkeypatch.setattr("analysis.humanizer.np.sin", lambda _x: 1.0)
+    n_fast = make_note(1, 60, 1.0, 0.2)
+    n_slow = make_note(2, 62, 1.0, 0.2)
+
+    hz = Humanizer(
+        {
+            "enable_tempo_sway": True,
+            "tempo_sway_intensity": 0.04,
+            "invert_tempo_sway": True,
+        }
+    )
+    sec_fast = make_section(0.0, 2.0, [n_fast], pace="fast")
+    sec_slow = make_section(0.0, 2.0, [n_slow], pace="slow")
+
+    hz.apply_tempo_rubato([n_fast, n_slow], [sec_fast, sec_slow])
+
+    assert n_fast.start_time < n_slow.start_time
 
 
 def test_prepare_shared_offsets_populates_and_clamps(monkeypatch):
@@ -94,101 +123,60 @@ def test_prepare_shared_offsets_populates_and_clamps(monkeypatch):
     assert hz._shared_drift_offsets[key] == 0.03
 
 
-def test_apply_to_hand_resync_and_drift_update(monkeypatch):
+@pytest.mark.parametrize(
+    ("hand", "decay", "drift_attr", "note_pitch", "note_start", "shared_offset", "expected_start", "expected_drift"),
+    [
+        pytest.param("left", 0.5, "left_hand_drift", 55, 1.0, 0.1, 1.2, 0.3, id="left_drift_update"),
+        pytest.param("right", 0.25, "right_hand_drift", 72, 2.0, 0.2, 2.1, 0.3, id="right_drift_update"),
+    ],
+)
+def test_apply_to_hand_resync_and_drift_update(monkeypatch, hand, decay, drift_attr, note_pitch, note_start, shared_offset, expected_start, expected_drift):
     hz = Humanizer(
         {
             "vary_timing": False,
             "vary_articulation": False,
             "enable_drift_correction": True,
-            "drift_decay_factor": 0.5,
+            "drift_decay_factor": decay,
             "drift_shared_factor": 1.0,
             "drift_noise_sigma": 0.01,
         }
     )
     monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *_a, **_k: 0.0)
-    notes = [make_note(1, 55, 1.0, 0.2, hand="left")]
-    hz.left_hand_drift = 0.4
-    hz._shared_drift_offsets = {1.0: 0.1}
+    notes = [make_note(1, note_pitch, note_start, 0.2, hand=hand)]
+    setattr(hz, drift_attr, 0.4)
+    hz._shared_drift_offsets = {note_start: shared_offset}
 
-    hz.apply_to_hand(notes, "left", {1.0})
+    hz.apply_to_hand(notes, hand, {note_start})
 
-    assert notes[0].start_time == 1.2
-    assert hz.left_hand_drift == pytest.approx(0.3)
-
-
-def test_apply_tempo_rubato_fast_and_slow_invert(monkeypatch):
-    monkeypatch.setattr("analysis.humanizer.np.sin", lambda _x: 1.0)
-    n_fast = make_note(1, 60, 1.0, 0.2)
-    n_slow = make_note(2, 62, 1.0, 0.2)
-
-    hz = Humanizer(
-        {
-            "enable_tempo_sway": True,
-            "tempo_sway_intensity": 0.04,
-            "invert_tempo_sway": True,
-        }
-    )
-    sec_fast = make_section(0.0, 2.0, [n_fast], pace="fast")
-    sec_slow = make_section(0.0, 2.0, [n_slow], pace="slow")
-
-    hz.apply_tempo_rubato([n_fast, n_slow], [sec_fast, sec_slow])
-
-    assert n_fast.start_time < n_slow.start_time
+    assert notes[0].start_time == expected_start
+    assert getattr(hz, drift_attr) == pytest.approx(expected_drift)
 
 
-def test_fingering_engine_chord_and_preserved_hand():
-    chord = [
-        make_note(1, 50, 0.0, 0.2, hand="unknown"),
-        make_note(2, 53, 0.0, 0.2, hand="unknown"),
+@pytest.mark.parametrize(
+    ("notes_input", "expected_hands"),
+    [
+        pytest.param(
+            [(50, "unknown", 0.0), (70, "unknown", 0.1)],
+            ["left", "right"],
+            id="auto_assigned_by_pitch",
+        ),
+        pytest.param(
+            [(50, "unknown", 0.0), (53, "unknown", 0.0), (70, "right", 1.0)],
+            ["left", "left", "right"],
+            id="chord_left_preset_right",
+        ),
+        pytest.param(
+            [(50, "left", 0.0), (53, "left", 0.0)],
+            ["left", "left"],
+            id="already_assigned_noop",
+        ),
+    ],
+)
+def test_fingering_engine_hand_assignment(notes_input, expected_hands):
+    notes = [
+        make_note(i, pitch, start, 0.2, hand=hand)
+        for i, (pitch, hand, start) in enumerate(notes_input, start=1)
     ]
-    preset = make_note(3, 70, 1.0, 0.2, hand="right")
-
     eng = FingeringEngine()
-    eng.assign_hands(chord + [preset])
-
-    assert all(n.hand == "left" for n in chord)
-    assert preset.hand == "right"
-
-
-def test_apply_to_hand_right_resync_decay_and_drift_update(monkeypatch):
-    hz = Humanizer(
-        {
-            "vary_timing": False,
-            "vary_articulation": False,
-            "enable_drift_correction": True,
-            "drift_decay_factor": 0.25,
-            "drift_shared_factor": 1.0,
-            "drift_noise_sigma": 0.01,
-        }
-    )
-    monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *_a, **_k: 0.0)
-    notes = [make_note(1, 72, 2.0, 0.2, hand="right")]
-    hz.right_hand_drift = 0.4
-    hz._shared_drift_offsets = {2.0: 0.2}
-
-    hz.apply_to_hand(notes, "right", {2.0})
-
-    assert notes[0].start_time == 2.1
-    assert hz.right_hand_drift == pytest.approx(0.3)
-
-
-def test_apply_tempo_rubato_disabled_noop():
-    hz = Humanizer({"enable_tempo_sway": False, "tempo_sway_intensity": 0.1})
-    n = make_note(1, 60, 1.0, 0.2)
-    sec = make_section(0.0, 2.0, [n], pace="normal")
-
-    hz.apply_tempo_rubato([n], [sec])
-
-    assert n.start_time == 1.0
-
-
-def test_fingering_engine_chord_already_assigned_noop():
-    chord = [
-        make_note(1, 50, 0.0, 0.2, hand="left"),
-        make_note(2, 53, 0.0, 0.2, hand="left"),
-    ]
-
-    eng = FingeringEngine()
-    eng.assign_hands(chord)
-
-    assert all(n.hand == "left" for n in chord)
+    eng.assign_hands(notes)
+    assert [n.hand for n in notes] == expected_hands

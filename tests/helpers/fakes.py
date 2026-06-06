@@ -206,3 +206,42 @@ class FakePlaybackPlayer:
 
     def seek(self, target):
         self.seek_calls.append(target)
+
+
+class FakeHumanizer:
+    """Tracks calls without modifying notes."""
+
+    def __init__(self, config=None):
+        self.config = config
+        self.calls: dict[str, int] = {}
+
+    def _inc(self, name: str) -> None:
+        self.calls[name] = self.calls.get(name, 0) + 1
+
+    def prepare_shared_offsets(self, notes) -> None:
+        self._inc("prepare_shared_offsets")
+
+    def apply_to_hand(self, notes, hand, resync) -> None:
+        self._inc("apply_to_hand")
+
+    def apply_tempo_rubato(self, notes, sections) -> None:
+        self._inc("apply_tempo_rubato")
+
+
+class FakePedalGenerator:
+    """Returns an empty event list."""
+
+    @staticmethod
+    def generate_events(config, notes, sections):
+        return []
+
+
+class FakeSectionAnalyzer:
+    """Returns an empty section list."""
+
+    def __init__(self, notes=None, tempo_map=None):
+        self.notes = notes
+        self.tempo_map = tempo_map
+
+    def analyze(self):
+        return []
