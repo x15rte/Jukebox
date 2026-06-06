@@ -84,6 +84,10 @@ def test_release_key_if_unused_handles_backend_exception(monkeypatch):
     monkeypatch.setattr(out, "Controller", FakeController)
 
     logs = []
+    monkeypatch.setattr(
+        out.jukebox_logger, "error",
+        lambda m, **k: logs.append(m),
+    )
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
 
     key_data = kb._mapper.get_key_data(60)
@@ -203,6 +207,10 @@ def test_numpad_backend_logs_note_and_pedal_exceptions(monkeypatch):
     monkeypatch.setattr(out.rmc, "send_note_message", bad_note)
     monkeypatch.setattr(out.rmc, "send_pedal", bad_pedal)
     monkeypatch.setattr(out.rmc, "reset_batched_sendinput", lambda: None)
+    monkeypatch.setattr(
+        out.jukebox_logger, "error",
+        lambda m, **k: logs.append(m),
+    )
 
     nb = out.NumpadBackend(inter_message_delay=0.0, log_message=logs.append)
     nb.note_on(60, 100)
@@ -227,6 +235,10 @@ def test_numpad_backend_shutdown_logs_errors(monkeypatch):
     monkeypatch.setattr(out.rmc, "send_note_message", bad_note)
     monkeypatch.setattr(out.rmc, "send_pedal", bad_pedal)
     monkeypatch.setattr(out.rmc, "reset_batched_sendinput", lambda: None)
+    monkeypatch.setattr(
+        out.jukebox_logger, "error",
+        lambda m, **k: logs.append(m),
+    )
 
     nb = out.NumpadBackend(inter_message_delay=0.0, log_message=logs.append)
     nb._active_notes = {60}
@@ -362,6 +374,10 @@ def test_note_on_logs_exception_when_backend_press_fails(monkeypatch):
 
     monkeypatch.setattr(out, "Controller", BadController)
     logs = []
+    monkeypatch.setattr(
+        out.jukebox_logger, "error",
+        lambda m, **k: logs.append(m),
+    )
 
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
     kb.note_on(60, 100)
@@ -383,6 +399,10 @@ def test_pedal_on_off_extra_branches(monkeypatch):
     monkeypatch.setattr(out, "Controller", FakeController)
 
     logs = []
+    monkeypatch.setattr(
+        out.jukebox_logger, "error",
+        lambda m, **k: logs.append(m),
+    )
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
 
     class BadKB:
@@ -474,6 +494,10 @@ def test_keyboard_shutdown_pdi_and_pynput_exception_branches(monkeypatch):
     monkeypatch.setattr(out, "Controller", FakeController)
 
     logs = []
+    monkeypatch.setattr(
+        out.jukebox_logger, "error",
+        lambda m, **k: logs.append(m),
+    )
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
 
     class BadPDI:
@@ -510,6 +534,10 @@ def test_keyboard_shutdown_windows_transport_failure_is_logged(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "win32")
     fake_pdi = pydirectinput_stub.install(monkeypatch)
     logs = []
+    monkeypatch.setattr(
+        out.jukebox_logger, "error",
+        lambda m, **k: logs.append(m),
+    )
 
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
     kb._active_pitches = {"x": {60}}

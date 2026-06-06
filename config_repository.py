@@ -524,9 +524,6 @@ class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
     hotkey: str = "f8"
     window_geometry: Optional[str] = None
 
-    save_log_to_file: bool = False
-    log_level: str = "INFO"
-
     # Runtime aliases
     vary_timing: bool = False
     vary_articulation: bool = False

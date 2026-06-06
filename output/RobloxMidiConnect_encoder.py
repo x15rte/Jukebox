@@ -229,7 +229,7 @@ def ensure_numlock_on() -> None:
             pydirectinput.keyDown("numlock", _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
             pydirectinput.keyUp("numlock", _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
     except Exception as e:
-        jukebox_logger.debug(f"Failed to ensure NumLock state: {e}")
+        jukebox_logger.debug(f"Failed to ensure NumLock state: {e}")  # debug is appropriate — best-effort
         return
 
 
@@ -237,7 +237,7 @@ def _tap_key(name: str) -> None:
     """Press and release a single numpad key with the platform transport."""
     if _platform == "Windows":
         if not _use_pydirectinput:
-            jukebox_logger.debug(
+            jukebox_logger.warning(
                 f"pydirectinput is unavailable; cannot send numpad key '{name}'."
             )
             return
@@ -245,7 +245,10 @@ def _tap_key(name: str) -> None:
             pydirectinput.keyDown(name, _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
             pydirectinput.keyUp(name, _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
         except Exception as e:
-            jukebox_logger.debug(f"pydirectinput key send failed for '{name}': {e}")
+            jukebox_logger.warning(
+                f"pydirectinput key send failed for '{name}': {e}",
+                exc_info=True,
+            )
             return
         return
 
@@ -258,7 +261,10 @@ def _tap_key(name: str) -> None:
                 post_macos_key_event(vk, True, 0)
                 post_macos_key_event(vk, False, 0)
             except Exception as e:
-                jukebox_logger.debug(f"macOS CGEvent key send failed for '{name}': {e}")
+                jukebox_logger.warning(
+                    f"macOS CGEvent key send failed for '{name}': {e}",
+                    exc_info=True,
+                )
                 return
         return
 
@@ -270,7 +276,10 @@ def _tap_key(name: str) -> None:
                 kb.press(kc)
                 kb.release(kc)
             except Exception as e:
-                jukebox_logger.debug(f"pynput key send failed for '{name}': {e}")
+                jukebox_logger.warning(
+                    f"pynput key send failed for '{name}': {e}",
+                    exc_info=True,
+                )
                 return
 
 

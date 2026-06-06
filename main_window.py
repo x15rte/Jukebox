@@ -227,6 +227,7 @@ class MainWindow(QMainWindow):
         settings_layout.addStretch()
 
         self.log_output = QTextBrowser()
+        self.log_output.setObjectName("LogOutput")
         self.log_output.setOpenExternalLinks(True)
         self.log_output.setFont(QFont("Courier", 9))
         log_layout = QVBoxLayout(log_tab)
@@ -250,8 +251,18 @@ class MainWindow(QMainWindow):
         filter_label = QLabel("Filter:")
         self.log_filter_edit = QLineEdit()
         self.log_filter_edit.setPlaceholderText("Type to filter log...")
-        self.log_filter_edit.textChanged.connect(self._apply_log_filter)
-        clear_btn.clicked.connect(self.log_output.clear)
+        self.log_filter_edit.textChanged.connect(self._on_log_filter_text_changed)
+        self.log_filter_status = QLabel("")
+        self.log_filter_status.setStyleSheet("color: gray;")
+        self.log_auto_scroll_check = QCheckBox("Auto-scroll")
+        self.log_auto_scroll_check.setChecked(True)
+        self.log_wrap_check = QCheckBox("Wrap")
+        self.log_wrap_check.setChecked(False)
+        self.log_wrap_check.toggled.connect(self._on_log_wrap_toggled)
+        self._log_filter_timer = QTimer()
+        self._log_filter_timer.setSingleShot(True)
+        self._log_filter_timer.timeout.connect(self._render_log)
+        clear_btn.clicked.connect(self._clear_log)
         copy_btn.clicked.connect(self._copy_log_to_clipboard)
         toolbar_layout.addWidget(clear_btn)
         toolbar_layout.addWidget(copy_btn)
@@ -259,9 +270,13 @@ class MainWindow(QMainWindow):
         toolbar_layout.addWidget(log_level_label)
         toolbar_layout.addWidget(self.log_level_combo)
         toolbar_layout.addWidget(self.log_save_to_file_check)
-        toolbar_layout.addSpacing(16)
+        toolbar_layout.addSpacing(8)
+        toolbar_layout.addWidget(self.log_auto_scroll_check)
+        toolbar_layout.addWidget(self.log_wrap_check)
+        toolbar_layout.addSpacing(8)
         toolbar_layout.addWidget(filter_label)
         toolbar_layout.addWidget(self.log_filter_edit, 1)
+        toolbar_layout.addWidget(self.log_filter_status)
         log_layout.addLayout(toolbar_layout)
         log_layout.addWidget(self.log_output, 1)
 
@@ -1362,18 +1377,6 @@ class MainWindow(QMainWindow):
         if msg.clickedButton() == open_btn:
             open_macos_accessibility_preferences()
 
-    def _log_message_to_plain(self, message: str) -> str:
-        if not message:
-            return ""
-        text = re.sub(r"<[^>]+>", "", message)
-        try:
-            import html
-
-            text = html.unescape(text)
-        except Exception:
-            return text.strip()
-        return text.strip()
-
     def _log_warning(self, message: str) -> None:
         jukebox_logger.warning(message)
 
@@ -1407,29 +1410,28 @@ class MainWindow(QMainWindow):
     def _on_status_updated(self, message: str) -> None:
         lowered = message.lstrip().lower()
         if lowered.startswith("error:"):
-            jukebox_logger.error(message)
+            jukebox_logger.error(message[message.index(":") + 1:].strip())
             return
         if lowered.startswith("warning:"):
-            jukebox_logger.warning(message)
+            jukebox_logger.warning(message[message.index(":") + 1:].strip())
             return
         self.add_log_message(message)
 
-    def add_log_message(self, message):
-        jukebox_logger.info(message)
+    def add_log_message(self, message, level="INFO"):
+        jukebox_logger.log(level, message)
 
     def _append_log(self, level: str, message: str) -> None:
-        if not hasattr(self, "_log_entries"):
-            self._log_entries = []
-
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         plain = f"[{timestamp}] [{level}] {message}"
 
-        if level == "ERROR":
-            color = "#F56C6C"
-        elif level == "WARNING":
-            color = "#E6A23C"
-        else:
-            color = "#CCCCCC"
+        log_colors = theme.get_dark_cyber_theme().logs
+        color_map = {
+            "DEBUG": log_colors.debug,
+            "INFO": log_colors.info,
+            "WARNING": log_colors.warning,
+            "ERROR": log_colors.error,
+        }
+        color = color_map.get(level, log_colors.info)
 
         import html as html_module
 
@@ -1440,32 +1442,66 @@ class MainWindow(QMainWindow):
                 escaped_first = html_module.escape(first_line)
                 escaped_rest = html_module.escape(rest)
                 html = (
-                    f'<span style="color:{color}">[{timestamp}] [ERROR] {escaped_first} '
-                    f'<details><summary>Details</summary><pre style="margin:0; white-space:pre-wrap;">{escaped_rest}</pre></details></span>'
+                    f'<span style="color:{color}">[{timestamp}] [{level}] {escaped_first} '
+                    f'<details><summary>Details</summary>'
+                    f'<pre style="margin:0; white-space:pre-wrap;">{escaped_rest}</pre>'
+                    f'</details></span>'
                 )
             else:
-                html = f'<span style="color:{color}">[{timestamp}] [ERROR] {html_module.escape(message)}</span>'
+                html = f'<span style="color:{color}">[{timestamp}] [{level}] {html_module.escape(message)}</span>'
         else:
-            line_content = f"[{timestamp}] [{level}] {html_module.escape(message)}"
-            html = f'<span style="color:{color}">{line_content}</span>'
-        self._log_entries.append({"level": level, "plain": plain, "html": html})
+            escaped = html_module.escape(message)
+            html = f'<span style="color:{color}">[{timestamp}] [{level}] {escaped}</span>'
 
+        self._log_entries.append({"level": level, "plain": plain, "html": html})
         if len(self._log_entries) > MAX_LOG_ENTRIES:
             self._log_entries = self._log_entries[-MAX_LOG_ENTRIES:]
 
-        self._apply_log_filter()
+        self._render_log()
 
-    def _apply_log_filter(self) -> None:
-        query = ""
-        if hasattr(self, "log_filter_edit"):
-            query = self.log_filter_edit.text().strip().lower()
+    def _render_log(self) -> None:
+        """Rebuild the QTextBrowser content from filtered entries."""
+        query = self.log_filter_edit.text().strip().lower()
 
-        self.log_output.clear()
-        for entry in getattr(self, "_log_entries", []):
-            plain = entry.get("plain", "")
-            if query and query not in plain.lower():
+        parts: list[str] = []
+        match_count = 0
+        for entry in self._log_entries:
+            if query and query not in entry["plain"].lower():
                 continue
-            self.log_output.append(entry["html"])
+            parts.append(entry["html"])
+            match_count += 1
+
+        self.log_output.setHtml("\n".join(parts))
+        total = len(self._log_entries)
+        if query:
+            self.log_filter_status.setText(f"{match_count}/{total}")
+        else:
+            self.log_filter_status.setText("")
+
+        if self.log_auto_scroll_check.isChecked():
+            sb = self.log_output.verticalScrollBar()
+            if sb is not None:
+                sb.setValue(sb.maximum())
+
+    def _on_log_filter_text_changed(self) -> None:
+        """Debounced filter: restart the 200 ms timer on each keystroke."""
+        self._log_filter_timer.start(200)
+
+    def _clear_log(self) -> None:
+        """Clear all log entries from both storage and display."""
+        self._log_entries.clear()
+        self.log_output.clear()
+        self.log_filter_status.setText("")
+
+    def _on_log_wrap_toggled(self, checked: bool) -> None:
+        if checked:
+            self.log_output.setLineWrapMode(
+                QTextBrowser.LineWrapMode.WidgetWidth
+            )
+        else:
+            self.log_output.setLineWrapMode(
+                QTextBrowser.LineWrapMode.NoWrap
+            )
 
     def _on_log_record(self, level: str, message: str) -> None:
         self._append_log(level, message)

@@ -243,7 +243,7 @@ def test_tap_key_pydirectinput_and_pynput_paths(monkeypatch):
 def test_tap_key_windows_without_pydirectinput_does_not_use_pynput(monkeypatch):
     logs = []
     presses = []
-    monkeypatch.setattr(rmc.jukebox_logger, "debug", lambda m: logs.append(m))
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", False)
     monkeypatch.setattr(rmc, "_precomputed_keys", {"numpad1": "KC1"})
@@ -328,7 +328,7 @@ def test_ensure_numlock_non_windows_noop(monkeypatch):
 
 def test_tap_key_handles_pydirectinput_exception(monkeypatch):
     logs = []
-    monkeypatch.setattr(rmc.jukebox_logger, "debug", lambda m: logs.append(m))
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
 
     class _PDI:
         @staticmethod
@@ -368,7 +368,7 @@ def test_tap_key_macos_cgevent_paths(monkeypatch):
 
 def test_tap_key_macos_cgevent_logs_on_exception(monkeypatch):
     logs = []
-    monkeypatch.setattr(rmc.jukebox_logger, "debug", lambda m: logs.append(m))
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
     monkeypatch.setattr(rmc, "_use_pydirectinput", False)
     monkeypatch.setattr(rmc, "_platform", "Darwin")
     monkeypatch.setattr(rmc, "_platform_map", {"numpad1": 42})
@@ -388,7 +388,7 @@ def test_tap_key_macos_cgevent_logs_on_exception(monkeypatch):
 
 def test_tap_key_pynput_exception_branch(monkeypatch):
     logs = []
-    monkeypatch.setattr(rmc.jukebox_logger, "debug", lambda m: logs.append(m))
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
     monkeypatch.setattr(rmc, "_use_pydirectinput", False)
     monkeypatch.setattr(rmc, "_platform", "Linux")
     monkeypatch.setattr(rmc, "_precomputed_keys", {"numpad2": "KC2"})

@@ -359,8 +359,7 @@ class KeyboardBackend(OutputBackend):
             self._states.pop(base_key, None)
 
     def _log_exception(self, context: str, exc: Exception) -> None:
-        if self._log is not None:
-            self._log(f"{context}: {exc}\n{traceback.format_exc()}")
+        jukebox_logger.error(f"{context}: {exc}", exc_info=True)
 
     def _windows_key_repress_delay(self) -> None:
         if _WINDOWS_KEY_REPRESS_DELAY > 0:

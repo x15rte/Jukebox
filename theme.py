@@ -103,6 +103,7 @@ class PianoColors:
 
 @dataclass(frozen=True)
 class LogColors:
+    debug: str
     info: str
     warning: str
     error: str
@@ -176,6 +177,7 @@ def get_dark_cyber_theme() -> Theme:
     )
 
     logs = LogColors(
+        debug="#8888A0",
         info=text_secondary,
         warning=accent_warning,
         error=accent_error,

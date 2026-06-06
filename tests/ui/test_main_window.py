@@ -20,11 +20,6 @@ def test_gather_config_without_tracks_shows_warning(window_factory, monkeypatch,
     assert warnings == [True]
 
 
-def test_log_message_to_plain_strips_tags(window_factory, monkeypatch, tmp_path):
-    w = window_factory()
-    out = w._log_message_to_plain("<b>Hello &amp; bye</b>")
-    assert out == "Hello & bye"
-
 
 def test_toggle_always_on_top_no_show_when_not_visible(window_factory, monkeypatch, tmp_path):
     w = window_factory()
@@ -196,8 +191,8 @@ def test_on_status_updated_routes_levels(window_factory, monkeypatch, tmp_path):
     w._on_status_updated("warning: heads up")
     w._on_status_updated("all good")
 
-    assert errors == ["Error: boom"]
-    assert warnings == ["warning: heads up"]
+    assert errors == ["boom"]
+    assert warnings == ["heads up"]
     assert infos == ["all good"]
 
 
@@ -211,23 +206,6 @@ def test_append_log_error_multiline_and_trim(window_factory, monkeypatch, tmp_pa
     assert len(w._log_entries) == 1
     assert w._log_entries[0]["level"] == "INFO"
 
-
-def test_log_message_to_plain_empty_and_fallback(window_factory, monkeypatch, tmp_path):
-    w = window_factory()
-    assert w._log_message_to_plain("") == ""
-
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name == "html":
-            raise ImportError("no html")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    out = w._log_message_to_plain("<b>x</b>")
-    assert out == "x"
 
 
 def test_toggle_always_on_top_visible_reapplies_state(window_factory, monkeypatch, tmp_path):
@@ -397,11 +375,9 @@ def test_on_log_level_changed_sets_level_and_saves(window_factory, monkeypatch, 
     assert ("dirty", None) in events
 
 
-def test_append_log_initializes_and_error_empty_details_branch(
-    window_factory, monkeypatch, tmp_path
-):
+def test_append_log_error_empty_details_branch(window_factory, monkeypatch, tmp_path):
     w = window_factory()
-    delattr(w, "_log_entries")
+    w._log_entries.clear()
 
     w._append_log("ERROR", "boom\n   ")
 
@@ -409,7 +385,7 @@ def test_append_log_initializes_and_error_empty_details_branch(
     assert "[ERROR]" in w._log_entries[-1]["html"]
 
 
-def test_apply_log_filter_query_filters_out_nonmatching(window_factory, monkeypatch, tmp_path):
+def test_render_log_filter_filters_out_nonmatching(window_factory, monkeypatch, tmp_path):
     w = window_factory()
     w._log_entries = [
         {"level": "INFO", "plain": "hello world", "html": "<span>a</span>"},
@@ -417,7 +393,7 @@ def test_apply_log_filter_query_filters_out_nonmatching(window_factory, monkeypa
     ]
     w.log_filter_edit.setText("hello")
 
-    w._apply_log_filter()
+    w._render_log()
 
     assert "a" in w.log_output.toPlainText()
     assert "b" not in w.log_output.toPlainText()
@@ -435,4 +411,46 @@ def test_update_enabled_states_ignores_non_text_check(window_factory, monkeypatc
 
     w.all_humanization_checks["dummy"] = Dummy()
     w._update_enabled_states()
+
+
+def test_clear_log_clears_entries(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._log_entries.append({"level": "INFO", "plain": "test", "html": "<span>test</span>"})
+    w._clear_log()
+    assert w._log_entries == []
+
+
+def test_on_log_filter_text_changed_starts_timer(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._on_log_filter_text_changed()
+    assert w._log_filter_timer.isActive()
+    w._log_filter_timer.stop()
+
+
+def test_on_log_wrap_toggled_changes_mode(window_factory, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QTextBrowser
+    w = window_factory()
+    w._on_log_wrap_toggled(True)
+    assert w.log_output.lineWrapMode() == QTextBrowser.LineWrapMode.WidgetWidth
+    w._on_log_wrap_toggled(False)
+    assert w.log_output.lineWrapMode() == QTextBrowser.LineWrapMode.NoWrap
+
+
+def test_add_log_message_with_level(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    messages = []
+    monkeypatch.setattr("main_window.jukebox_logger.log", lambda lvl, msg, **k: messages.append((lvl, msg)))
+    w.add_log_message("info default")
+    w.add_log_message("warning msg", level="WARNING")
+    assert messages[0] == ("INFO", "info default")
+    assert messages[1] == ("WARNING", "warning msg")
+
+
+def test_render_log_auto_scroll_respects_toggle(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._log_entries.append({"level": "INFO", "plain": "test", "html": "<span>x</span>"})
+    w.log_auto_scroll_check.setChecked(False)
+    w._render_log()
+    # Should not crash when auto-scroll is off
+    assert "x" in w.log_output.toPlainText()
 
