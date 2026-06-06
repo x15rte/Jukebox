@@ -627,3 +627,4 @@ pyright.out
 # python venv
 bin/
 pyvenv.cfg
+cov_output.txt

@@ -726,7 +726,8 @@ class MainWindow(QMainWindow):
         filepath = self.autoplay_file_list[row]
         try:
             if self._autoplay_select_tracks(filepath):
-                assert self.selected_tracks_info is not None
+                if self.selected_tracks_info is None:
+                    return
                 preview_notes = []
                 for track, role in self.selected_tracks_info:
                     for note in track.notes:
@@ -832,9 +833,8 @@ class MainWindow(QMainWindow):
                 return False
 
             try:
-                assert self.selected_tracks_info is not None, (
-                    "selected_tracks_info should have been set by _autoplay_select_tracks"
-                )
+                if self.selected_tracks_info is None:  # pragma: no cover
+                    raise RuntimeError("selected_tracks_info should have been set by _autoplay_select_tracks")
                 final_notes, sections, compiled_events, total_dur, tempo_map = (
                     PlaybackService.prepare_playback(
                         filepath,
@@ -1809,7 +1809,7 @@ class MainWindow(QMainWindow):
             if self.autoplay_current_index < len(self.autoplay_file_list):
                 delay = self.autoplay_delay_spinbox.value()
                 rand_delay = self.autoplay_random_delay_spinbox.value()
-                total_delay = delay + (random.uniform(0, rand_delay) if rand_delay > 0 else 0.0)
+                total_delay = delay + (random.uniform(0, rand_delay) if rand_delay > 0 else 0.0)  # nosec
                 if total_delay > 0:
                     next_name = os.path.basename(
                         self.autoplay_file_list[self.autoplay_current_index]
