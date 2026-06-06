@@ -55,7 +55,15 @@ jobs:
           python -m pip install -r requirements-windows.txt -r requirements-test.txt
 
       - name: Run tests
-        run: python -m pytest -q
+        run: python -m pytest -q --durations=10 --junitxml=test-results.xml
+
+      - name: Publish test report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: pytest-results-${{ matrix.os }}
+          path: test-results.xml
+          reporter: java-junit
 
   coverage:
     runs-on: ubuntu-latest
@@ -89,17 +97,30 @@ jobs:
       - name: Run coverage
         run: >
           python -m pytest
-          --cov
+          --cov --cov-branch
           --cov-report=term-missing
           --cov-report=xml
-          --cov-fail-under=100
+          --durations=10
+          --junitxml=test-results.xml
+          --cov-fail-under=95
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: coverage-xml
-          path: coverage.xml
+          path: |
+            coverage.xml
+            test-results.xml
           overwrite: true
+
+      - name: Publish test report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: pytest-results-coverage
+          path: test-results.xml
+          reporter: java-junit
 
   typecheck:
     runs-on: ubuntu-latest
@@ -161,4 +182,33 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-test.txt
 
       - name: Run compatibility tests
-        run: python -m pytest -q
+        run: python -m pytest -q --durations=10 --junitxml=test-results.xml
+
+      - name: Publish test report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: pytest-results-compat-py3.14
+          path: test-results.xml
+          reporter: java-junit
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: python -m pip install ruff
+
+      - name: Run ruff check
+        run: ruff check .
+
+      - name: Run ruff format check
+        run: ruff format --check .

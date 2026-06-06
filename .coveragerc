@@ -21,7 +21,9 @@ omit =
     dist/*
     lib/*
     lib64/*
+branch = True
 
 [report]
 show_missing = True
 skip_covered = False
+skip_empty = True

@@ -1,3 +1,6 @@
+"""Tests for HotkeyManager: hotkey parsing, binding, and lifecycle."""
+from __future__ import annotations
+
 from typing import Any, cast
 
 from pynput.keyboard import Key
@@ -16,6 +19,18 @@ def test_parse_hotkey_string_defaults_and_char():
     assert parse_hotkey_string(None) == Key.f8
     key = cast(Any, parse_hotkey_string("x"))
     assert hasattr(key, "char") and key.char == "x"
+
+
+def test_parse_hotkey_string_valid_key_enum_name():
+    """A valid Key enum name (e.g. 'f12', 'space', 'enter') resolves."""
+    key = parse_hotkey_string("f12")
+    assert key == Key.f12
+
+    key = parse_hotkey_string("space")
+    assert key == Key.space
+
+    key = parse_hotkey_string("enter")
+    assert key == Key.enter
 
 
 def test_hotkey_manager_binding_and_toggle(monkeypatch):
@@ -55,6 +70,28 @@ def test_format_key_string_prefers_key_char(monkeypatch):
     mgr = HotkeyManager()
 
     assert mgr.format_key_string(CharKey()) == "z"
+
+
+def test_on_press_ignored_key_noop(monkeypatch):
+    """Pressing a non-matching key when not binding should be a silent no-op."""
+    _patch_listener(monkeypatch)
+    mgr = HotkeyManager()
+    mgr.current_key = Key.f8
+
+    # Pressing an irrelevant key should not crash and should not fire toggle
+    toggled = []
+    mgr.toggle_requested.connect(lambda: toggled.append(True))
+    mgr.on_press(Key.f1)
+    assert len(toggled) == 0
+
+
+def test_stop_with_listener_stops(monkeypatch):
+    """stop() should call listener.stop() when listener is active."""
+    _patch_listener(monkeypatch)
+    mgr = HotkeyManager()
+    assert mgr.listener is not None
+    mgr.stop()
+    assert mgr.listener.stopped is True
 
 
 def test_stop_with_no_listener_noop(monkeypatch):

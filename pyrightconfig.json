@@ -1,33 +1,33 @@
 {
   "include": [
     "analysis",
-    "core",
-    "native",
-    "output",
-    "playback",
-    "ui",
     "config_bindings.py",
     "config_repository.py",
+    "core",
     "logger_core.py",
     "main.py",
     "main_window.py",
     "models.py",
+    "native",
+    "output",
     "platform_utils.py",
+    "playback",
     "theme.py",
-    "version.py",
-    "tests"
+    "ui",
+    "version.py"
   ],
   "exclude": [
     "**/__pycache__",
+    "**/.*",
+    "**/node_modules",
     "build",
     "dist",
     "lib",
-    "lib64",
-    "**/node_modules",
-    "**/.*"
+    "lib64"
   ],
-  "pythonVersion": "3.12",
-  "typeCheckingMode": "basic",
-  "reportMissingImports": false,
-  "reportMissingModuleSource": false
+  "typeCheckingMode": "standard",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportMissingModuleSource": false,
+  "pythonVersion": "3.12"
 }
