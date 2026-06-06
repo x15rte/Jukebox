@@ -58,7 +58,7 @@ jobs:
         run: python -m pytest -q --durations=10 --junitxml=test-results.xml
 
       - name: Publish test report
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         if: always()
         with:
           name: pytest-results-${{ matrix.os }}
@@ -115,7 +115,7 @@ jobs:
           overwrite: true
 
       - name: Publish test report
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         if: always()
         with:
           name: pytest-results-coverage
@@ -185,7 +185,7 @@ jobs:
         run: python -m pytest -q --durations=10 --junitxml=test-results.xml
 
       - name: Publish test report
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         if: always()
         with:
           name: pytest-results-compat-py3.14
