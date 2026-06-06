@@ -1442,16 +1442,16 @@ class MainWindow(QMainWindow):
                 escaped_first = html_module.escape(first_line)
                 escaped_rest = html_module.escape(rest)
                 html = (
-                    f'<span style="color:{color}">[{timestamp}] [{level}] {escaped_first} '
+                    f'<div style="color:{color}">[{timestamp}] [{level}] {escaped_first} '
                     f'<details><summary>Details</summary>'
                     f'<pre style="margin:0; white-space:pre-wrap;">{escaped_rest}</pre>'
-                    f'</details></span>'
+                    f'</details></div>'
                 )
             else:
-                html = f'<span style="color:{color}">[{timestamp}] [{level}] {html_module.escape(message)}</span>'
+                html = f'<div style="color:{color}">[{timestamp}] [{level}] {html_module.escape(message)}</div>'
         else:
             escaped = html_module.escape(message)
-            html = f'<span style="color:{color}">[{timestamp}] [{level}] {escaped}</span>'
+            html = f'<div style="color:{color}">[{timestamp}] [{level}] {escaped}</div>'
 
         self._log_entries.append({"level": level, "plain": plain, "html": html})
         if len(self._log_entries) > MAX_LOG_ENTRIES:
