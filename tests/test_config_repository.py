@@ -304,3 +304,134 @@ def test_playback_config_from_roundtrip():
     assert pc.articulation == 0.8
     assert pc.enable_vary_timing is True
     assert pc["articulation"] == 0.8
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: _resolve_type with list/dict (line 85)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_type_list_dict_returns_str():
+    """_resolve_type returns str for list[...] and dict[...] origin types."""
+    from config_repository import _resolve_type
+
+    assert _resolve_type(list[int]) == str
+    assert _resolve_type(dict[str, object]) == str
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: _build_field_meta failures (lines 94-98)
+# ---------------------------------------------------------------------------
+
+
+def test_build_field_meta_get_type_hints_fails(monkeypatch):
+    """_build_field_meta catches get_type_hints failure and uses empty hints."""
+    from config_repository import _build_field_meta
+
+    def _raise(*_a, **_kw):
+        raise Exception("boom")
+
+    monkeypatch.setattr("config_repository.get_type_hints", _raise)
+
+    import dataclasses
+
+    @dataclasses.dataclass
+    class _GoodClass:
+        name: str = "default"
+
+    meta = _build_field_meta(_GoodClass)
+    assert "name" in meta
+
+
+def test_build_field_meta_skips_private_fields():
+    """_build_field_meta skips fields starting with underscore."""
+    from config_repository import _build_field_meta
+    import dataclasses
+
+    @dataclasses.dataclass
+    class _WithPrivate:
+        name: str = "val"
+        _hidden: int = 42
+
+    meta = _build_field_meta(_WithPrivate)
+    assert "name" in meta
+    assert "_hidden" not in meta
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: _coerce_field with type(None) (lines 215-219)
+# ---------------------------------------------------------------------------
+
+
+def test_coerce_field_none_type_branch():
+    """_coerce_field handles type(None) via the Optional[str] fallback branch."""
+    from config_repository import _coerce_field, _FieldMeta
+
+    meta = _FieldMeta(cls_type=type(None))
+    # None value -> _coerce_optional_str returns None -> returns default
+    assert _coerce_field(None, meta, "fallback") == "fallback"
+    # Non-string -> _coerce_optional_str returns None -> returns default
+    assert _coerce_field(42, meta, "fallback") == "fallback"
+    # Blank string -> None -> returns default
+    assert _coerce_field("   ", meta, "fallback") == "fallback"
+    # Valid string -> passes through
+    assert _coerce_field("hello", meta, "fallback") == "hello"
+
+
+def test_coerce_field_str_returns_default_for_non_string():
+    """_coerce_field with str type returns default when value is not a string."""
+    cfg = Config.from_dict({"hotkey": 123})
+    assert cfg.hotkey == "f8"
+
+
+def test_coerce_field_catch_all_type():
+    """_coerce_field catch-all (line 219) handles unhandled types."""
+    from config_repository import _coerce_field, _FieldMeta
+
+    meta_list = _FieldMeta(cls_type=list)
+    # value matches tp -> returns value
+    assert _coerce_field([1, 2], meta_list, "default") == [1, 2]
+    # value doesn't match tp -> returns default
+    assert _coerce_field("not_a_list", meta_list, "default") == "default"
+
+    meta_dict = _FieldMeta(cls_type=dict)
+    assert _coerce_field({"a": 1}, meta_dict, None) == {"a": 1}
+    assert _coerce_field(42, meta_dict, None) is None
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: articulation migration > 1.0 (line 446)
+# ---------------------------------------------------------------------------
+
+
+def test_from_dict_migrates_articulation_above_one():
+    """Migration copies articulation as-is when its value is > 1.0."""
+    cfg = Config.from_dict({"articulation": 99.0})
+    assert cfg.value_articulation == 99.0
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: PlaybackConfig.__contains__ non-string (line 568)
+# ---------------------------------------------------------------------------
+
+
+def test_playback_config_contains_non_string():
+    """PlaybackConfig.__contains__ returns False for non-string keys."""
+    pc = PlaybackConfig(tempo=120.0)
+    assert (1 in pc) is False
+    assert (None in pc) is False
+    assert (0.5 in pc) is False
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: PlaybackConfig.__copy__ extra attrs (lines 590-591)
+# ---------------------------------------------------------------------------
+
+
+def test_playback_config_copy_includes_extra_attributes():
+    """__copy__ preserves extra attributes not in __annotations__."""
+    pc = PlaybackConfig(tempo=120.0)
+    pc["custom_extra"] = "extra_value"
+    copied = pc.__copy__()
+    assert copied.tempo == 120.0
+    assert copied["custom_extra"] == "extra_value"
