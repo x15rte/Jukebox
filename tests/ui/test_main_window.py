@@ -147,7 +147,7 @@ def test_update_playback_tab_appearance_locked_and_unlocked(window_factory, monk
     assert w.tabs.tabToolTip(0) == ""
 
 
-def test_on_tab_changed_when_locked_stops_and_switches(
+def test_on_tab_changed_never_stops_playback(
     window_factory, monkeypatch, tmp_path
 ):
     w = window_factory()
@@ -155,13 +155,14 @@ def test_on_tab_changed_when_locked_stops_and_switches(
     monkeypatch.setattr(w, "handle_stop", lambda: stop_calls.append(True))
 
     w.playback_state = "paused"
-    # Block signals so setCurrentIndex doesn't trigger _on_tab_changed as a side effect
     w.tabs.blockSignals(True)
-    w.tabs.setCurrentIndex(1)  # Visualizer tab (index 1) — not in stop list
+    w.tabs.setCurrentIndex(0)
     w.tabs.blockSignals(False)
-    w._on_tab_changed(0)  # Switching to Playback tab while locked
 
-    assert stop_calls == [True]
+    for idx in (0, 1, 2, 3):
+        w._on_tab_changed(idx)
+
+    assert stop_calls == [], "Tab changes should never trigger stop (controls are already disabled)"
 
 
 def test_on_log_save_to_file_toggled_enables_and_disables(window_factory, monkeypatch, tmp_path):

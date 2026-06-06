@@ -4,6 +4,7 @@ import sys
 import os
 import re
 import copy
+import random
 from datetime import datetime
 from pathlib import Path
 
@@ -30,6 +31,8 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QTextBrowser,
     QDialog,
+    QListWidget,
+    QAbstractItemView,
 )
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal as Signal, Qt
 from PyQt6.QtGui import QFont, QIcon, QColor, QCloseEvent
@@ -97,6 +100,13 @@ class MainWindow(QMainWindow):
         self.parsed_tempo_scale = 1.0
         self.current_notes = []
         self.total_song_duration_sec = 1.0
+        self.autoplay_folder: str | None = None
+        self.autoplay_file_list: list[str] = []
+        self.autoplay_current_index: int = -1
+        self.autoplay_next_timer: QTimer = QTimer()
+        self.autoplay_next_timer.setSingleShot(True)
+        self.autoplay_next_timer.timeout.connect(self._autoplay_play_current)
+        self._autoplay_stopping: bool = False
         self.playback_state = "stopped"
         self._log_entries = []
 
@@ -336,8 +346,8 @@ class MainWindow(QMainWindow):
             self.tabs.setTabToolTip(idx, tooltip)
 
     def _on_tab_changed(self, index: int) -> None:
-        if index in (0, 2, 3) and self._is_playback_locked():
-            self.handle_stop()
+        # All tabs are safe to browse during playback — editable controls are
+        # already disabled by set_controls_enabled(False) while playback runs.
         self._last_tab_index = index
 
     def _on_playback_state_changed(self, state: str) -> None:
@@ -465,12 +475,99 @@ class MainWindow(QMainWindow):
         file_layout = QVBoxLayout(self.file_input_widget)
         file_layout.setContentsMargins(0, 0, 0, 0)
         file_layout.setSpacing(theme.CONTROL_SPACING)
+
+        # Sub-mode: single file vs playlist folder
+        sub_row = QHBoxLayout()
+        self.input_mode_single_radio = QRadioButton("Single file")
+        self.input_mode_playlist_radio = QRadioButton("Playlist (Folder)")
+        self.input_mode_single_radio.setChecked(True)
+        self.input_mode_single_radio.toggled.connect(self._on_file_submode_changed)
+        self.input_mode_playlist_radio.toggled.connect(self._on_file_submode_changed)
+        sub_row.addWidget(self.input_mode_single_radio)
+        sub_row.addWidget(self.input_mode_playlist_radio)
+        sub_row.addStretch(1)
+        file_layout.addLayout(sub_row)
+
+        # Single-file panel
+        self.file_single_widget = QWidget()
+        single_layout = QVBoxLayout(self.file_single_widget)
+        single_layout.setContentsMargins(0, 0, 0, 0)
+        single_layout.setSpacing(theme.CONTROL_SPACING)
         self.file_path_label = QLabel("No file selected.")
         self.file_path_label.setStyleSheet("font-style: italic; color: grey;")
         browse_button = QPushButton("Browse MIDI file…")
         browse_button.clicked.connect(self.select_file)
-        file_layout.addWidget(self.file_path_label)
-        file_layout.addWidget(browse_button)
+        single_layout.addWidget(self.file_path_label)
+        single_layout.addWidget(browse_button)
+        file_layout.addWidget(self.file_single_widget)
+
+        # Playlist panel
+        self.file_playlist_widget = QWidget()
+        pl_layout = QVBoxLayout(self.file_playlist_widget)
+        pl_layout.setContentsMargins(0, 0, 0, 0)
+        pl_layout.setSpacing(theme.CONTROL_SPACING)
+
+        folder_row = QHBoxLayout()
+        self.autoplay_folder_label = QLabel("No folder selected.")
+        self.autoplay_folder_label.setStyleSheet("font-style: italic; color: grey;")
+        self.autoplay_browse_btn = QPushButton("Browse Folder…")
+        self.autoplay_browse_btn.clicked.connect(self._autoplay_browse_folder)
+        self.autoplay_reload_btn = QPushButton("Reload")
+        self.autoplay_reload_btn.setEnabled(False)
+        self.autoplay_reload_btn.clicked.connect(self._autoplay_scan_folder)
+        self.autoplay_shuffle_btn = QPushButton("Shuffle")
+        self.autoplay_shuffle_btn.setEnabled(False)
+        self.autoplay_shuffle_btn.clicked.connect(self._autoplay_shuffle)
+        folder_row.addWidget(self.autoplay_folder_label, 1)
+        folder_row.addWidget(self.autoplay_browse_btn)
+        folder_row.addWidget(self.autoplay_reload_btn)
+        folder_row.addWidget(self.autoplay_shuffle_btn)
+        pl_layout.addLayout(folder_row)
+
+        self.autoplay_file_listbox = QListWidget()
+        self.autoplay_file_listbox.setMaximumHeight(120)
+        self.autoplay_file_listbox.setSelectionMode(
+            QAbstractItemView.SelectionMode.NoSelection
+        )
+        self.autoplay_file_listbox.itemDoubleClicked.connect(
+            self._autoplay_jump_to_song
+        )
+        pl_layout.addWidget(self.autoplay_file_listbox)
+
+        self.autoplay_info_label = QLabel("")
+        self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+        pl_layout.addWidget(self.autoplay_info_label)
+
+        delay_row = QHBoxLayout()
+        delay_label = QLabel("Delay:")
+        self.autoplay_delay_spinbox = QDoubleSpinBox()
+        self.autoplay_delay_spinbox.setRange(0.0, 600.0)
+        self.autoplay_delay_spinbox.setSingleStep(0.5)
+        self.autoplay_delay_spinbox.setSuffix(" s")
+        self.autoplay_delay_spinbox.setDecimals(1)
+        self.autoplay_delay_spinbox.setValue(0.0)
+        self.autoplay_delay_spinbox.setToolTip("Fixed delay between songs")
+        random_label = QLabel("Random:")
+        self.autoplay_random_delay_spinbox = QDoubleSpinBox()
+        self.autoplay_random_delay_spinbox.setRange(0.0, 60.0)
+        self.autoplay_random_delay_spinbox.setSingleStep(0.5)
+        self.autoplay_random_delay_spinbox.setSuffix(" s")
+        self.autoplay_random_delay_spinbox.setDecimals(1)
+        self.autoplay_random_delay_spinbox.setValue(0.0)
+        self.autoplay_random_delay_spinbox.setToolTip(
+            "Extra random delay added on top of the fixed delay"
+        )
+        delay_row.addWidget(delay_label)
+        delay_row.addWidget(self.autoplay_delay_spinbox)
+        delay_row.addSpacing(12)
+        delay_row.addWidget(random_label)
+        delay_row.addWidget(self.autoplay_random_delay_spinbox)
+        delay_row.addStretch(1)
+        pl_layout.addLayout(delay_row)
+
+        file_layout.addWidget(self.file_playlist_widget)
+        self.file_playlist_widget.hide()
+
         layout.addWidget(self.file_input_widget)
 
         self.piano_input_widget = QWidget()
@@ -522,6 +619,282 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.use_88_key_check)
 
         return group
+
+    # ------------------------------------------------------------------
+    # Autoplay group (playlist / sequential folder playback)
+    # ------------------------------------------------------------------
+
+    def _autoplay_browse_folder(self):
+        if self.playback_controller.is_running:
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Folder with MIDI Files"
+        )
+        if folder:
+            self._set_autoplay_folder_path(folder)
+            self._autoplay_scan_folder()
+
+    def _set_autoplay_folder_path(self, folder_path: str | None):
+        self.autoplay_folder = folder_path
+        if folder_path:
+            self.autoplay_folder_label.setText(os.path.basename(folder_path))
+            self.autoplay_folder_label.setToolTip(folder_path)
+            self.autoplay_reload_btn.setEnabled(True)
+            self.autoplay_shuffle_btn.setEnabled(True)
+        else:
+            self.autoplay_folder_label.setText("No folder selected.")
+            self.autoplay_folder_label.setToolTip("")
+            self.autoplay_reload_btn.setEnabled(False)
+            self.autoplay_shuffle_btn.setEnabled(False)
+        self._save_config()
+
+    def _autoplay_scan_folder(self):
+        self.autoplay_next_timer.stop()
+        folder = self.autoplay_folder
+        if not folder:
+            return
+        folder_path = Path(folder)
+        midi_files = list(folder_path.glob("*.mid")) + list(folder_path.glob("*.midi"))
+        seen: set[str] = set()
+        unique: list[str] = []
+        for f in midi_files:
+            key = str(f).casefold()
+            if key not in seen:
+                seen.add(key)
+                unique.append(str(f.resolve()))
+        self.autoplay_file_list = sorted(unique, key=str.casefold)
+        self.autoplay_current_index = -1
+
+        self.autoplay_file_listbox.clear()
+        for fpath in self.autoplay_file_list:
+            self.autoplay_file_listbox.addItem(os.path.basename(fpath))
+
+        count = len(self.autoplay_file_list)
+        if count == 0:
+            self.autoplay_info_label.setText("No MIDI files found in folder.")
+            self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+            self.play_button.setEnabled(bool(self.selected_tracks_info))
+            self._set_current_file_labels(None)
+        else:
+            self.autoplay_info_label.setText(f"{count} MIDI file(s) found.")
+            self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+            self.play_button.setEnabled(True)
+            # Show the first file in the playlist on the bottom label
+            self._set_current_file_labels(self.autoplay_file_list[0])
+        self.add_log_message(
+            f"Autoplay: found {count} MIDI file(s) in folder."
+        )
+
+    def _autoplay_jump_to_song(self, item):
+        """Select a song in the playlist and preview it in the visualizer."""
+        row = self.autoplay_file_listbox.row(item)
+        if row < 0 or row >= len(self.autoplay_file_list):
+            return
+
+        # Cancel any pending auto-advance timer and stop current playback
+        self.autoplay_next_timer.stop()
+        self._autoplay_stopping = True
+        if self.playback_controller.is_running:
+            self.playback_controller.stop_and_wait(timeout_ms=3000)
+            QApplication.processEvents()
+        self._autoplay_stopping = False
+
+        self.autoplay_current_index = row
+        self._update_autoplay_highlight()
+        self._set_current_file_labels(self.autoplay_file_list[row])
+
+        # Parse and show visualizer preview (same as selecting a single file)
+        filepath = self.autoplay_file_list[row]
+        try:
+            if self._autoplay_select_tracks(filepath):
+                assert self.selected_tracks_info is not None
+                preview_notes = []
+                for track, role in self.selected_tracks_info:
+                    for note in track.notes:
+                        n = copy.deepcopy(note)
+                        if role == "Left Hand":
+                            n.hand = "left"
+                        elif role == "Right Hand":
+                            n.hand = "right"
+                        else:
+                            n.hand = "left" if n.pitch < 60 else "right"
+                        preview_notes.append(n)
+                preview_notes.sort(key=lambda n: n.start_time)
+                self.current_notes = preview_notes
+                total_dur = max(n.end_time for n in preview_notes) if preview_notes else 1.0
+                self.total_song_duration_sec = total_dur
+                self.timeline_widget.set_data(preview_notes, total_dur, self.parsed_tempo_map)
+                self.timeline_widget.set_position(0)
+                self._on_visual_scrub(0)
+                self._update_time_label(0, total_dur)
+                self.add_log_message(f"Selected: {os.path.basename(filepath)}")
+        except Exception as e:
+            self.add_log_message(f"Could not preview '{os.path.basename(filepath)}': {e}")
+
+    def _autoplay_shuffle(self):
+        self.autoplay_next_timer.stop()
+        if len(self.autoplay_file_list) < 2:
+            return
+        random.shuffle(self.autoplay_file_list)
+        self.autoplay_current_index = -1
+        self.autoplay_file_listbox.clear()
+        for fpath in self.autoplay_file_list:
+            self.autoplay_file_listbox.addItem(os.path.basename(fpath))
+        self._update_autoplay_highlight()
+        # Update bottom file label to the new first song
+        self._set_current_file_labels(self.autoplay_file_list[0])
+        self.add_log_message(
+            f"Playlist shuffled: {len(self.autoplay_file_list)} song(s)."
+        )
+
+    def _autoplay_select_tracks(self, filepath: str) -> bool:
+        """Parse a MIDI file and auto-select all non-drum tracks with Auto-Detect hand.
+        Returns True if at least one track was selected."""
+        tempo_scale = self.tempo_spinbox.value() / 100.0
+        tracks, tempo_map = MidiParser.parse_structure(filepath, tempo_scale)
+        self.parsed_tracks = tracks
+        self.parsed_tempo_map = tempo_map
+        self.parsed_tempo_scale = tempo_scale
+
+        selected = [(t, "Auto-Detect") for t in tracks if not t.is_drum]
+        if not selected:
+            self.add_log_message(
+                f"Autoplay: no playable tracks found in '{os.path.basename(filepath)}'."
+            )
+            return False
+
+        self.selected_tracks_info = selected
+        self.add_log_message(
+            f"Autoplay: selected {len(selected)} track(s) from '{os.path.basename(filepath)}'."
+        )
+        return True
+
+    def _autoplay_play_current(self) -> bool:
+        """Play the current song in the autoplay file list.
+        Skips files that fail to parse or prepare. Returns True if playback started."""
+        # Cancel any pending timer — this function is the handler itself, so if
+        # called manually while a timer is queued, prevent the timer from
+        # firing a duplicate run.
+        self.autoplay_next_timer.stop()
+
+        # If stop was pressed just before the timer fired, bail out.
+        if self._autoplay_stopping:
+            self._autoplay_stopping = False
+            return False
+        # Use a while-loop (not recursion) to skip past files that fail to parse.
+        while True:
+            if not (0 <= self.autoplay_current_index < len(self.autoplay_file_list)):
+                self.autoplay_current_index = -1
+                self._update_autoplay_highlight()
+                self.add_log_message("Autoplay: no more songs to play.")
+                return False
+
+            filepath = self.autoplay_file_list[self.autoplay_current_index]
+            filename = os.path.basename(filepath)
+
+            self._set_current_file_labels(filepath)
+
+            try:
+                if not self._autoplay_select_tracks(filepath):
+                    self.autoplay_current_index += 1
+                    continue
+            except Exception as e:
+                jukebox_logger.error(
+                    f"Autoplay: error parsing '{filename}': {e}", exc_info=True
+                )
+                self.add_log_message(
+                    f"Autoplay: skipping '{filename}' — parse error: {e}"
+                )
+                self.autoplay_current_index += 1
+                continue
+
+            config = self.gather_config()
+            if config is None:
+                return False
+
+            try:
+                assert self.selected_tracks_info is not None, (
+                    "selected_tracks_info should have been set by _autoplay_select_tracks"
+                )
+                final_notes, sections, compiled_events, total_dur, tempo_map = (
+                    PlaybackService.prepare_playback(
+                        filepath,
+                        self.selected_tracks_info,
+                        config,
+                        preparsed=(self.parsed_tracks, self.parsed_tempo_map)
+                        if self.parsed_tracks is not None
+                        and self.parsed_tempo_map is not None
+                        else None,
+                        preparsed_tempo_scale=self.parsed_tempo_scale,
+                    )
+                )
+            except Exception as e:
+                jukebox_logger.error(
+                    f"Autoplay: error preparing playback for '{filename}': {e}",
+                    exc_info=True,
+                )
+                self.add_log_message(
+                    f"Autoplay: skipping '{filename}' — prepare error: {e}"
+                )
+                self.autoplay_current_index += 1
+                continue
+
+            self.add_log_message(
+                f"Autoplay: playing ({self.autoplay_current_index + 1}"
+                f"/{len(self.autoplay_file_list)}) '{filename}'"
+            )
+            self.autoplay_info_label.setText(
+                f"▶ Playing {self.autoplay_current_index + 1}"
+                f"/{len(self.autoplay_file_list)}: {filename}"
+            )
+            self.autoplay_info_label.setStyleSheet("font-style: normal; color: #4FC3F7;")
+
+            self.current_notes = final_notes
+            config["start_offset"] = 0.0
+            self.timeline_widget.set_data(final_notes, total_dur, tempo_map)
+            self.total_song_duration_sec = total_dur
+            self.timeline_widget.set_position(0)
+            self._on_visual_scrub(0)
+
+            self.set_controls_enabled(False)
+            self.play_button.setEnabled(True)
+            self.stop_button.setEnabled(True)
+            self._update_autoplay_highlight()
+
+            started = self.playback_controller.start(
+                compiled_events,
+                config,
+                total_dur,
+                config.get("output_mode", "key"),
+                config.get("use_88_key_layout", False),
+                log_message=self.add_log_message,
+            )
+            if started:
+                return True
+            else:
+                self.set_controls_enabled(True)
+                return False
+
+    def _update_autoplay_highlight(self):
+        """Bold the currently-playing item in the playlist listbox."""
+        for i in range(self.autoplay_file_listbox.count()):
+            item = self.autoplay_file_listbox.item(i)
+            if item is not None:
+                font = item.font()
+                font.setBold(i == self.autoplay_current_index)
+                item.setFont(font)
+
+    def _on_file_submode_changed(self):
+        """Toggle between single-file and playlist sub-panels inside File (MIDI) mode."""
+        is_playlist = self.input_mode_playlist_radio.isChecked()
+        self.file_single_widget.setVisible(not is_playlist)
+        self.file_playlist_widget.setVisible(is_playlist)
+        self.autoplay_next_timer.stop()
+        # Reset autoplay state when switching away
+        if not is_playlist:
+            self.autoplay_current_index = -1
+            self._update_autoplay_highlight()
+        self._save_config()
 
     def _on_input_mode_changed(self):
         use_piano = self.input_mode_piano_radio.isChecked()
@@ -1252,6 +1625,17 @@ class MainWindow(QMainWindow):
         if self.playback_controller.is_running:
             self.toggle_playback_state()
             return
+
+        # Autoplay mode: start sequential folder playback
+        if self.input_mode_playlist_radio.isChecked() and self.autoplay_file_list:
+            # If a song was selected via double-click, start from there;
+            # otherwise, start from the beginning.
+            if self.autoplay_current_index < 0:
+                self.autoplay_current_index = 0
+            self._update_autoplay_highlight()
+            self._autoplay_play_current()
+            return
+
         config = self.gather_config()
         if not config:
             return
@@ -1317,8 +1701,20 @@ class MainWindow(QMainWindow):
             self.play_button.setEnabled(True)
 
     def handle_stop(self):
+        self._autoplay_stopping = self.playback_controller.is_running
         if self.playback_controller.is_running:
             self.playback_controller.stop()
+        # Cancel any pending auto-advance timer
+        self.autoplay_next_timer.stop()
+        if self.input_mode_playlist_radio.isChecked():
+            count = len(self.autoplay_file_list)
+            if count and self.autoplay_current_index >= 0:
+                name = os.path.basename(self.autoplay_file_list[self.autoplay_current_index])
+                self.autoplay_info_label.setText(f"Stopped: {name}")
+                self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+            elif count:
+                self.autoplay_info_label.setText(f"{count} MIDI file(s) found.")
+                self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
 
     def handle_reset(self):
         self.timeline_widget.set_position(0)
@@ -1333,7 +1729,44 @@ class MainWindow(QMainWindow):
         self.set_controls_enabled(True)
         self.stop_button.setEnabled(False)
 
+        # Don't auto-advance if Stop was pressed or a song jump was triggered
+        if self._autoplay_stopping:
+            self._autoplay_stopping = False
+            return
+
+        # Autoplay: advance to next song
+        if (
+            self.input_mode_playlist_radio.isChecked()
+            and self.autoplay_file_list
+            and self.autoplay_current_index >= 0
+        ):
+            self.autoplay_current_index += 1
+            if self.autoplay_current_index < len(self.autoplay_file_list):
+                delay = self.autoplay_delay_spinbox.value()
+                rand_delay = self.autoplay_random_delay_spinbox.value()
+                total_delay = delay + (random.uniform(0, rand_delay) if rand_delay > 0 else 0.0)
+                if total_delay > 0:
+                    next_name = os.path.basename(
+                        self.autoplay_file_list[self.autoplay_current_index]
+                    )
+                    self.autoplay_info_label.setText(
+                        f"Next song in {total_delay:.1f}s: {next_name}"
+                    )
+                    self.autoplay_info_label.setStyleSheet(
+                        "font-style: normal; color: grey;"
+                    )
+                    self.autoplay_next_timer.start(int(total_delay * 1000))
+                else:
+                    self._autoplay_play_current()
+            else:
+                self.add_log_message("Autoplay: all songs played.")
+                self.autoplay_info_label.setText("All songs played.")
+                self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+                self.autoplay_current_index = -1
+                self._update_autoplay_highlight()
+
     def closeEvent(self, a0: QCloseEvent) -> None:  # type: ignore[override]  # noqa: N802
+        self.autoplay_next_timer.stop()
         try:
             self._save_config()
         except Exception as e:

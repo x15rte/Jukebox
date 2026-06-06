@@ -120,8 +120,12 @@ class DummyGeometry:
 class DummyWidget:
     def __init__(self):
         self.input_mode_file_radio = DummyRadio()
+        self.input_mode_single_radio = DummyRadio()
+        self.input_mode_playlist_radio = DummyRadio()
         self.input_mode_piano_radio = DummyRadio()
         self.file_input_widget = DummyFlagWidget()
+        self.file_single_widget = DummyFlagWidget()
+        self.file_playlist_widget = DummyFlagWidget()
         self.piano_input_widget = DummyFlagWidget()
         self._playback_file_only_widget = DummyFlagWidget()
         self.humanization_group = DummyFlagWidget()
@@ -137,6 +141,13 @@ class DummyWidget:
         self.hk_label = DummyHKLabel()
         self.hotkey_manager = DummyHotkeyManager()
         self.restore_calls = []
+        self._saved = []
+
+    def _on_file_submode_changed(self):
+        self._saved.append(("file_submode", self.input_mode_playlist_radio.isChecked()))
+
+    def _save_config(self):
+        self._saved.append(("save_config", None))
 
     def _update_88_key_visibility(self):
         return None

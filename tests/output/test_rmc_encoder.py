@@ -570,4 +570,46 @@ def test_import_leaves_keyboard_none_when_pynput_missing(monkeypatch):
         assert mod._kb is None
         assert mod._keyboard is None
     finally:
+        monkeypatch.undo()
+        importlib.reload(rmc)
+
+
+def test_import_linux_path_pynput_available(monkeypatch):
+    """Cover Linux code path: pynput import succeeds, _precomputed_keys populated."""
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+
+    mod = importlib.reload(rmc)
+    try:
+        assert mod._kb is not None
+        assert mod._keyboard is not None
+        # _precomputed_keys populated from VK_CODES["Linux"] (empty) ->
+        # falls back to _platform_map from VK_CODES["Linux"].
+        # Since VK_CODES has no "Linux" key, _platform_map is {} and
+        # _precomputed_keys is also {}.  The key assertion is that line 202
+        # executed at all (tested by _kb not being None).
+        assert isinstance(mod._precomputed_keys, dict)
+    finally:
+        monkeypatch.undo()
         importlib.reload(mod)
+
+
+def test_import_linux_path_pynput_missing(monkeypatch):
+    """Cover Linux code path: pynput import fails, _kb stays None."""
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "pynput":
+            raise ImportError("missing pynput")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    mod = importlib.reload(rmc)
+    try:
+        assert mod._kb is None
+        assert mod._keyboard is None
+    finally:
+        monkeypatch.undo()
+        importlib.reload(rmc)

@@ -33,6 +33,12 @@ class Config:
     input_mode: str = "file"
     midi_input_device: Optional[str] = None
 
+    # Autoplay
+    autoplay_folder: Optional[str] = None
+    autoplay_mode: bool = False
+    autoplay_delay: float = 0.0
+    autoplay_random_delay: float = 0.0
+
     # Humanization
     select_all_humanization: bool = False
     simulate_hands: bool = False
@@ -66,6 +72,8 @@ class Config:
             d.pop("window_geometry", None)
         if d.get("midi_input_device") is None:
             d.pop("midi_input_device", None)
+        if d.get("autoplay_folder") is None:
+            d.pop("autoplay_folder", None)
         return d
 
     def to_runtime_playback_dict(self) -> Dict[str, Any]:
@@ -144,6 +152,8 @@ class Config:
             "value_hand_drift_decay",
             "value_mistake_chance",
             "value_tempo_sway_intensity",
+            "autoplay_delay",
+            "autoplay_random_delay",
         }
         for key in float_fields:
             if key in filtered:
@@ -187,6 +197,10 @@ class Config:
             filtered["midi_input_device"] = _coerce_optional_str(
                 filtered["midi_input_device"]
             )
+        if "autoplay_folder" in filtered:
+            filtered["autoplay_folder"] = _coerce_optional_str(
+                filtered["autoplay_folder"]
+            )
 
         config = cls(**filtered)
         config.tempo = _clamp(config.tempo, 10.0, 200.0)
@@ -197,6 +211,8 @@ class Config:
         config.value_tempo_sway_intensity = _clamp(
             config.value_tempo_sway_intensity, 0.0, 0.1
         )
+        config.autoplay_delay = _clamp(config.autoplay_delay, 0.0, 600.0)
+        config.autoplay_random_delay = _clamp(config.autoplay_random_delay, 0.0, 60.0)
         config.opacity = int(_clamp(config.opacity, 20, 100))
         return config
 

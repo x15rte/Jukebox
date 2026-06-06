@@ -55,6 +55,26 @@ CONFIG_UI_BINDINGS = [
         lambda w, v: w.midi_input_combo.setCurrentText(v or ""),
     ),
     (
+        "autoplay_folder",
+        lambda w: w.autoplay_folder,
+        lambda w, v: w._set_autoplay_folder_path(v),
+    ),
+    (
+        "autoplay_mode",
+        lambda w: w.input_mode_playlist_radio.isChecked(),
+        lambda w, v: _set_file_submode(w, v),
+    ),
+    (
+        "autoplay_delay",
+        lambda w: w.autoplay_delay_spinbox.value(),
+        lambda w, v: w.autoplay_delay_spinbox.setValue(v),
+    ),
+    (
+        "autoplay_random_delay",
+        lambda w: w.autoplay_random_delay_spinbox.value(),
+        lambda w, v: w.autoplay_random_delay_spinbox.setValue(v),
+    ),
+    (
         "select_all_humanization",
         lambda w: w.select_all_humanization_check.isChecked(),
         lambda w, v: w.select_all_humanization_check.setChecked(v),
@@ -218,6 +238,19 @@ def _apply_input_mode(widget, value):
         widget._refresh_midi_inputs(show_dialog=False)
     elif not use_piano and getattr(widget, "midi_input_active", False):
         widget._disconnect_midi_input()
+
+
+def _set_file_submode(widget, use_playlist: bool):
+    """Set the single-file vs playlist sub-radio under File (MIDI) mode."""
+    widget.input_mode_single_radio.blockSignals(True)
+    widget.input_mode_playlist_radio.blockSignals(True)
+    try:
+        widget.input_mode_single_radio.setChecked(not use_playlist)
+        widget.input_mode_playlist_radio.setChecked(use_playlist)
+    finally:
+        widget.input_mode_single_radio.blockSignals(False)
+        widget.input_mode_playlist_radio.blockSignals(False)
+    widget._on_file_submode_changed()
 
 
 def _set_output_mode_combo(widget, value):
