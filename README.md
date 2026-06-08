@@ -69,7 +69,7 @@ Alternatively, if you prefer to use the pre-built executable from the **Immutabl
 pyinstaller ./Jukebox.spec
 ```
 
-# 📸 Screenshots 
+# 📸 Screenshots (out of date)
 <img alt="Image" src="https://github.com/user-attachments/assets/f0b03367-02f4-4b12-92e8-3d5695be2742" />
 <img alt="Image" src="https://github.com/user-attachments/assets/99e310f9-cac9-4dfa-810b-479f93d9f961" />
 <img alt="Image" src="https://github.com/user-attachments/assets/93c3ab54-2e89-4a4a-b13b-1339f3806aa9" />
