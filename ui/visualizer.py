@@ -59,7 +59,7 @@ class PianoWidget(QWidget):
         black_key_width = key_width * 0.65
         black_key_height = height * 0.6
 
-        t = theme.get_dark_cyber_theme()
+        t = theme.get_theme()
 
         white_brush = QBrush(t.piano.white_key)
         black_brush = QBrush(t.piano.black_key)
@@ -132,7 +132,7 @@ class TimelineWidget(QWidget):
             None  # Measure (start, end) times; avoid recompute in paint.
         )
 
-        t = theme.get_dark_cyber_theme()
+        t = theme.get_theme()
 
         self.bg_color = t.visualizer.background
         self.left_hand_color = t.visualizer.left_hand

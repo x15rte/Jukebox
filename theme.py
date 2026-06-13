@@ -140,24 +140,34 @@ class Theme:
     qss: str
 
 
+_theme_cache: Theme | None = None
+
+
+def get_theme() -> Theme:
+    """Return the cached dark-cyber theme instance (lazy-init)."""
+    global _theme_cache
+    if _theme_cache is None:
+        _theme_cache = get_dark_cyber_theme()
+    return _theme_cache
+
 def get_dark_cyber_theme() -> Theme:
     """Return a dark, colorful theme: neutral dark base with clean, non-flashy accents."""
-    # Base colors as hex strings (for QSS / HTML); neutral deep gray without purple tint.
-    background_main = "#121216"
-    background_panel = "#1A1A21"
-    background_panel_alt = "#23232B"
-    border_subtle = "#383843"
+    # Base colors as hex strings (for QSS / HTML); pure black with neutral grays.
+    background_main = "#121214"
+    background_panel = "#1C1C20"
+    background_panel_alt = "#222228"
+    border_subtle = "#3C3C46"
 
-    text_primary = "#F5F5F7"
-    text_secondary = "#D0D0D8"
-    text_muted = "#9292A0"
+    text_primary = "#EBEBF0"
+    text_secondary = "#AAAAB4"
+    text_muted = "#888896"
 
-    # Accent colors: primarily blue, teal, and orange; avoid heavy purple and flashy gradients.
-    accent_primary = "#4F9DFF"  # bright blue
+    # Accent colors: orange primary, teal secondary, standard green/red.
+    accent_primary = "#EF6C4D"  # orange
     accent_secondary = "#22C1B5"  # teal
     accent_success = "#5EC96B"  # green
-    accent_warning = "#F6AD55"  # orange
-    accent_error = "#F56565"  # red
+    accent_warning = "#E6A23C"  # amber
+    accent_error = "#F56C6C"  # red
 
     visualizer = VisualizerColors(
         background=QColor(24, 24, 28),

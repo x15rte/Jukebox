@@ -81,11 +81,7 @@ class MainWindow(QMainWindow):
         self._app_version = app_version
         self.setWindowTitle(f"{APP_NAME} ({app_version})" if app_version else APP_NAME)
         self.setMinimumSize(780, 520)
-        self.setStyleSheet(
-            "QWidget { background-color: rgb(18, 18, 20); color: rgb(235, 235, 240); }"
-            "QGroupBox { border: 1px solid rgb(60,60,70); border-radius: 6px; margin-top: 8px; }"
-            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; font-weight: 600; }"
-        )
+        self.setStyleSheet(theme.get_theme().qss)
 
         self.midi_input_thread = None
         self.midi_input_worker = None
@@ -163,6 +159,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._check_macos_accessibility)
 
     def _setup_ui(self):
+
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
@@ -253,7 +250,6 @@ class MainWindow(QMainWindow):
         self.log_filter_edit.setPlaceholderText("Type to filter log...")
         self.log_filter_edit.textChanged.connect(self._on_log_filter_text_changed)
         self.log_filter_status = QLabel("")
-        self.log_filter_status.setStyleSheet("color: gray;")
         self.log_auto_scroll_check = QCheckBox("Auto-scroll")
         self.log_auto_scroll_check.setChecked(True)
         self.log_wrap_check = QCheckBox("Wrap")
@@ -452,7 +448,7 @@ class MainWindow(QMainWindow):
 
     def _create_info_icon(self, tooltip_text: str) -> QLabel:
         label = QLabel("\u24d8")
-        label.setStyleSheet("color: gray; font-weight: bold;")
+        label.setStyleSheet(f"color: {theme.get_theme().text_muted}; font-weight: bold;")
         label.setToolTip(tooltip_text)
         return label
 
@@ -513,7 +509,7 @@ class MainWindow(QMainWindow):
         single_layout.setContentsMargins(0, 0, 0, 0)
         single_layout.setSpacing(theme.CONTROL_SPACING)
         self.file_path_label = QLabel("No file selected.")
-        self.file_path_label.setStyleSheet("font-style: italic; color: grey;")
+        self.file_path_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
         browse_button = QPushButton("Browse MIDI file…")
         browse_button.clicked.connect(self.select_file)
         single_layout.addWidget(self.file_path_label)
@@ -528,7 +524,7 @@ class MainWindow(QMainWindow):
 
         folder_row = QHBoxLayout()
         self.autoplay_folder_label = QLabel("No folder selected.")
-        self.autoplay_folder_label.setStyleSheet("font-style: italic; color: grey;")
+        self.autoplay_folder_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
         self.autoplay_browse_btn = QPushButton("Browse Folder…")
         self.autoplay_browse_btn.clicked.connect(self._autoplay_browse_folder)
         self.autoplay_reload_btn = QPushButton("Reload")
@@ -554,7 +550,7 @@ class MainWindow(QMainWindow):
         pl_layout.addWidget(self.autoplay_file_listbox)
 
         self.autoplay_info_label = QLabel("")
-        self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+        self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
         pl_layout.addWidget(self.autoplay_info_label)
 
         delay_row = QHBoxLayout()
@@ -615,7 +611,7 @@ class MainWindow(QMainWindow):
         piano_layout.addLayout(control_row)
 
         self.midi_input_status_label = QLabel("Piano input disabled.")
-        self.midi_input_status_label.setStyleSheet("font-style: italic; color: grey;")
+        self.midi_input_status_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
         piano_layout.addWidget(self.midi_input_status_label)
 
         layout.addWidget(self.piano_input_widget)
@@ -723,12 +719,12 @@ class MainWindow(QMainWindow):
         count = len(self.autoplay_file_list)
         if count == 0:
             self.autoplay_info_label.setText("No MIDI files found in folder.")
-            self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+            self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
             self.play_button.setEnabled(bool(self.selected_tracks_info))
             self._set_current_file_labels(None)
         else:
             self.autoplay_info_label.setText(f"{count} MIDI file(s) found.")
-            self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+            self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
             self.play_button.setEnabled(True)
             # Show the first file in the playlist on the bottom label
             self._set_current_file_labels(self.autoplay_file_list[0])
@@ -898,7 +894,7 @@ class MainWindow(QMainWindow):
                 f"▶ Playing {self.autoplay_current_index + 1}"
                 f"/{len(self.autoplay_file_list)}: {filename}"
             )
-            self.autoplay_info_label.setStyleSheet("font-style: normal; color: #4FC3F7;")
+            self.autoplay_info_label.setStyleSheet(f"font-style: normal; color: {theme.get_theme().accent_primary};")
 
             self.current_notes = final_notes
             config["start_offset"] = 0.0
@@ -1441,7 +1437,7 @@ class MainWindow(QMainWindow):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         plain = f"[{timestamp}] [{level}] {message}"
 
-        log_colors = theme.get_dark_cyber_theme().logs
+        log_colors = theme.get_theme().logs
         color_map = {
             "DEBUG": log_colors.debug,
             "INFO": log_colors.info,
@@ -1793,10 +1789,10 @@ class MainWindow(QMainWindow):
             if count and self.autoplay_current_index >= 0:
                 name = os.path.basename(self.autoplay_file_list[self.autoplay_current_index])
                 self.autoplay_info_label.setText(f"Stopped: {name}")
-                self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+                self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
             elif count:
                 self.autoplay_info_label.setText(f"{count} MIDI file(s) found.")
-                self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+                self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
 
     def handle_reset(self):
         self.timeline_widget.set_position(0)
@@ -1835,7 +1831,7 @@ class MainWindow(QMainWindow):
                         f"Next song in {total_delay:.1f}s: {next_name}"
                     )
                     self.autoplay_info_label.setStyleSheet(
-                        "font-style: normal; color: grey;"
+                        f"font-style: normal; color: {theme.get_theme().text_muted};"
                     )
                     self.autoplay_next_timer.start(int(total_delay * 1000))
                 else:
@@ -1843,7 +1839,7 @@ class MainWindow(QMainWindow):
             else:
                 self.add_log_message("Autoplay: all songs played.")
                 self.autoplay_info_label.setText("All songs played.")
-                self.autoplay_info_label.setStyleSheet("font-style: italic; color: grey;")
+                self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
                 self.autoplay_current_index = -1
                 self._update_autoplay_highlight()
 
