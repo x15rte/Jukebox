@@ -895,13 +895,21 @@ class MainWindow(QMainWindow):
                 return False
 
     def _update_autoplay_highlight(self):
-        """Bold the currently-playing item in the playlist listbox."""
+        """Bold the currently-playing item in the playlist listbox and scroll to it."""
         for i in range(self.autoplay_file_listbox.count()):
             item = self.autoplay_file_listbox.item(i)
             if item is not None:
                 font = item.font()
                 font.setBold(i == self.autoplay_current_index)
                 item.setFont(font)
+        # Scroll to the currently playing item so it stays visible
+        if 0 <= self.autoplay_current_index < self.autoplay_file_listbox.count():
+            target = self.autoplay_file_listbox.item(self.autoplay_current_index)
+            if target is not None:
+                self.autoplay_file_listbox.scrollToItem(
+                    target,
+                    QAbstractItemView.ScrollHint.EnsureVisible,
+                )
 
     def _on_file_submode_changed(self):
         """Toggle between single-file and playlist sub-panels inside File (MIDI) mode."""
