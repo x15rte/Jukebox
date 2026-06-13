@@ -26,7 +26,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
-from typing import Any, ClassVar, Dict, Iterator, List, Optional, Set, Tuple, Union, get_type_hints
+from typing import Any, ClassVar, Dict, Iterator, Optional, Set, Tuple, Union, get_type_hints
 
 
 CONFIG_DIR_NAME = ".jukebox_piano"
@@ -158,12 +158,6 @@ def _coerce_int(value: Any, default: int) -> int:
     return default
 
 
-def _sanitize_choice(value: Any, allowed: Set[str], default: str) -> str:
-    if not isinstance(value, str):
-        return default
-    candidate = value.strip()
-    return candidate if candidate in allowed else default
-
 
 def _coerce_optional_str(value: Any) -> Optional[str]:
     if value is None:
@@ -212,7 +206,7 @@ def _coerce_field(value: Any, meta: _FieldMeta, default: Any) -> Any:
         return default
 
     # Optional[str] — resolved type is str but we handle None separately
-    if tp is type(None) or tp is str:
+    if tp is type(None):
         coerced = _coerce_optional_str(value)
         return coerced if coerced is not None else default
 
@@ -581,15 +575,6 @@ class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
         except KeyError:
             return default
 
-    def __copy__(self) -> "PlaybackConfig":
-        result = PlaybackConfig()
-        for k in self.__annotations__:
-            if hasattr(self, k):
-                setattr(result, k, getattr(self, k))
-        for k in self.__dict__:
-            if k not in self.__annotations__:
-                object.__setattr__(result, k, getattr(self, k))
-        return result
 
     def __repr__(self) -> str:
         items = ", ".join(

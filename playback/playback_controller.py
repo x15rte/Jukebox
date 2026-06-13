@@ -186,8 +186,6 @@ class PlaybackController(QObject):
             return  # Already cleaned up (e.g. stop() called after thread died)
 
         thread = self._thread
-        player = self._player
-        backend = self._backend
 
         self._player = None
         self._backend = None

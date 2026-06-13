@@ -170,7 +170,6 @@ class PedalGenerator:
             return events
 
         PEDAL_LAG = 0.05  # Seconds between pedal up and down when repedaling.
-        SAFE_INTERVALS = {0, 3, 4, 5, 7}  # Unison, m3, M3, P4, P5, octave; keep pedal.
         UNSAFE_INTERVALS = {1, 6}  # m2, tritone; repedal to avoid clash.
 
         for i in range(len(driver_notes)):

@@ -242,10 +242,6 @@ def test_update_playback_tab_appearance_tabbar_none_returns_early(
     w._update_playback_tab_appearance()
 
 
-def test_create_info_icon_sets_tooltip(window_factory, monkeypatch, tmp_path):
-    w = window_factory()
-    icon = w._create_info_icon("tip")
-    assert icon.toolTip() == "tip"
 
 
 def test_original_pedal_tooltip_matches_raw_pedal_humanizer_behavior(
@@ -260,11 +256,6 @@ def test_original_pedal_tooltip_matches_raw_pedal_humanizer_behavior(
     assert "Falls back to Automatic if none found" in tooltip
 
 
-def test_on_tab_changed_unlocked_updates_last_index(window_factory, monkeypatch, tmp_path):
-    w = window_factory()
-    w.playback_state = "stopped"
-    w._on_tab_changed(2)
-    assert w._last_tab_index == 2
 
 
 def test_reset_controls_to_default_logs_and_calls_resets(window_factory, monkeypatch, tmp_path):

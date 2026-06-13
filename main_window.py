@@ -2,7 +2,6 @@
 
 import sys
 import os
-import re
 import copy
 import random
 from datetime import datetime
@@ -35,10 +34,9 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
 )
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal as Signal, Qt
-from PyQt6.QtGui import QFont, QIcon, QColor, QCloseEvent
+from PyQt6.QtGui import QFont, QColor, QCloseEvent
 import mido
 
-from models import Note
 from core import MidiParser
 from ui import (
     PianoWidget,
@@ -139,7 +137,6 @@ class MainWindow(QMainWindow):
         except ValueError as e:
             raise RuntimeError(f"Invalid config UI bindings: {e}") from e
 
-        self._last_tab_index = 0
 
         self.playback_controller = PlaybackController(self)
         self.playback_controller.status_updated.connect(self._on_status_updated)
@@ -363,7 +360,7 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         # All tabs are safe to browse during playback — editable controls are
         # already disabled by set_controls_enabled(False) while playback runs.
-        self._last_tab_index = index
+        pass
 
     def _on_playback_state_changed(self, state: str) -> None:
         self.playback_state = state
@@ -438,6 +435,30 @@ class MainWindow(QMainWindow):
 
         self.time_label.setText(f"{fmt(current)} / {fmt(total)}")
 
+    def _build_preview_notes(self, tempo_map) -> None:
+        """Build self.current_notes preview from self.selected_tracks_info and update timeline."""
+        if self.selected_tracks_info is None:
+            return
+        preview_notes = []
+        for track, role in self.selected_tracks_info:
+            for note in track.notes:
+                n = copy.deepcopy(note)
+                if role == "Left Hand":
+                    n.hand = "left"
+                elif role == "Right Hand":
+                    n.hand = "right"
+                else:
+                    n.hand = "left" if n.pitch < 60 else "right"
+                preview_notes.append(n)
+        preview_notes.sort(key=lambda n: n.start_time)
+        self.current_notes = preview_notes
+        total_dur = max(n.end_time for n in preview_notes) if preview_notes else 1.0
+        self.total_song_duration_sec = total_dur
+        self.timeline_widget.set_data(preview_notes, total_dur, tempo_map)
+        self.timeline_widget.set_position(0)
+        self._on_visual_scrub(0)
+        self._update_time_label(0, total_dur)
+
     def _copy_log_to_clipboard(self):
         clipboard = QApplication.clipboard()
         if clipboard is not None:
@@ -446,11 +467,6 @@ class MainWindow(QMainWindow):
         if sb is not None:
             sb.showMessage("Log copied to clipboard!", 2000)
 
-    def _create_info_icon(self, tooltip_text: str) -> QLabel:
-        label = QLabel("\u24d8")
-        label.setStyleSheet(f"color: {theme.get_theme().text_muted}; font-weight: bold;")
-        label.setToolTip(tooltip_text)
-        return label
 
     def _create_slider_and_spinbox(
         self, min_val, max_val, default_val, text_suffix="", factor=10000.0, decimals=4
@@ -756,25 +772,7 @@ class MainWindow(QMainWindow):
             if self._autoplay_select_tracks(filepath):
                 if self.selected_tracks_info is None:
                     return
-                preview_notes = []
-                for track, role in self.selected_tracks_info:
-                    for note in track.notes:
-                        n = copy.deepcopy(note)
-                        if role == "Left Hand":
-                            n.hand = "left"
-                        elif role == "Right Hand":
-                            n.hand = "right"
-                        else:
-                            n.hand = "left" if n.pitch < 60 else "right"
-                        preview_notes.append(n)
-                preview_notes.sort(key=lambda n: n.start_time)
-                self.current_notes = preview_notes
-                total_dur = max(n.end_time for n in preview_notes) if preview_notes else 1.0
-                self.total_song_duration_sec = total_dur
-                self.timeline_widget.set_data(preview_notes, total_dur, self.parsed_tempo_map)
-                self.timeline_widget.set_position(0)
-                self._on_visual_scrub(0)
-                self._update_time_label(0, total_dur)
+                self._build_preview_notes(self.parsed_tempo_map)
                 self.add_log_message(f"Selected: {os.path.basename(filepath)}")
         except Exception as e:
             self.add_log_message(f"Could not preview '{os.path.basename(filepath)}': {e}")
@@ -1674,25 +1672,7 @@ class MainWindow(QMainWindow):
             self.play_button.setEnabled(True)
             self.reset_button.setEnabled(True)
 
-            preview_notes = []
-            for track, role in self.selected_tracks_info:
-                for note in track.notes:
-                    n = copy.deepcopy(note)
-                    if role == "Left Hand":
-                        n.hand = "left"
-                    elif role == "Right Hand":
-                        n.hand = "right"
-                    else:
-                        n.hand = "left" if n.pitch < 60 else "right"
-                    preview_notes.append(n)
-            preview_notes.sort(key=lambda n: n.start_time)
-            self.current_notes = preview_notes
-            total_dur = max(n.end_time for n in preview_notes) if preview_notes else 1.0
-            self.total_song_duration_sec = total_dur
-            self.timeline_widget.set_data(preview_notes, total_dur, tempo_map)
-            self.timeline_widget.set_position(0)
-            self._on_visual_scrub(0)
-            self._update_time_label(0, total_dur)
+            self._build_preview_notes(tempo_map)
             self.tabs.setCurrentIndex(1)
         else:
             self.add_log_message("Track selection cancelled.")

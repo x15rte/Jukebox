@@ -36,18 +36,18 @@ class TrackSelectionDialog(QDialog):
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(
+        table = QTableWidget()
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels(
             ["Play", "Track Name", "Instrument", "Notes", "Hand Assignment"]
         )
-        hdr = self.table.horizontalHeader()
+        hdr = table.horizontalHeader()
         if hdr is not None:
             hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        layout.addWidget(self.table)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        layout.addWidget(table)
 
-        self.table.setRowCount(len(self.tracks))
+        table.setRowCount(len(self.tracks))
         self.checkboxes = []
         self.role_combos = []
 
@@ -60,20 +60,20 @@ class TrackSelectionDialog(QDialog):
                 Qt.CheckState.Unchecked if track.is_drum else Qt.CheckState.Checked
             )
             check_item.setCheckState(check_state)
-            self.table.setItem(i, 0, check_item)
+            table.setItem(i, 0, check_item)
             self.checkboxes.append(check_item)
 
             name_item = QTableWidgetItem(track.name)
             name_font = name_item.font()
             name_font.setFamily("Segoe UI Emoji")
             name_item.setFont(name_font)
-            self.table.setItem(i, 1, name_item)
+            table.setItem(i, 1, name_item)
 
-            self.table.setItem(i, 2, QTableWidgetItem(track.instrument_name))
-            self.table.setItem(i, 3, QTableWidgetItem(str(track.note_count)))
+            table.setItem(i, 2, QTableWidgetItem(track.instrument_name))
+            table.setItem(i, 3, QTableWidgetItem(str(track.note_count)))
             combo = QComboBox()
             combo.addItems(["Auto-Detect", "Left Hand", "Right Hand"])
-            self.table.setCellWidget(i, 4, combo)
+            table.setCellWidget(i, 4, combo)
             self.role_combos.append(combo)
 
         buttons = QDialogButtonBox(

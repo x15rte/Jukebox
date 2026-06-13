@@ -79,23 +79,6 @@ def test_send_pedal_uses_sentinel(monkeypatch):
     assert (c, d) == (10, 7)
 
 
-def test_process_mido_message_dispatches(monkeypatch):
-    calls = []
-    monkeypatch.setattr(rmc, "send_note_message", lambda n, v, off: calls.append(("note", n, v, off)))
-    monkeypatch.setattr(rmc, "send_pedal", lambda v: calls.append(("pedal", v)))
-
-    rmc.process_mido_message(SimpleNamespace(type="note_on", note=60, velocity=100))
-    rmc.process_mido_message(SimpleNamespace(type="note_on", note=60, velocity=0))
-    rmc.process_mido_message(SimpleNamespace(type="note_off", note=61, velocity=0))
-    rmc.process_mido_message(SimpleNamespace(type="control_change", control=64, value=70))
-    rmc.process_mido_message(SimpleNamespace(type="clock"))
-
-    assert calls[0] == ("note", 60, 100, False)
-    assert calls[1] == ("note", 60, 0, True)
-    assert calls[2] == ("note", 61, 0, True)
-    assert calls[3] == ("pedal", 70)
-
-
 def test_encode_and_send_message_falls_back_when_batched_send_fails(monkeypatch):
     tapped = []
     monkeypatch.setattr(rmc, "ensure_numlock_on", lambda: None)
@@ -510,15 +493,6 @@ def test_send_note_message_note_off_uses_zero_velocity_digits(monkeypatch):
     assert sent == [(6, 1, 0, 0)]
 
 
-def test_process_mido_message_note_missing_and_non_pedal_cc(monkeypatch):
-    calls = []
-    monkeypatch.setattr(rmc, "send_note_message", lambda *a: calls.append(("note", a)))
-    monkeypatch.setattr(rmc, "send_pedal", lambda v: calls.append(("pedal", v)))
-
-    rmc.process_mido_message(SimpleNamespace(type="note_on", velocity=100))
-    rmc.process_mido_message(SimpleNamespace(type="control_change", control=1, value=70))
-
-    assert calls == []
 
 
 def test_encode_note_components_note_off_and_clamped_velocity():

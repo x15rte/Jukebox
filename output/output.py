@@ -303,43 +303,11 @@ class KeyboardBackend(OutputBackend):
         if self._windows_transport is not None:
             self._windows_transport.key_down(key_name)
             return
-        pdi = self._pdi
-        if pdi is None:
-            return
-        try:
-            pdi.keyDown(key_name, _pause=False)
-        except TypeError:
-            try:
-                pdi.keyDown(key_name)
-            except Exception as exc:
-                raise OutputBackendSendError(
-                    f"Windows KEY mode failed to press '{key_name}': {exc}"
-                ) from exc
-        except Exception as exc:
-            raise OutputBackendSendError(
-                f"Windows KEY mode failed to press '{key_name}': {exc}"
-            ) from exc
 
     def _pdi_key_up(self, key_name: str) -> None:
         if self._windows_transport is not None:
             self._windows_transport.key_up(key_name)
             return
-        pdi = self._pdi
-        if pdi is None:
-            return
-        try:
-            pdi.keyUp(key_name, _pause=False)
-        except TypeError:
-            try:
-                pdi.keyUp(key_name)
-            except Exception as exc:
-                raise OutputBackendSendError(
-                    f"Windows KEY mode failed to release '{key_name}': {exc}"
-                ) from exc
-        except Exception as exc:
-            raise OutputBackendSendError(
-                f"Windows KEY mode failed to release '{key_name}': {exc}"
-            ) from exc
 
     def _release_key_if_unused(self, base_key: str) -> None:
         if not self._active_pitches.get(base_key):
@@ -362,8 +330,7 @@ class KeyboardBackend(OutputBackend):
         jukebox_logger.error(f"{context}: {exc}", exc_info=True)
 
     def _windows_key_repress_delay(self) -> None:
-        if _WINDOWS_KEY_REPRESS_DELAY > 0:
-            time.sleep(_WINDOWS_KEY_REPRESS_DELAY)
+        time.sleep(_WINDOWS_KEY_REPRESS_DELAY)
 
     def note_on(self, pitch: int, velocity: int) -> None:
         data = self._mapper.get_key_data(pitch)
@@ -441,20 +408,6 @@ class KeyboardBackend(OutputBackend):
             self._windows_transport.send_batch(batch)
             return
 
-        if self._use_pydirectinput and self._pdi is not None:
-            pressed_modifiers: List[str] = []
-            try:
-                for mod in modifiers:
-                    mod_name = self._modifier_name(mod)
-                    if mod_name is None:
-                        continue
-                    self._pdi_key_down(mod_name)
-                    pressed_modifiers.append(mod_name)
-                self._pdi_key_down(base_key)
-            finally:
-                for mod_name in reversed(pressed_modifiers):
-                    self._pdi_key_up(mod_name)
-            return
 
         try:
             if self._kb is not None:

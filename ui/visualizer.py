@@ -12,7 +12,7 @@ from PyQt6.QtGui import (
     QMouseEvent,
     QResizeEvent,
 )
-from typing import List, Optional
+from typing import List
 from models import Note
 from core import TempoMap
 from logger_core import jukebox_logger
@@ -33,11 +33,6 @@ class PianoWidget(QWidget):
         self.white_keys_count = 52
         self.black_keys = {1, 3, 6, 8, 10}  # Semitones that are black keys (mod 12)
 
-    def set_pitch_active(self, pitch: int, active: bool):
-        if active:
-            self.active_pitches.add(pitch)
-        else:
-            self.active_pitches.discard(pitch)
 
     def set_active_pitches(self, pitches) -> None:
         """Replace active pitches from an iterable of MIDI note numbers."""
@@ -225,7 +220,7 @@ class TimelineWidget(QWidget):
         # Measure lines.
         if self._cached_boundaries:
             painter.setPen(QPen(self.measure_line_color, 1))
-            for start_t, end_t in self._cached_boundaries:
+            for start_t, _ in self._cached_boundaries:
                 x = (start_t / self.total_duration) * w
                 painter.drawLine(QPointF(x, 0), QPointF(x, h))
 

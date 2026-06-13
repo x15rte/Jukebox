@@ -5,24 +5,16 @@ Usage:
 """
 
 from tests.helpers.builders import (  # safe — core imports are lazy
-    make_config,
-    make_key_event,
-    make_midi_track,
     make_note,
     make_section,
-    make_tempo_map,
 )
 
 _fake_names = {
     "FakeBackend",
     "FakeEvent",
-    "FakeHumanizer",
-    "FakeInPort",
     "FakeListener",
     "FakeLiveBackend",
-    "FakePedalGenerator",
     "FakePlaybackPlayer",
-    "FakeSectionAnalyzer",
     "FakeSignal",
     "FakeThread",
     "RecorderBackend",
@@ -33,12 +25,8 @@ _fake_names = {
 # output.output → pynput at import time (which breaks conftest's
 # pynput-stub logic on headless CI).
 __all__ = [
-    "make_config",
-    "make_key_event",
-    "make_midi_track",
     "make_note",
     "make_section",
-    "make_tempo_map",
 ]
 
 

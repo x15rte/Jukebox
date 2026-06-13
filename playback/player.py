@@ -15,7 +15,7 @@ from typing import Any, List, Set, Optional, Tuple
 from PyQt6.QtCore import QObject, pyqtSignal as Signal
 
 from models import Note, KeyEvent, MusicalSection
-from core import TempoMap, KeyMapper
+from core import KeyMapper
 from analysis import Humanizer, PedalGenerator
 from output import OutputBackend
 from native import set_timer_resolution, restore_timer_resolution, precise_sleep

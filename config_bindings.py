@@ -8,7 +8,7 @@ applied after a full config load but skipped during normal UI→Config reads.
 """
 
 from dataclasses import dataclass, fields
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable
 
 from PyQt6.QtCore import QByteArray
 

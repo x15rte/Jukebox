@@ -4,11 +4,11 @@ import sys
 import pytest
 
 import logger_core
-from logger_core import _JukeboxLogger, JukeboxLogger
+from logger_core import JukeboxLogger
 
 
 def test_set_gui_callback_replaces_existing_callbacks():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
 
     def cb1(level, msg):
@@ -26,7 +26,7 @@ def test_set_gui_callback_replaces_existing_callbacks():
 
 
 def test_add_and_remove_gui_callback_idempotent():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
 
     def cb(level, msg):
@@ -43,7 +43,7 @@ def test_add_and_remove_gui_callback_idempotent():
 
 
 def test_clear_gui_callbacks():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
 
     def cb(level, msg):
@@ -56,7 +56,7 @@ def test_clear_gui_callbacks():
 
 
 def test_callback_count():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
 
     def cb(level, msg):
         pass
@@ -71,12 +71,12 @@ def test_callback_count():
 
 
 def test_current_level_name_default():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     assert lg.current_level_name == "INFO"
 
 
 def test_current_level_name_after_set():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     lg.set_level("DEBUG")
     assert lg.current_level_name == "DEBUG"
     lg.set_level("WARNING")
@@ -84,7 +84,7 @@ def test_current_level_name_after_set():
 
 
 def test_is_file_logging_enabled(tmp_path):
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     assert lg.is_file_logging_enabled is False
     p = tmp_path / "x" / "log.txt"
     lg.enable_file_logging(str(p))
@@ -94,19 +94,19 @@ def test_is_file_logging_enabled(tmp_path):
 
 
 def test_set_level_with_unknown_name_defaults_info():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     lg.set_level("not-a-level")
     assert lg._logger.level == logging.INFO
 
 
 def test_enable_file_logging_empty_path_is_noop():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     lg.enable_file_logging("")
     assert lg._file_handler is None
 
 
 def test_enable_file_logging_noop_when_same_handler(tmp_path):
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     p = tmp_path / "a" / "log.txt"
 
     lg.enable_file_logging(str(p), max_bytes=111, backup_count=2)
@@ -117,7 +117,7 @@ def test_enable_file_logging_noop_when_same_handler(tmp_path):
 
 
 def test_enable_file_logging_replaces_old_handler_even_if_close_fails(tmp_path, monkeypatch):
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     p1 = tmp_path / "x" / "log1.txt"
     p2 = tmp_path / "x" / "log2.txt"
 
@@ -134,12 +134,12 @@ def test_enable_file_logging_replaces_old_handler_even_if_close_fails(tmp_path, 
 
 
 def test_disable_file_logging_no_handler_noop():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     lg.disable_file_logging()
 
 
 def test_disable_file_logging_close_exception_is_swallowed(tmp_path, monkeypatch):
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     p = tmp_path / "x" / "log.txt"
     lg.enable_file_logging(str(p))
 
@@ -153,7 +153,7 @@ def test_disable_file_logging_close_exception_is_swallowed(tmp_path, monkeypatch
 
 def test_log_exc_info_at_requested_level():
     """BUG-1 guard: log() with exc_info=True must respect the requested level."""
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     lg.set_level("DEBUG")
     events = []
     lg.add_gui_callback(lambda level, msg: events.append(level))
@@ -168,7 +168,7 @@ def test_log_exc_info_at_requested_level():
 
 def test_log_exc_info_no_active_exception():
     """BUG-2 guard: exc_info=True with no active exception produces clean output."""
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
     lg.add_gui_callback(lambda level, msg: events.append(msg))
 
@@ -180,7 +180,7 @@ def test_log_exc_info_no_active_exception():
 
 
 def test_log_with_exc_info_appends_traceback_and_notifies_callbacks():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
     lg.set_level("DEBUG")
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
@@ -196,7 +196,7 @@ def test_log_with_exc_info_appends_traceback_and_notifies_callbacks():
 
 
 def test_log_skips_callbacks_when_level_disabled():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
     lg.set_level("ERROR")
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
@@ -206,7 +206,7 @@ def test_log_skips_callbacks_when_level_disabled():
 
 
 def test_log_callback_exception_does_not_break_logging():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     calls = {"ok": 0}
 
     def bad_cb(_level, _msg):
@@ -225,7 +225,7 @@ def test_log_callback_exception_does_not_break_logging():
 
 def test_info_exc_info():
     """exc_info on info() convenience method."""
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
 
@@ -240,7 +240,7 @@ def test_info_exc_info():
 
 def test_warning_exc_info():
     """exc_info on warning() convenience method."""
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
 
@@ -255,7 +255,7 @@ def test_warning_exc_info():
 
 def test_debug_exc_info():
     """exc_info on debug() convenience method."""
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     lg.set_level("DEBUG")
     events = []
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
@@ -270,7 +270,7 @@ def test_debug_exc_info():
 
 
 def test_critical_logs_at_critical():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
     lg.set_level("DEBUG")
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
@@ -280,7 +280,7 @@ def test_critical_logs_at_critical():
 
 
 def test_critical_exc_info():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
     lg.set_level("DEBUG")
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
@@ -296,7 +296,7 @@ def test_critical_exc_info():
 
 def test_exception_convenience():
     """exception() logs at ERROR with traceback."""
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     events = []
     lg.set_level("DEBUG")
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
@@ -311,7 +311,7 @@ def test_exception_convenience():
 
 
 def test_repr():
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     r = repr(lg)
     assert "JukeboxLogger" in r
     assert "INFO" in r
@@ -321,12 +321,12 @@ def test_repr():
 
 def test_public_class_name():
     """Both old private name and new public name work."""
-    assert JukeboxLogger is _JukeboxLogger
+    assert JukeboxLogger is JukeboxLogger
 
 
 def test_unicode_stderr_does_not_crash(monkeypatch):
     """Edge case: Unicode characters that don't fit the console codepage."""
-    lg = _JukeboxLogger()
+    lg = JukeboxLogger()
     # Replace stderr with a mock that can't handle Unicode.
     class NarrowStream:
         encoding = "ascii"
@@ -340,7 +340,7 @@ def test_unicode_stderr_does_not_crash(monkeypatch):
 
     monkeypatch.setattr(sys, "stderr", NarrowStream())
     # Recreate the logger so the handler picks up the narrow stream.
-    lg2 = _JukeboxLogger()
+    lg2 = JukeboxLogger()
     lg2.set_level("DEBUG")
     # This should not raise even though the stream is ASCII-only.
     lg2.info("Unicode test: ☃ é 中文")
@@ -351,4 +351,4 @@ def test_unicode_stderr_does_not_crash(monkeypatch):
 
 
 def test_global_singleton_has_expected_type():
-    assert isinstance(logger_core.jukebox_logger, _JukeboxLogger)
+    assert isinstance(logger_core.jukebox_logger, JukeboxLogger)

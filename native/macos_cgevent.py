@@ -200,7 +200,6 @@ def post_macos_key_event(key_code: int, key_down: bool, flags: int = 0) -> bool:
     ):
         return False
     try:
-        import ctypes
 
         source = _macos_app_services.CGEventSourceCreate(
             _kCGEventSourceStateHIDSystemState

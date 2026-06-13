@@ -269,5 +269,3 @@ class JukeboxLogger:
 # Global singleton used throughout the project.
 jukebox_logger = JukeboxLogger()
 
-# Backward-compatible alias for code that imports the old private name (tests).
-_JukeboxLogger = JukeboxLogger

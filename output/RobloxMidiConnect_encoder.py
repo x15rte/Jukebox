@@ -36,7 +36,6 @@ ENCODED_KEYS = [
 ]
 
 PEDAL_SENTINEL = 143
-KEYS_PER_MESSAGE = 5  # 1 prefix + 4 data keys
 
 # Numpad scan codes (hardware level, matching original RMC project)
 _SCAN_CODES = {
@@ -74,9 +73,6 @@ def reset_batched_sendinput() -> None:
         _use_batched_sendinput = True
 
 
-# ---------------------------------------------------------------------------
-# pydirectinput setup (scan-code based input, matching original RMC project)
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Batched SendInput (scan codes) — sends one full RMC frame in 1 kernel call
@@ -360,21 +356,3 @@ def send_pedal(value: int) -> None:
     d = math.floor(value % 12)
     encode_and_send_message(a, b, c, d)
 
-
-def process_mido_message(msg) -> None:
-    """Dispatch a *mido* MIDI message to the appropriate send function."""
-    msg_type = getattr(msg, "type", None)
-    if msg_type == "clock":
-        return
-
-    if msg_type in ("note_on", "note_off"):
-        note = getattr(msg, "note", None)
-        velocity = getattr(msg, "velocity", 0)
-        if note is None:
-            return
-        is_off = msg_type == "note_off" or (msg_type == "note_on" and velocity == 0)
-        send_note_message(note, velocity, is_off)
-        return
-
-    if msg_type == "control_change" and getattr(msg, "control", None) == 64:
-        send_pedal(getattr(msg, "value", 0))

@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from typing import Any, cast
 
 import theme
@@ -45,43 +44,9 @@ def test_apply_global_palette_sets_core_roles():
     assert app.set_palette_called is True
 
 
-def test_heading_font_uses_provided_base_and_default_font(monkeypatch):
-    class FakeFont:
-        def __init__(self, src=None):
-            if src is not None and hasattr(src, "size"):
-                src_obj = cast(Any, src)
-                self.size = src_obj.size
-                self.bold = src_obj.bold
-            else:
-                self.size = 10.0
-                self.bold = False
-
-        def pointSizeF(self):
-            return self.size
-
-        def setPointSizeF(self, v):
-            self.size = v
-
-        def setBold(self, v):
-            self.bold = v
-
-    monkeypatch.setattr(theme, "QFont", FakeFont)
-    monkeypatch.setattr(theme, "QApplication", SimpleNamespace(font=lambda: FakeFont()))
-
-    base = FakeFont()
-    base.size = 20.0
-    f1 = cast(Any, theme.heading_font(base=cast(Any, base), scale=1.5))
-    assert f1.size == 30.0
-    assert f1.bold is True
-
-    f2 = cast(Any, theme.heading_font(base=None, scale=1.2))
-    assert f2.size == 12.0
-    assert f2.bold is True
 
 
 def test_theme_helpers_and_dark_theme_payload():
-    assert "font-size" in theme.subtle_label_style()
-    assert "QGroupBox" in theme.section_groupbox_style()
 
     t = theme.get_dark_cyber_theme()
     assert t.background_main.startswith("#")

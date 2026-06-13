@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication
 
 
@@ -16,18 +16,11 @@ from PyQt6.QtWidgets import QApplication
 
 WINDOW_BG = QColor(18, 18, 20)
 PANEL_BG = QColor(28, 28, 32)
-PANEL_BORDER = QColor(60, 60, 70)
 TEXT_PRIMARY = QColor(235, 235, 240)
-TEXT_SECONDARY = QColor(170, 170, 180)
-ACCENT = QColor(239, 108, 77)  # primary accent (buttons, highlights)
-ACCENT_SOFT = QColor(239, 108, 77, 60)
-ERROR = QColor(245, 108, 108)
-WARNING = QColor(230, 162, 60)
 
 
 # --- Layout metrics ---
 
-SECTION_MARGIN = 12
 SECTION_SPACING = 10
 CONTROL_SPACING = 6
 
@@ -48,38 +41,6 @@ def apply_global_palette(app: QApplication) -> None:
     palette.setColor(palette.ColorRole.ToolTipBase, PANEL_BG)
     palette.setColor(palette.ColorRole.ToolTipText, TEXT_PRIMARY)
     app.setPalette(palette)
-
-
-def heading_font(base: QFont | None = None, scale: float = 1.1) -> QFont:
-    """Return a slightly larger font for group headings."""
-    f = QFont(base or QApplication.font())
-    f.setPointSizeF(f.pointSizeF() * scale)
-    f.setBold(True)
-    return f
-
-
-def subtle_label_style() -> str:
-    """Style sheet for secondary/description labels."""
-    return "color: rgb(170, 170, 180);font-size: 11px;"
-
-
-def section_groupbox_style() -> str:
-    """Style sheet for top-level group boxes in the Playback panel."""
-    return (
-        "QGroupBox {"
-        "  border: 1px solid rgb(60, 60, 70);"
-        "  border-radius: 6px;"
-        "  margin-top: 8px;"
-        "  padding: 8px 8px 10px 8px;"
-        "}"
-        "QGroupBox::title {"
-        "  subcontrol-origin: margin;"
-        "  left: 10px;"
-        "  padding: 0 3px 0 3px;"
-        "  color: rgb(235, 235, 240);"
-        "  font-weight: 600;"
-        "}"
-    )
 
 
 @dataclass(frozen=True)

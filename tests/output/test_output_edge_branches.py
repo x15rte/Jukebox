@@ -11,72 +11,9 @@ from tests.helpers.fakes import FakeController, FakeEvent
 out = cast(Any, out)
 
 
-class _PDITypeFallback:
-    def __init__(self):
-        self.down = []
-        self.up = []
-
-    def keyDown(self, name, _pause=None):
-        if _pause is False:
-            raise TypeError("no _pause")
-        self.down.append(name)
-
-    def keyUp(self, name, _pause=None):
-        if _pause is False:
-            raise TypeError("no _pause")
-        self.up.append(name)
-
-
-class _PDITypeFallbackFailure:
-    def keyDown(self, _name, _pause=None):
-        if _pause is False:
-            raise TypeError("no _pause")
-        raise RuntimeError("fallback down failed")
-
-    def keyUp(self, _name, _pause=None):
-        if _pause is False:
-            raise TypeError("no _pause")
-        raise RuntimeError("fallback up failed")
-
-
-class _PDINormal:
-    def __init__(self):
-        self.down = []
-        self.up = []
-
-    def keyDown(self, name, _pause=False):
-        self.down.append(name)
-
-    def keyUp(self, name, _pause=False):
-        self.up.append(name)
 
 
 
-def test_pdi_key_down_up_typeerror_fallback(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "linux")
-    monkeypatch.setattr(out, "Controller", FakeController)
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-    kb._pdi = cast(Any, _PDITypeFallback())
-
-    kb._pdi_key_down("x")
-    kb._pdi_key_up("x")
-
-    assert kb._pdi.down == ["x"]
-    assert kb._pdi.up == ["x"]
-
-
-def test_pdi_key_down_up_typeerror_fallback_errors_raise(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "linux")
-    monkeypatch.setattr(out, "Controller", FakeController)
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-    kb._pdi = cast(Any, _PDITypeFallbackFailure())
-
-    with pytest.raises(out.OutputBackendSendError, match="fallback down failed"):
-        kb._pdi_key_down("x")
-    with pytest.raises(out.OutputBackendSendError, match="fallback up failed"):
-        kb._pdi_key_up("x")
 
 
 def test_release_key_if_unused_handles_backend_exception(monkeypatch):
@@ -116,40 +53,6 @@ def test_note_on_with_unknown_pitch_noop(monkeypatch):
     kb.note_off(-999)
 
 
-def test_note_on_pydirectinput_modifier_none_branch(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "linux")
-    monkeypatch.setattr(out, "Controller", FakeController)
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-    kb._pdi = cast(Any, _PDINormal())
-    kb._use_pydirectinput = True
-    kb._kb = None
-
-    monkeypatch.setattr(kb, "_modifier_name", lambda mod: None)
-    kb.note_on(61, 100)
-
-    key_data = kb._mapper.get_key_data(61)
-    assert key_data is not None
-    base = key_data["key"]
-    assert base in kb._pdi.down
-
-
-def test_note_on_pydirectinput_modifier_branch_releases_modifier(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "linux")
-    monkeypatch.setattr(out, "Controller", FakeController)
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-    kb._pdi = cast(Any, _PDINormal())
-    kb._use_pydirectinput = True
-    kb._kb = None
-
-    kb.note_on(61, 100)
-
-    key_data = kb._mapper.get_key_data(61)
-    assert key_data is not None
-    base = key_data["key"]
-    assert kb._pdi.down == ["shiftleft", base]
-    assert kb._pdi.up == ["shiftleft"]
 
 
 def test_note_off_macos_releases_only_when_no_active_pitches(monkeypatch):
@@ -422,28 +325,6 @@ def test_pedal_on_off_extra_branches(monkeypatch):
     assert any("pedal_off error" in m for m in logs)
 
 
-def test_pedal_on_off_pydirectinput_errors_raise(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "linux")
-    monkeypatch.setattr(out, "Controller", FakeController)
-
-    class BadPDI:
-        def keyDown(self, *_a, **_k):
-            raise RuntimeError("down boom")
-
-        def keyUp(self, *_a, **_k):
-            raise RuntimeError("up boom")
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-    kb._use_pydirectinput = True
-    kb._pdi = cast(Any, BadPDI())
-    kb._kb = None
-
-    with pytest.raises(out.OutputBackendSendError, match="down boom"):
-        kb.pedal_on()
-
-    kb._pedal_down = True
-    with pytest.raises(out.OutputBackendSendError, match="up boom"):
-        kb.pedal_off()
 
 
 def test_pedal_off_releases_empty_active_keys(monkeypatch):
@@ -489,7 +370,7 @@ def test_keyboard_shutdown_macos_releases_keys_pedal_and_modifiers(monkeypatch):
     assert any(ev[1] is False for ev in events)
 
 
-def test_keyboard_shutdown_pdi_and_pynput_exception_branches(monkeypatch):
+def test_keyboard_shutdown_pynput_exception_branches(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "linux")
     monkeypatch.setattr(out, "Controller", FakeController)
 
@@ -498,34 +379,14 @@ def test_keyboard_shutdown_pdi_and_pynput_exception_branches(monkeypatch):
         out.jukebox_logger, "error",
         lambda m, **k: logs.append(m),
     )
-    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
-
-    class BadPDI:
-        def keyUp(self, *_a, **_k):
-            raise RuntimeError("keyup boom")
-
-    kb._use_pydirectinput = True
-    kb._pdi = cast(Any, BadPDI())
-    kb._kb = None
-    kb._active_pitches = {"x": {60}}
-    kb._state_for("x")
-    kb._pedal_down = True
-
-    kb.shutdown()
-
-    assert any("shutdown note release error" in m for m in logs)
-    assert any("shutdown pedal release error" in m for m in logs)
-    assert any("shutdown modifier release error" in m for m in logs)
-
-    monkeypatch.setattr(out.sys, "platform", "linux")
 
     class BadKB:
         def release(self, _k):
             raise RuntimeError("release boom")
 
-    kb2 = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
-    kb2._kb = cast(Any, BadKB())
-    kb2.shutdown()
+    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+    kb._kb = cast(Any, BadKB())
+    kb.shutdown()
 
     assert any("shutdown modifier release error" in m for m in logs)
 

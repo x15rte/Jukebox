@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Set
 
 import numpy as np
 
-from models import Note, MusicalSection, Finger
+from models import Note, MusicalSection
 from core import get_time_groups
 
 _DRIFT_NOISE_SIGMA = 0.004
@@ -130,13 +130,6 @@ class Humanizer:
 
 class FingeringEngine:
     """Assigns left/right hand by pitch; chords use average pitch. Split at MIDI 60 (middle C)."""
-
-    MAX_HAND_SPAN = 14
-
-    def __init__(self):
-        self.fingers = [Finger(id=i, hand="left") for i in range(5)] + [
-            Finger(id=i, hand="right") for i in range(5, 10)
-        ]
 
     def assign_hands(self, notes: List[Note]):
         time_groups = get_time_groups(notes)

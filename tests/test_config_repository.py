@@ -13,7 +13,6 @@ from config_repository import (
     _coerce_float,
     _coerce_int,
     _coerce_optional_str,
-    _sanitize_choice,
 )
 
 
@@ -222,13 +221,6 @@ def test_coerce_int_fallback_branches(value, default, expected):
     assert _coerce_int(value, default) == expected
 
 
-@pytest.mark.parametrize(
-    ("value", "allowed", "default", "expected"),
-    [(1, {"a"}, "d", "d"), (" x ", {"x"}, "d", "x")],
-)
-def test_sanitize_choice_branches(value, allowed, default, expected):
-    assert _sanitize_choice(value, allowed, default) == expected
-
 
 @pytest.mark.parametrize(
     ("value", "expected"),
@@ -269,13 +261,6 @@ def test_playback_config_dict_setitem():
     assert pc["unknown_extra"] == 42
 
 
-def test_playback_config_copy():
-    pc = PlaybackConfig(tempo=120.0, vary_timing=True)
-    pc["raw_pedal_events"] = [(0.0, 64)]
-    copied = pc.__copy__()
-    assert copied.tempo == 120.0
-    assert copied.vary_timing is True
-    assert copied["raw_pedal_events"] == [(0.0, 64)]
 
 
 def test_playback_config_len():
@@ -422,16 +407,3 @@ def test_playback_config_contains_non_string():
     assert (None in pc) is False
     assert (0.5 in pc) is False
 
-
-# ---------------------------------------------------------------------------
-# Edge-case coverage: PlaybackConfig.__copy__ extra attrs (lines 590-591)
-# ---------------------------------------------------------------------------
-
-
-def test_playback_config_copy_includes_extra_attributes():
-    """__copy__ preserves extra attributes not in __annotations__."""
-    pc = PlaybackConfig(tempo=120.0)
-    pc["custom_extra"] = "extra_value"
-    copied = pc.__copy__()
-    assert copied.tempo == 120.0
-    assert copied["custom_extra"] == "extra_value"

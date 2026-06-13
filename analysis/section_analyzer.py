@@ -70,7 +70,7 @@ class SectionAnalyzer:
             pace = self._classify_pace_beats(chunk_notes, s_beat, e_beat)
             return art, pace
 
-        for i, (m_start, m_end) in enumerate(measures):
+        for m_start, m_end in measures:
             notes_in_measure = [
                 n
                 for n in self.notes

@@ -117,21 +117,6 @@ def test_decode_midi_text_empty_bytes_uses_name_fallback():
     assert _decode_midi_text(msg) == "ignored"
 
 
-def test_decode_midi_text_ascii_decode_error_falls_through():
-    class BadBytes(bytes):
-        def decode(self, enc, *args, **kwargs):
-            if enc == "ascii":
-                raise UnicodeDecodeError("ascii", b"x", 0, 1, "bad")
-            return super().decode(enc, *args, **kwargs)
-
-    class Data:
-        def __bytes__(self):
-            return BadBytes(b"ABC")
-
-    out = _decode_midi_text(DummyMsg(data=Data(), name="n"))
-    assert out == "ABC"
-
-
 def test_decode_midi_text_encoding_fallback_to_name_on_latin1_error():
     class BadBytes(bytes):
         def decode(self, enc, *args, **kwargs):

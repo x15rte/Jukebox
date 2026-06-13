@@ -37,11 +37,11 @@ def test_midi_track_instrument_name_ranges_and_drum_override():
 
 def test_key_state_press_release():
     ks = KeyState("a")
-    assert ks.is_physically_down is False
+    assert ks.is_active is False
     ks.press()
-    assert ks.is_physically_down is True
+    assert ks.is_active is True
     ks.release()
-    assert ks.is_physically_down is False
+    assert ks.is_active is False
 
 
 def test_midi_track_note_count_and_key_event_defaults():

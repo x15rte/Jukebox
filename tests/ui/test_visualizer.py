@@ -65,10 +65,10 @@ def test_piano_active_pitch_mutators(qtbot):
     w = PianoWidget()
     qtbot.addWidget(w)
 
-    w.set_pitch_active(60, True)
+    w.active_pitches.add(60)
     assert 60 in w.active_pitches
 
-    w.set_pitch_active(60, False)
+    w.active_pitches.discard(60)
     assert 60 not in w.active_pitches
 
     w.set_active_pitches([61, 62])

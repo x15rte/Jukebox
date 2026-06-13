@@ -98,16 +98,5 @@ class KeyState:
     def release(self):
         self.is_active = False
 
-    @property
-    def is_physically_down(self) -> bool:
-        return self.is_active
 
 
-@dataclass
-class Finger:
-    """Finger slot for fingering engine (id, hand, current pitch, last press time)."""
-
-    id: int
-    hand: str
-    current_pitch: Optional[int] = None
-    last_press_time: float = -1.0

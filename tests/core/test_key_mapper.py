@@ -28,14 +28,8 @@ def test_black_key_mapping_uses_shift_in_middle_range():
     assert Key.shift in data["modifiers"]
 
 
-def test_pitch_to_name_and_black_key_detection():
-    assert KeyMapper.pitch_to_name(60) == "C4"
+def test_is_black_key_detection():
     assert KeyMapper.is_black_key(61) is True
     assert KeyMapper.is_black_key(60) is False
 
 
-def test_get_key_for_pitch_and_bounds_properties():
-    km = KeyMapper(use_88_key_layout=False)
-    assert km.get_key_for_pitch(60) is not None
-    assert km.lower_ctrl_bound == 0
-    assert km.upper_ctrl_bound == 128

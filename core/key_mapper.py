@@ -12,18 +12,6 @@ class KeyMapper:
     altered; doing so will cause the game to misinterpret input.
     """
 
-    SYMBOL_MAP = {
-        "!": "1",
-        "@": "2",
-        "#": "3",
-        "$": "4",
-        "%": "5",
-        "^": "6",
-        "&": "7",
-        "*": "8",
-        "(": "9",
-        ")": "0",
-    }
 
     # --- game-defined key tables ---
     LEFT_CTRL_KEYS = "1234567890qwert"
@@ -74,23 +62,7 @@ class KeyMapper:
             pitch = self.max_pitch
         return self.key_map.get(pitch)
 
-    def get_key_for_pitch(self, pitch: int) -> Optional[str]:
-        data = self.get_key_data(pitch)
-        return data["key"] if data else None
 
     @staticmethod
     def is_black_key(pitch: int) -> bool:
         return (pitch % 12) in {1, 3, 6, 8, 10}
-
-    @staticmethod
-    def pitch_to_name(pitch: int) -> str:
-        names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-        return f"{names[pitch % 12]}{(pitch // 12) - 1}"
-
-    @property
-    def lower_ctrl_bound(self):
-        return 0
-
-    @property
-    def upper_ctrl_bound(self):
-        return 128

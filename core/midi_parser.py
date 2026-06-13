@@ -64,10 +64,7 @@ def _decode_midi_text(msg) -> str:
         return ""
 
     if all((32 <= b <= 126) or b in (9, 10, 13) for b in data_bytes):
-        try:
-            return data_bytes.decode("ascii")
-        except UnicodeDecodeError:
-            pass
+        return data_bytes.decode("ascii")
 
     encodings = ["utf-8", "cp932", "shift_jis"]
 

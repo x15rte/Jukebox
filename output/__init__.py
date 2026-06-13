@@ -9,7 +9,6 @@ from .output import (
     NumpadBackend,
     create_backend,
 )
-from . import RobloxMidiConnect_encoder
 
 __all__ = [
     "OutputBackend",
