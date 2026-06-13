@@ -636,6 +636,38 @@ class MainWindow(QMainWindow):
 
         self.use_88_key_check = QCheckBox("Use 88-key extended layout")
         layout.addWidget(self.use_88_key_check)
+        pedal_row = QHBoxLayout()
+        pedal_label = QLabel("Pedal Style")
+        self.pedal_style_combo = QComboBox()
+        self.pedal_style_combo.addItems(list(self.pedal_mapping.keys()))
+        self.pedal_style_combo.setItemData(
+            0,
+            "Uses sustain pedal data from the MIDI file when present. With Humanizer off, existing MIDI pedal events keep their original timing. With Humanizer on, the same pedal pattern follows the humanized performance. Falls back to Automatic if none found.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
+        self.pedal_style_combo.setItemData(
+            1,
+            "Analyzes song sections to switch between Rhythmic and Sustain.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
+        self.pedal_style_combo.setItemData(
+            2,
+            "Ignores note length. Holds pedal until harmony changes.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
+        self.pedal_style_combo.setItemData(
+            3,
+            "Presses pedal only while keys are held down.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
+        self.pedal_style_combo.setItemData(
+            4, "Disables auto-pedal entirely.", Qt.ItemDataRole.ToolTipRole
+        )
+        pedal_row.addWidget(pedal_label)
+        pedal_row.addWidget(self.pedal_style_combo)
+        pedal_row.addStretch(1)
+        layout.addLayout(pedal_row)
+
 
         return group
 
@@ -1132,44 +1164,8 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(group)
 
         self._playback_file_only_widget = QWidget()
-        file_grid = QGridLayout(self._playback_file_only_widget)
-        tempo_label = QLabel("Tempo")
-        self.tempo_slider, self.tempo_spinbox = self._create_slider_and_spinbox(
-            10.0, 200.0, 100.0, "%", factor=10.0, decimals=1
-        )
-        file_grid.addWidget(tempo_label, 0, 0)
-        file_grid.addWidget(self.tempo_slider, 0, 2)
-        file_grid.addWidget(self.tempo_spinbox, 0, 3)
-
-        pedal_label = QLabel("Pedal Style")
-        self.pedal_style_combo = QComboBox()
-        self.pedal_style_combo.addItems(list(self.pedal_mapping.keys()))
-        self.pedal_style_combo.setItemData(
-            0,
-            "Uses sustain pedal data from the MIDI file when present. With Humanizer off, existing MIDI pedal events keep their original timing. With Humanizer on, the same pedal pattern follows the humanized performance. Falls back to Automatic if none found.",
-            Qt.ItemDataRole.ToolTipRole,
-        )
-        self.pedal_style_combo.setItemData(
-            1,
-            "Analyzes song sections to switch between Rhythmic and Sustain.",
-            Qt.ItemDataRole.ToolTipRole,
-        )
-        self.pedal_style_combo.setItemData(
-            2,
-            "Ignores note length. Holds pedal until harmony changes.",
-            Qt.ItemDataRole.ToolTipRole,
-        )
-        self.pedal_style_combo.setItemData(
-            3,
-            "Presses pedal only while keys are held down.",
-            Qt.ItemDataRole.ToolTipRole,
-        )
-        self.pedal_style_combo.setItemData(
-            4, "Disables auto-pedal entirely.", Qt.ItemDataRole.ToolTipRole
-        )
-        file_grid.addWidget(pedal_label, 1, 0)
-        file_grid.addWidget(self.pedal_style_combo, 1, 2, 1, 2)
-
+        file_layout = QVBoxLayout(self._playback_file_only_widget)
+        file_layout.setContentsMargins(0, 0, 0, 0)
         countdown_row = QHBoxLayout()
         self.countdown_check = QCheckBox("3 second countdown")
         countdown_row.addWidget(self.countdown_check)
@@ -1177,8 +1173,7 @@ class MainWindow(QMainWindow):
         self.reset_defaults_btn = QPushButton("Reset Defaults")
         self.reset_defaults_btn.clicked.connect(self._reset_controls_to_default)
         countdown_row.addWidget(self.reset_defaults_btn)
-        file_grid.addLayout(countdown_row, 2, 0, 1, 4)
-        file_grid.setColumnStretch(2, 1)
+        file_layout.addLayout(countdown_row)
         main_layout.addWidget(self._playback_file_only_widget)
 
         hk_group = QGroupBox("Hotkey")
@@ -1231,6 +1226,15 @@ class MainWindow(QMainWindow):
         detailed_layout = QGridLayout()
         detailed_layout.setColumnStretch(2, 1)
 
+        tempo_label = QLabel("Tempo")
+        self.tempo_slider, self.tempo_spinbox = self._create_slider_and_spinbox(
+            10.0, 200.0, 100.0, "%", factor=10.0, decimals=1
+        )
+        detailed_layout.addWidget(tempo_label, 0, 0)
+        detailed_layout.addWidget(self.tempo_slider, 0, 2)
+        detailed_layout.addWidget(self.tempo_spinbox, 0, 3)
+
+
         def add_detailed_row(
             row_idx,
             name,
@@ -1256,10 +1260,11 @@ class MainWindow(QMainWindow):
             self.all_humanization_spinboxes[key] = spinbox
 
         add_detailed_row(
-            0, "Vary Timing", "vary_timing", 0, 0.1, 0.01, " s", factor=10000.0
+            1, "Vary Timing", "vary_timing", 0, 0.1, 0.01, " s", factor=10000.0
         )
+
         add_detailed_row(
-            1,
+            2,
             "Vary Articulation",
             "vary_articulation",
             50,
@@ -1269,11 +1274,13 @@ class MainWindow(QMainWindow):
             factor=100.0,
             decimals=1,
         )
+
         add_detailed_row(
-            2, "Hand Drift", "hand_drift", 0, 100, 25, "%", factor=100.0, decimals=1
+            3, "Hand Drift", "hand_drift", 0, 100, 25, "%", factor=100.0, decimals=1
         )
+
         add_detailed_row(
-            3,
+            4,
             "Mistake Chance",
             "mistake_chance",
             0,
@@ -1283,14 +1290,16 @@ class MainWindow(QMainWindow):
             factor=100.0,
             decimals=1,
         )
-        add_detailed_row(4, "Tempo Sway", "tempo_sway", 0, 0.1, 0, " s", factor=10000.0)
+
+        add_detailed_row(5, "Tempo Sway", "tempo_sway", 0, 0.1, 0, " s", factor=10000.0)
+
 
         self.invert_sway_check = QCheckBox("Invert tempo sway")
         self.all_humanization_checks["invert_tempo_sway"] = self.invert_sway_check
         self.all_humanization_checks["tempo_sway"].toggled.connect(
             self.invert_sway_check.setEnabled
         )
-        detailed_layout.addWidget(self.invert_sway_check, 5, 0)
+        detailed_layout.addWidget(self.invert_sway_check, 6, 0)
         main_v_layout.addLayout(detailed_layout)
 
         self.select_all_humanization_check.toggled.connect(
@@ -1309,7 +1318,6 @@ class MainWindow(QMainWindow):
 
     def _reset_playback_group_to_default(self):
         defaults = Config()
-        self.tempo_spinbox.setValue(defaults.tempo)
         self.pedal_style_combo.setCurrentText(
             self.pedal_mapping_inv.get(defaults.pedal_style, "Original (from MIDI)")
         )
@@ -1321,6 +1329,7 @@ class MainWindow(QMainWindow):
         self.countdown_check.setChecked(defaults.countdown)
 
     def _reset_humanization_group_to_default(self):
+        self.tempo_spinbox.setValue(Config().tempo)
         self.all_humanization_spinboxes["vary_timing"].setValue(0.010)
         self.all_humanization_spinboxes["vary_articulation"].setValue(95.0)
         self.all_humanization_spinboxes["hand_drift"].setValue(25.0)
