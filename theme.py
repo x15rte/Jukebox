@@ -68,6 +68,7 @@ class LogColors:
     info: str
     warning: str
     error: str
+    critical: str
 
 
 @dataclass(frozen=True)
@@ -152,6 +153,7 @@ def get_dark_cyber_theme() -> Theme:
         info=text_secondary,
         warning=accent_warning,
         error=accent_error,
+        critical="#FF3333",
     )
 
     # Global stylesheet for common widgets; conservative so it plays well cross‑platform.

@@ -175,6 +175,9 @@ class DummyWidget:
     def restoreGeometry(self, data):
         self.restore_calls.append(data)
 
+    def add_log_message(self, message, level="INFO"):
+        pass
+
 
 
 def test_validate_config_ui_bindings_passes_default():

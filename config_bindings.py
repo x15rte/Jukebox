@@ -13,7 +13,7 @@ from typing import Any, Callable, Iterable
 from PyQt6.QtCore import QByteArray
 
 from config_repository import Config
-from logger_core import jukebox_logger
+from logger_core import jukebox_logger, LOG_FILENAME
 from ui import parse_hotkey_string
 
 
@@ -346,10 +346,11 @@ def _set_log_level_combo(widget, value):
 
 def _set_save_log_to_file(widget, value):
     _set_save_log_to_file_checkbox(widget, value)
-    log_path = widget.config_dir / "log.txt"
+    log_path = widget.config_dir / LOG_FILENAME
     if value:
         widget.config_dir.mkdir(parents=True, exist_ok=True)
         jukebox_logger.enable_file_logging(str(log_path))
+        widget.add_log_message(f"Log is being saved to: {log_path}")
     else:
         jukebox_logger.disable_file_logging()
 

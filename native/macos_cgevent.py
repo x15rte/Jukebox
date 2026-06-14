@@ -4,14 +4,12 @@ All functions are no-ops on non-Darwin platforms.
 """
 
 from __future__ import annotations
-
-import logging
 import shutil
 import subprocess  # nosec B404: fixed args only
 import sys
 from typing import Any, Dict, Optional
 
-_log = logging.getLogger(__name__)
+from logger_core import jukebox_logger
 
 # ---------------------------------------------------------------------------
 # macOS Accessibility (for keyboard injection; Darwin only)
@@ -34,9 +32,8 @@ def is_macos_accessibility_trusted() -> bool:
         fn.restype = ctypes.c_bool
         return bool(fn(None))
     except Exception as e:
-        _log.debug("AXIsProcessTrustedWithOptions check failed: %s", e)
+        jukebox_logger.debug(f"AXIsProcessTrustedWithOptions check failed: {e}")
         return True
-
 
 def open_macos_accessibility_preferences() -> None:
     """Open System Settings to Privacy & Security -> Accessibility on macOS (Darwin). No-op on other platforms."""
@@ -53,7 +50,7 @@ def open_macos_accessibility_preferences() -> None:
             timeout=5,
         )
     except Exception as e:
-        _log.debug("Failed to open Accessibility preferences: %s", e)
+        jukebox_logger.debug(f"Failed to open Accessibility preferences: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +155,7 @@ def _init_macos_cgevent() -> bool:
         _macos_cgevent_ready = True
         return True
     except Exception as e:
-        _log.debug("macOS CGEvent init failed: %s", e)
+        jukebox_logger.debug(f"macOS CGEvent init failed: {e}")
         _macos_cgevent_ready = True
         _macos_app_services = None
         return False
@@ -218,5 +215,5 @@ def post_macos_key_event(key_code: int, key_down: bool, flags: int = 0) -> bool:
         _macos_core_foundation.CFRelease(source)
         return True
     except Exception as e:
-        _log.debug("post_macos_key_event failed: %s", e)
+        jukebox_logger.debug(f"post_macos_key_event failed: {e}")
         return False

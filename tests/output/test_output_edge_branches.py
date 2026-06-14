@@ -524,3 +524,47 @@ def test_shutdown_releases_note_and_pedal_with_keyboard_backend(monkeypatch):
     kb_impl = cast(Any, kb._kb)
     assert "x" in kb_impl.releases
     assert Key.space in kb_impl.releases
+
+
+def test_keyboard_windows_pydirectinput_exception_branches(monkeypatch):
+    """Cover KeyboardBackend pydirectinput error branches (pedal_on/off raise, shutdown individual release errors)."""
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    logs = []
+
+    # --- pedal_on re-raises pydirectinput errors (line 499) ---
+    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+    transport = cast(Any, kb._windows_transport)
+    transport.key_down = lambda key_name: (_ for _ in ()).throw(
+        RuntimeError("pdi key_down failed")
+    )
+    with pytest.raises(RuntimeError, match="pdi key_down failed"):
+        kb.pedal_on()
+
+    # --- pedal_off re-raises pydirectinput errors (line 533) ---
+    kb2 = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+    transport2 = cast(Any, kb2._windows_transport)
+    transport2.key_up = lambda key_name: (_ for _ in ()).throw(
+        RuntimeError("pdi key_up failed")
+    )
+    kb2._pedal_down = True
+    with pytest.raises(RuntimeError, match="pdi key_up failed"):
+        kb2.pedal_off()
+    # --- shutdown individual pydirectinput error path ---
+    # Force _windows_transport=None so shutdown takes the per-key pydirectinput branch
+    kb3 = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+    kb3._windows_transport = None
+    kb3._active_pitches = {"a": {60}, "b": {62}}
+    kb3._state_for("a").press()
+    kb3._state_for("b").press()
+
+    def failing_key_up(key_char):
+        raise RuntimeError("pdi key_up boom")
+    monkeypatch.setattr(kb3, "_pdi_key_up", failing_key_up)
+
+    kb3._pedal_down = True
+    kb3.shutdown()
+
+    assert any("note release error" in m for m in logs)
+    assert any("pedal release error" in m for m in logs)
+    assert any("modifier release error" in m for m in logs)

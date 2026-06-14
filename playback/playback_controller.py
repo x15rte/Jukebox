@@ -117,7 +117,6 @@ class PlaybackController(QObject):
             )
         except OutputBackendUnavailableError as e:
             message = f"Playback could not start: {e}"
-            jukebox_logger.error(message)
             if log_message is not None:
                 log_message(message)
             self._backend = None

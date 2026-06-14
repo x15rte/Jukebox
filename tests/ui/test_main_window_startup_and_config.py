@@ -102,7 +102,7 @@ def test_load_config_handles_config_load_error(window_factory, monkeypatch, tmp_
 
     w._load_config()
 
-    assert any("Config file could not be loaded" in e[1] for e in events if e[0] == "error")
+    assert any("Failed to load config from" in e[1] for e in events if e[0] == "error")
     assert ("reset", None) in events
     assert ("enabled", None) in events
 

@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
 )
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal as Signal, Qt
-from PyQt6.QtGui import QFont, QColor, QCloseEvent
+from PyQt6.QtGui import QFont, QColor, QCloseEvent, QTextCursor
 import mido
 
 from core import MidiParser
@@ -47,7 +47,7 @@ from ui import (
 )
 from output import OutputBackendError, OutputBackendUnavailableError, create_backend
 from playback import PlaybackController, PlaybackService
-from logger_core import jukebox_logger
+from logger_core import jukebox_logger, LOG_FILENAME
 from config_repository import Config, ConfigRepository, ConfigLoadError
 from native import (
     is_macos_accessibility_trusted,
@@ -65,7 +65,6 @@ import theme
 APP_NAME = "Jukebox"
 APP_ID = "jukebox.piano"
 APP_URL = "https://github.com/x15rte/Jukebox"
-LOG_FILENAME = "log.txt"
 MAX_LOG_ENTRIES = 5000
 
 
@@ -973,11 +972,8 @@ class MainWindow(QMainWindow):
         try:
             names = mido.get_input_names()  # type: ignore[attr-defined]
         except Exception as e:
-            jukebox_logger.error(
-                f"Failed to list MIDI input devices: {e}", exc_info=True
-            )
             self._log_error(
-                "Failed to list MIDI input devices: " + str(e),
+                f"Failed to list MIDI input devices: {e}",
                 show_dialog=show_dialog,
                 dialog_title="Error",
                 exc_info=True,
@@ -1452,6 +1448,7 @@ class MainWindow(QMainWindow):
             "INFO": log_colors.info,
             "WARNING": log_colors.warning,
             "ERROR": log_colors.error,
+            "CRITICAL": log_colors.critical,
         }
         color = color_map.get(level, log_colors.info)
 
@@ -1479,7 +1476,21 @@ class MainWindow(QMainWindow):
         if len(self._log_entries) > MAX_LOG_ENTRIES:
             self._log_entries = self._log_entries[-MAX_LOG_ENTRIES:]
 
-        self._render_log()
+        if self.log_filter_edit.text().strip():
+            # Filter active — full rebuild needed
+            self._render_log()
+        else:
+            # No filter — just append single entry
+            self._append_html(html)
+
+    def _append_html(self, html: str) -> None:
+        cursor = self.log_output.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertHtml(html)
+        if self.log_auto_scroll_check.isChecked():
+            sb = self.log_output.verticalScrollBar()
+            if sb is not None:
+                sb.setValue(sb.maximum())
 
     def _render_log(self) -> None:
         """Rebuild the QTextBrowser content from filtered entries."""
@@ -1563,11 +1574,11 @@ class MainWindow(QMainWindow):
             config = self._config_from_ui()
             self.config_repo.save(config)
         except OSError as e:
-            jukebox_logger.error(f"Error saving config: {e}", exc_info=True)
             self._log_error(
-                "Error saving config: " + str(e),
+                f"Error saving config: {e}",
                 show_dialog=True,
                 dialog_title="Error Saving Config",
+                exc_info=True,
             )
 
     def _update_enabled_states(self):
@@ -1595,17 +1606,10 @@ class MainWindow(QMainWindow):
         try:
             config = self.config_repo.load()
         except ConfigLoadError as e:
-            jukebox_logger.error(
-                f"Failed to load config from {e.path}: {e.cause}", exc_info=True
-            )
-            backup_note = (
-                f" Corrupt config was moved to: {e.backup_path}."
-                if e.backup_path is not None
-                else ""
-            )
             self._log_error(
-                "Config file could not be loaded; using defaults."
-                + backup_note
+                f"Failed to load config from {e.path}: {e.cause}"
+                + (f" Corrupt config was moved to {e.backup_path}." if e.backup_path else ""),
+                exc_info=True,
             )
             self._reset_controls_to_default()
             self._update_enabled_states()
@@ -1665,11 +1669,11 @@ class MainWindow(QMainWindow):
             tempo_scale = self.tempo_spinbox.value() / 100.0
             tracks, tempo_map = MidiParser.parse_structure(filepath, tempo_scale)
         except Exception as e:
-            jukebox_logger.error(f"Failed to parse MIDI: {e}", exc_info=True)
             self._log_error(
-                "Failed to parse MIDI: " + str(e),
+                f"Failed to parse MIDI: {e}",
                 show_dialog=True,
                 dialog_title="Error",
+                exc_info=True,
             )
             return
         self.parsed_tracks = tracks
@@ -1726,11 +1730,11 @@ class MainWindow(QMainWindow):
                 )
             )
         except Exception as e:
-            jukebox_logger.error(f"Error preparing playback: {e}", exc_info=True)
             self._log_error(
-                "Error preparing playback: " + str(e),
+                f"Error preparing playback: {e}",
                 show_dialog=True,
                 dialog_title="Error",
+                exc_info=True,
             )
             return
 
@@ -1835,6 +1839,7 @@ class MainWindow(QMainWindow):
                 self._update_autoplay_highlight()
 
     def closeEvent(self, a0: QCloseEvent) -> None:  # type: ignore[override]  # noqa: N802
+        jukebox_logger.clear_gui_callbacks()
         self.autoplay_next_timer.stop()
         try:
             self._flush_config()

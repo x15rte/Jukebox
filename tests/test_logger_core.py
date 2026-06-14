@@ -2,13 +2,14 @@ import logging
 import sys
 
 import pytest
+import uuid
 
 import logger_core
 from logger_core import JukeboxLogger
 
 
 def test_set_gui_callback_replaces_existing_callbacks():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     events = []
 
     def cb1(level, msg):
@@ -26,7 +27,7 @@ def test_set_gui_callback_replaces_existing_callbacks():
 
 
 def test_add_and_remove_gui_callback_idempotent():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     events = []
 
     def cb(level, msg):
@@ -43,7 +44,7 @@ def test_add_and_remove_gui_callback_idempotent():
 
 
 def test_clear_gui_callbacks():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     events = []
 
     def cb(level, msg):
@@ -56,7 +57,7 @@ def test_clear_gui_callbacks():
 
 
 def test_callback_count():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
 
     def cb(level, msg):
         pass
@@ -71,12 +72,12 @@ def test_callback_count():
 
 
 def test_current_level_name_default():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     assert lg.current_level_name == "INFO"
 
 
 def test_current_level_name_after_set():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     lg.set_level("DEBUG")
     assert lg.current_level_name == "DEBUG"
     lg.set_level("WARNING")
@@ -84,7 +85,7 @@ def test_current_level_name_after_set():
 
 
 def test_is_file_logging_enabled(tmp_path):
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     assert lg.is_file_logging_enabled is False
     p = tmp_path / "x" / "log.txt"
     lg.enable_file_logging(str(p))
@@ -94,19 +95,19 @@ def test_is_file_logging_enabled(tmp_path):
 
 
 def test_set_level_with_unknown_name_defaults_info():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     lg.set_level("not-a-level")
     assert lg._logger.level == logging.INFO
 
 
 def test_enable_file_logging_empty_path_is_noop():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     lg.enable_file_logging("")
     assert lg._file_handler is None
 
 
 def test_enable_file_logging_noop_when_same_handler(tmp_path):
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     p = tmp_path / "a" / "log.txt"
 
     lg.enable_file_logging(str(p), max_bytes=111, backup_count=2)
@@ -117,7 +118,7 @@ def test_enable_file_logging_noop_when_same_handler(tmp_path):
 
 
 def test_enable_file_logging_replaces_old_handler_even_if_close_fails(tmp_path, monkeypatch):
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     p1 = tmp_path / "x" / "log1.txt"
     p2 = tmp_path / "x" / "log2.txt"
 
@@ -134,12 +135,12 @@ def test_enable_file_logging_replaces_old_handler_even_if_close_fails(tmp_path, 
 
 
 def test_disable_file_logging_no_handler_noop():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     lg.disable_file_logging()
 
 
 def test_disable_file_logging_close_exception_is_swallowed(tmp_path, monkeypatch):
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     p = tmp_path / "x" / "log.txt"
     lg.enable_file_logging(str(p))
 
@@ -153,7 +154,7 @@ def test_disable_file_logging_close_exception_is_swallowed(tmp_path, monkeypatch
 
 def test_log_exc_info_at_requested_level():
     """BUG-1 guard: log() with exc_info=True must respect the requested level."""
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     lg.set_level("DEBUG")
     events = []
     lg.add_gui_callback(lambda level, msg: events.append(level))
@@ -168,7 +169,7 @@ def test_log_exc_info_at_requested_level():
 
 def test_log_exc_info_no_active_exception():
     """BUG-2 guard: exc_info=True with no active exception produces clean output."""
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     events = []
     lg.add_gui_callback(lambda level, msg: events.append(msg))
 
@@ -180,7 +181,7 @@ def test_log_exc_info_no_active_exception():
 
 
 def test_log_with_exc_info_appends_traceback_and_notifies_callbacks():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     events = []
     lg.set_level("DEBUG")
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
@@ -196,7 +197,7 @@ def test_log_with_exc_info_appends_traceback_and_notifies_callbacks():
 
 
 def test_log_skips_callbacks_when_level_disabled():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     events = []
     lg.set_level("ERROR")
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
@@ -206,7 +207,7 @@ def test_log_skips_callbacks_when_level_disabled():
 
 
 def test_log_callback_exception_does_not_break_logging():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     calls = {"ok": 0}
 
     def bad_cb(_level, _msg):
@@ -225,7 +226,7 @@ def test_log_callback_exception_does_not_break_logging():
 
 def test_info_exc_info():
     """exc_info on info() convenience method."""
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     events = []
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
 
@@ -240,7 +241,7 @@ def test_info_exc_info():
 
 def test_warning_exc_info():
     """exc_info on warning() convenience method."""
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     events = []
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
 
@@ -255,7 +256,7 @@ def test_warning_exc_info():
 
 def test_debug_exc_info():
     """exc_info on debug() convenience method."""
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     lg.set_level("DEBUG")
     events = []
     lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
@@ -268,50 +269,8 @@ def test_debug_exc_info():
     assert events[0][0] == "DEBUG"
     assert "Traceback" in events[0][1]
 
-
-def test_critical_logs_at_critical():
-    lg = JukeboxLogger()
-    events = []
-    lg.set_level("DEBUG")
-    lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
-
-    lg.critical("boom")
-    assert events[0][0] == "CRITICAL"
-
-
-def test_critical_exc_info():
-    lg = JukeboxLogger()
-    events = []
-    lg.set_level("DEBUG")
-    lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
-
-    try:
-        raise ValueError("x")
-    except ValueError:
-        lg.critical("boom", exc_info=True)
-
-    assert events[0][0] == "CRITICAL"
-    assert "Traceback" in events[0][1]
-
-
-def test_exception_convenience():
-    """exception() logs at ERROR with traceback."""
-    lg = JukeboxLogger()
-    events = []
-    lg.set_level("DEBUG")
-    lg.add_gui_callback(lambda level, msg: events.append((level, msg)))
-
-    try:
-        raise ValueError("x")
-    except ValueError:
-        lg.exception("boom")
-
-    assert events[0][0] == "ERROR"
-    assert "Traceback" in events[0][1]
-
-
 def test_repr():
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     r = repr(lg)
     assert "JukeboxLogger" in r
     assert "INFO" in r
@@ -326,7 +285,7 @@ def test_public_class_name():
 
 def test_unicode_stderr_does_not_crash(monkeypatch):
     """Edge case: Unicode characters that don't fit the console codepage."""
-    lg = JukeboxLogger()
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     # Replace stderr with a mock that can't handle Unicode.
     class NarrowStream:
         encoding = "ascii"
@@ -340,7 +299,7 @@ def test_unicode_stderr_does_not_crash(monkeypatch):
 
     monkeypatch.setattr(sys, "stderr", NarrowStream())
     # Recreate the logger so the handler picks up the narrow stream.
-    lg2 = JukeboxLogger()
+    lg2 = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     lg2.set_level("DEBUG")
     # This should not raise even though the stream is ASCII-only.
     lg2.info("Unicode test: ☃ é 中文")

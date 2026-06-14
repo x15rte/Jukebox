@@ -33,6 +33,8 @@ _LEVELS: dict[str, int] = {
 }
 
 
+LOG_FILENAME = "log.txt"
+
 class JukeboxLogger:
     """Thin wrapper around ``logging.Logger`` with GUI callbacks and level control.
 
@@ -42,8 +44,8 @@ class JukeboxLogger:
     - :attr:`callback_count`
     """
 
-    def __init__(self) -> None:
-        self._logger = logging.getLogger("jukebox")
+    def __init__(self, logger_name: str = "jukebox") -> None:
+        self._logger = logging.getLogger(logger_name)
         self._logger.setLevel(logging.INFO)
         # Avoid propagating to the root logger unless the host app wants that.
         self._logger.propagate = False
@@ -158,12 +160,12 @@ class JukeboxLogger:
         """
         if not path:
             return
-        abs_path = os.path.abspath(path)
         with self._lock:
+            abs_path = os.path.abspath(path)
             # Fast path — same handler already active.
             if (
                 self._file_handler is not None
-                and self._file_handler.baseFilename == abs_path
+                and os.path.normcase(self._file_handler.baseFilename) == os.path.normcase(abs_path)
                 and self._file_handler.maxBytes == max_bytes
                 and self._file_handler.backupCount == backup_count
             ):
@@ -253,18 +255,6 @@ class JukeboxLogger:
     def debug(self, message: str, exc_info: bool = False) -> None:
         """Log at DEBUG level."""
         self.log("DEBUG", message, exc_info=exc_info)
-
-    def critical(self, message: str, exc_info: bool = False) -> None:
-        """Log at CRITICAL level."""
-        self.log("CRITICAL", message, exc_info=exc_info)
-
-    def exception(self, message: str) -> None:
-        """Log at ERROR level with exception traceback.
-
-        Convenience wrapper for use inside ``except`` blocks.
-        """
-        self.log("ERROR", message, exc_info=True)
-
 
 # Global singleton used throughout the project.
 jukebox_logger = JukeboxLogger()

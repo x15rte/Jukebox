@@ -445,3 +445,53 @@ def test_render_log_auto_scroll_respects_toggle(window_factory, monkeypatch, tmp
     # Should not crash when auto-scroll is off
     assert "x" in w.log_output.toPlainText()
 
+
+
+def test_closeEvent_clears_gui_callbacks(window_factory, monkeypatch):
+    from PyQt6.QtGui import QCloseEvent
+
+    w = window_factory()
+    events = []
+    monkeypatch.setattr(
+        "main_window.jukebox_logger.clear_gui_callbacks",
+        lambda: events.append("clear"),
+    )
+    w.closeEvent(QCloseEvent())
+    assert "clear" in events
+
+
+def test_refresh_midi_inputs_single_emission(window_factory, monkeypatch):
+    w = window_factory()
+    error_count = 0
+
+    def count_error(msg, **kwargs):
+        nonlocal error_count
+        error_count += 1
+
+    monkeypatch.setattr("main_window.jukebox_logger.error", count_error)
+    monkeypatch.setattr("mido.get_input_names", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    w._refresh_midi_inputs(show_dialog=False)
+
+    assert error_count == 1
+
+
+def test_append_log_critical_color(window_factory, monkeypatch):
+    w = window_factory()
+    w._append_log("CRITICAL", "critical msg")
+    html = w._log_entries[-1]["html"]
+    assert "#FF3333" in html
+
+
+def test_append_log_with_filter_active_triggers_full_render(window_factory, monkeypatch):
+    w = window_factory()
+    w.log_filter_edit.setText("ERROR")
+    w._append_log("INFO", "test message")
+    # Cover the filter-active branch (full _render_log)
+
+
+def test_build_preview_notes_no_selected_tracks_returns_early(window_factory, monkeypatch):
+    w = window_factory()
+    w.selected_tracks_info = None
+    w._build_preview_notes(None)
+    # Cover the early return when selected_tracks_info is None

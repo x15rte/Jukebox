@@ -6,11 +6,11 @@ All functions are no-ops on non-Windows platforms.
 
 from __future__ import annotations
 
-import logging
+import sys
 import sys
 import time
 
-_log = logging.getLogger(__name__)
+from logger_core import jukebox_logger
 
 _winmm = None
 if sys.platform == "win32":
@@ -28,7 +28,7 @@ def set_timer_resolution(ms: int = 1) -> None:
         try:
             _winmm.timeBeginPeriod(ms)
         except Exception as e:
-            _log.debug("timeBeginPeriod failed: %s", e)
+            jukebox_logger.debug(f"timeBeginPeriod failed: {e}")
 
 
 def restore_timer_resolution(ms: int = 1) -> None:
@@ -37,7 +37,7 @@ def restore_timer_resolution(ms: int = 1) -> None:
         try:
             _winmm.timeEndPeriod(ms)
         except Exception as e:
-            _log.debug("timeEndPeriod failed: %s", e)
+            jukebox_logger.debug(f"timeEndPeriod failed: {e}")
 
 
 def precise_sleep(seconds: float) -> None:
