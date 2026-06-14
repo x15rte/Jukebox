@@ -225,7 +225,7 @@ def get_dark_cyber_theme() -> Theme:
             border-bottom: 3px solid {accent_primary};
         }}
 
-        QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+        QLineEdit, QComboBox {{
             background-color: {background_panel_alt};
             border-radius: 3px;
             border: 1px solid {border_subtle};
