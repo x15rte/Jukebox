@@ -483,6 +483,38 @@ def test_append_log_critical_color(window_factory, monkeypatch):
     assert "#FF3333" in html
 
 
+def test_append_log_info_multiline_gets_br(window_factory, monkeypatch):
+    w = window_factory()
+    w._append_log("INFO", "line1\nline2\nline3")
+    html = w._log_entries[-1]["html"]
+    # Count <br> — there should be 2 for the 2 newlines
+    assert html.count("<br>") == 2, f"Expected 2 <br> in HTML: {html}"
+    assert "line1" in html
+    assert "line2" in html
+    assert "line3" in html
+
+
+def test_append_log_warning_multiline_gets_br(window_factory, monkeypatch):
+    w = window_factory()
+    w._append_log("WARNING", "warning\ndetail")
+    html = w._log_entries[-1]["html"]
+    assert "<br>" in html, f"Missing <br> in WARNING multiline: {html}"
+
+
+def test_append_log_debug_multiline_gets_br(window_factory, monkeypatch):
+    w = window_factory()
+    w._append_log("DEBUG", "debug\ndetail")
+    html = w._log_entries[-1]["html"]
+    assert "<br>" in html, f"Missing <br> in DEBUG multiline: {html}"
+
+
+def test_append_log_single_line_no_br(window_factory, monkeypatch):
+    w = window_factory()
+    w._append_log("INFO", "single line message")
+    html = w._log_entries[-1]["html"]
+    assert "<br>" not in html, f"Unexpected <br> in single-line: {html}"
+
+
 def test_append_log_with_filter_active_triggers_full_render(window_factory, monkeypatch):
     w = window_factory()
     w.log_filter_edit.setText("ERROR")

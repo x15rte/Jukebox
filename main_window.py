@@ -1470,6 +1470,8 @@ class MainWindow(QMainWindow):
                 html = f'<div style="color:{color}">[{timestamp}] [{level}] {html_module.escape(message)}</div>'
         else:
             escaped = html_module.escape(message)
+            if "\n" in message:
+                escaped = escaped.replace("\n", "<br>")
             html = f'<div style="color:{color}">[{timestamp}] [{level}] {escaped}</div>'
 
         self._log_entries.append({"level": level, "plain": plain, "html": html})
@@ -1486,6 +1488,8 @@ class MainWindow(QMainWindow):
     def _append_html(self, html: str) -> None:
         cursor = self.log_output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
+        if not cursor.atStart():
+            cursor.insertBlock()
         cursor.insertHtml(html)
         if self.log_auto_scroll_check.isChecked():
             sb = self.log_output.verticalScrollBar()
