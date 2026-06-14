@@ -580,6 +580,7 @@ class MainWindow(QMainWindow):
         self.autoplay_delay_spinbox.setSuffix(" s")
         self.autoplay_delay_spinbox.setDecimals(1)
         self.autoplay_delay_spinbox.setValue(0.0)
+        self.autoplay_delay_spinbox.valueChanged.connect(lambda: self._mark_config_dirty())
         self.autoplay_delay_spinbox.setToolTip("Fixed delay between songs")
         random_label = QLabel("Random:")
         self.autoplay_random_delay_spinbox = QDoubleSpinBox()
@@ -588,6 +589,7 @@ class MainWindow(QMainWindow):
         self.autoplay_random_delay_spinbox.setSuffix(" s")
         self.autoplay_random_delay_spinbox.setDecimals(1)
         self.autoplay_random_delay_spinbox.setValue(0.0)
+        self.autoplay_random_delay_spinbox.valueChanged.connect(lambda: self._mark_config_dirty())
         self.autoplay_random_delay_spinbox.setToolTip(
             "Extra random delay added on top of the fixed delay"
         )
@@ -612,6 +614,7 @@ class MainWindow(QMainWindow):
         device_label = QLabel("MIDI input device:")
         self.midi_input_combo = QComboBox()
         self.midi_input_refresh_btn = QPushButton("Refresh")
+        self.midi_input_combo.currentTextChanged.connect(lambda: self._mark_config_dirty())
         self.midi_input_refresh_btn.clicked.connect(self._refresh_midi_inputs)
         device_row.addWidget(device_label)
         device_row.addWidget(self.midi_input_combo)
@@ -680,6 +683,7 @@ class MainWindow(QMainWindow):
         )
         pedal_row.addWidget(pedal_label)
         pedal_row.addWidget(self.pedal_style_combo)
+        self.pedal_style_combo.currentIndexChanged.connect(lambda: self._mark_config_dirty())
         pedal_row.addStretch(1)
         layout.addLayout(pedal_row)
 
@@ -1165,6 +1169,7 @@ class MainWindow(QMainWindow):
         countdown_row = QHBoxLayout()
         self.countdown_check = QCheckBox("3 second countdown")
         countdown_row.addWidget(self.countdown_check)
+        self.countdown_check.toggled.connect(lambda: self._mark_config_dirty())
         countdown_row.addStretch()
         self.reset_defaults_btn = QPushButton("Reset Defaults")
         self.reset_defaults_btn.clicked.connect(self._reset_controls_to_default)
@@ -1212,6 +1217,8 @@ class MainWindow(QMainWindow):
         simple_toggles_layout = QHBoxLayout()
         self.all_humanization_checks["simulate_hands"] = QCheckBox("Simulate Hands")
         self.all_humanization_checks["enable_chord_roll"] = QCheckBox("Chord Rolling")
+        self.all_humanization_checks["simulate_hands"].toggled.connect(lambda: self._mark_config_dirty())
+        self.all_humanization_checks["enable_chord_roll"].toggled.connect(lambda: self._mark_config_dirty())
         simple_toggles_layout.addWidget(self.all_humanization_checks["simulate_hands"])
         simple_toggles_layout.addStretch(1)
         simple_toggles_layout.addWidget(
