@@ -87,74 +87,73 @@ def test_generate_treble_only_section_uses_earliest_note_start(pedal_style):
     assert [(e.time, e.key_char) for e in out] == [(0.2, "down"), (0.6, "up")]
 
 
-@pytest.mark.parametrize("pedal_style", ["legato", "rhythmic"])
-def test_generate_section_styles_truncate_previous_overlap(pedal_style):
-    first_note = make_note(1, 40, 0.0, 0.4, hand="left")
-    second_note = make_note(2, 43, 0.3, 0.3, hand="left")
-    sections = [
-        make_section(0.0, 0.4, [first_note]),
-        make_section(0.5, 0.8, [second_note]),
-    ]
-
+@pytest.mark.parametrize(
+    ("pedal_style", "scenario"),
+    [
+        ("legato", "truncate_overlap"),
+        ("legato", "preserve_non_overlapping"),
+        ("legato", "preserve_tail_overlap"),
+        ("rhythmic", "truncate_overlap"),
+        ("rhythmic", "preserve_non_overlapping"),
+        ("rhythmic", "preserve_tail_overlap"),
+    ],
+)
+def test_generate_section_styles(pedal_style, scenario):
+    scenarios = {
+        "truncate_overlap": {
+            "notes": [
+                make_note(1, 40, 0.0, 0.4, hand="left"),
+                make_note(2, 43, 0.3, 0.3, hand="left"),
+            ],
+            "sections": [
+                make_section(0.0, 0.4, [make_note(1, 40, 0.0, 0.4, hand="left")]),
+                make_section(0.5, 0.8, [make_note(2, 43, 0.3, 0.3, hand="left")]),
+            ],
+            "expected": [(0.0, "down"), (0.3, "up"), (0.3, "down"), (0.6, "up")],
+        },
+        "preserve_non_overlapping": {
+            "notes": [
+                make_note(1, 40, 0.0, 0.1, hand="left"),
+                make_note(2, 40, 1.0, 0.1, hand="left"),
+                make_note(3, 43, 0.85, 0.05, hand="left"),
+            ],
+            "sections": [
+                make_section(0.0, 1.2, [make_note(1, 40, 0.0, 0.1, hand="left"), make_note(2, 40, 1.0, 0.1, hand="left")]),
+                make_section(0.8, 0.95, [make_note(3, 43, 0.85, 0.05, hand="left")]),
+            ],
+            "expected": [
+                (0.0, "down"),
+                (0.1, "up"),
+                (0.85, "down"),
+                (0.9, "up"),
+                (1.0, "down"),
+                (1.1, "up"),
+            ],
+        },
+        "preserve_tail_overlap": {
+            "notes": [
+                make_note(1, 40, 0.8, 0.4, hand="left"),
+                make_note(2, 43, 0.85, 0.05, hand="left"),
+            ],
+            "sections": [
+                make_section(0.8, 1.2, [make_note(1, 40, 0.8, 0.4, hand="left")]),
+                make_section(1.1, 1.2, [make_note(2, 43, 0.85, 0.05, hand="left")]),
+            ],
+            "expected_key_chars": ["down", "up", "down", "up", "down", "up"],
+            "expected_times": pytest.approx([0.8, 0.85, 0.85, 0.9, 0.9, 1.2]),
+        },
+    }
+    cfg = scenarios[scenario]
     out = PedalGenerator.generate_events(
         {"pedal_style": pedal_style},
-        [first_note, second_note],
-        sections,
+        cfg["notes"],
+        cfg["sections"],
     )
-
-    assert [(e.time, e.key_char) for e in out] == [
-        (0.0, "down"),
-        (0.3, "up"),
-        (0.3, "down"),
-        (0.6, "up"),
-    ]
-
-
-@pytest.mark.parametrize("pedal_style", ["legato", "rhythmic"])
-def test_generate_section_styles_preserve_later_non_overlapping_intervals(
-    pedal_style,
-):
-    first_early = make_note(1, 40, 0.0, 0.1, hand="left")
-    first_late = make_note(2, 40, 1.0, 0.1, hand="left")
-    second = make_note(3, 43, 0.85, 0.05, hand="left")
-    sections = [
-        make_section(0.0, 1.2, [first_early, first_late]),
-        make_section(0.8, 0.95, [second]),
-    ]
-
-    out = PedalGenerator.generate_events(
-        {"pedal_style": pedal_style},
-        [first_early, first_late, second],
-        sections,
-    )
-
-    assert [(e.time, e.key_char) for e in out] == [
-        (0.0, "down"),
-        (0.1, "up"),
-        (0.85, "down"),
-        (0.9, "up"),
-        (1.0, "down"),
-        (1.1, "up"),
-    ]
-
-
-@pytest.mark.parametrize("pedal_style", ["legato", "rhythmic"])
-def test_generate_section_styles_preserve_tail_after_partial_overlap(pedal_style):
-    first = make_note(1, 40, 0.8, 0.4, hand="left")
-    second = make_note(2, 43, 0.85, 0.05, hand="left")
-    sections = [
-        make_section(0.8, 1.2, [first]),
-        make_section(1.1, 1.2, [second]),
-    ]
-
-    out = PedalGenerator.generate_events(
-        {"pedal_style": pedal_style},
-        [first, second],
-        sections,
-    )
-
-    assert [e.key_char for e in out] == ["down", "up", "down", "up", "down", "up"]
-    assert [e.time for e in out] == pytest.approx([0.8, 0.85, 0.85, 0.9, 0.9, 1.2])
+    if scenario == "preserve_tail_overlap":
+        assert [e.key_char for e in out] == cfg["expected_key_chars"]
+        assert [e.time for e in out] == cfg["expected_times"]
+    else:
+        assert [(e.time, e.key_char) for e in out] == cfg["expected"]
 
 
 def test_generate_rhythmic_emits_per_left_hand_group():

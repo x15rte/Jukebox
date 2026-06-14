@@ -5,7 +5,7 @@ import theme
 theme = cast(Any, theme)
 
 
-def test_apply_global_palette_sets_core_roles():
+def test_apply_global_palette_sets_all_color_roles():
     class Palette:
         class ColorRole:
             Window = "Window"
@@ -37,12 +37,35 @@ def test_apply_global_palette_sets_core_roles():
     app = App()
     theme.apply_global_palette(cast(Any, app))
 
+    assert len(app.p.calls) == 8
     roles = {role for role, _ in app.p.calls}
-    assert "Window" in roles
-    assert "Base" in roles
-    assert "ToolTipText" in roles
+    all_roles = {"Window", "Base", "AlternateBase", "Text",
+                 "WindowText", "ButtonText", "ToolTipBase", "ToolTipText"}
+    assert roles == all_roles
     assert app.set_palette_called is True
 
+
+
+def test_get_theme_lazy_init_and_cache():
+    theme._theme_cache = None
+    original_get = theme.get_dark_cyber_theme
+    called = []
+    theme.get_dark_cyber_theme = lambda: (called.append(1), original_get())[1]
+    try:
+        t1 = theme.get_theme()
+        t2 = theme.get_theme()
+        assert t1 is t2
+        assert len(called) == 1
+    finally:
+        theme._theme_cache = None
+        theme.get_dark_cyber_theme = original_get
+
+
+def test_apply_global_palette_handles_none_app():
+    try:
+        theme.apply_global_palette(None)  # type: ignore[arg-type]
+    except AttributeError:
+        pass
 
 
 

@@ -51,3 +51,25 @@ def test_midi_track_note_count_and_key_event_defaults():
     e = KeyEvent(time=1.0, priority=1, action="press", key_char="a")
     assert e.pitch is None
     assert e.velocity == 100
+
+
+
+def test_key_event_ordering_by_time_then_priority():
+    events = [
+        KeyEvent(time=2.0, priority=1, action="a", key_char="x"),
+        KeyEvent(time=1.0, priority=2, action="b", key_char="x"),
+        KeyEvent(time=2.0, priority=0, action="c", key_char="x"),
+        KeyEvent(time=1.0, priority=0, action="d", key_char="x"),
+    ]
+    sorted_list = sorted(events)
+    assert sorted_list[0].action == "d"
+    assert sorted_list[1].action == "b"
+    assert sorted_list[2].action == "c"
+    assert sorted_list[3].action == "a"
+
+
+def test_note_end_time_with_zero_duration():
+    n1 = Note(1, 60, 100, 1.0, 0.0)
+    assert n1.end_time == 1.0
+    n2 = Note(2, 60, 100, 1.0, -0.5)
+    assert n2.end_time == 0.5
