@@ -35,6 +35,22 @@ class ConfigBinding:
     setter: Callable[[Any, Any], None]
     is_effectful: bool = False
 
+def _get_pedal_style(w: Any) -> str:
+    val = w.pedal_mapping.get(w.pedal_style_combo.currentText())
+    if val is None:
+        jukebox_logger.warning(f"Unknown pedal style text: {w.pedal_style_combo.currentText()}, falling back to hybrid")
+        val = "hybrid"
+    return val
+
+
+def _set_pedal_style(w: Any, v: str) -> None:
+    mapped = w.pedal_mapping_inv.get(v)
+    if mapped is None:
+        jukebox_logger.warning(f"Unknown pedal style value: {v}, falling back to Original")
+        mapped = "Original (from MIDI)"
+    w.pedal_style_combo.setCurrentText(mapped)
+
+
 
 CONFIG_UI_BINDINGS: list[ConfigBinding] = [
     ConfigBinding(
@@ -49,10 +65,8 @@ CONFIG_UI_BINDINGS: list[ConfigBinding] = [
     ),
     ConfigBinding(
         "pedal_style",
-        lambda w: w.pedal_mapping.get(w.pedal_style_combo.currentText(), "hybrid"),
-        lambda w, v: w.pedal_style_combo.setCurrentText(
-            w.pedal_mapping_inv.get(v, "Original (from MIDI)")
-        ),
+        lambda w: _get_pedal_style(w),
+        lambda w, v: _set_pedal_style(w, v),
     ),
     ConfigBinding(
         "use_88_key_layout",

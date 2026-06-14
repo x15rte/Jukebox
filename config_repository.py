@@ -22,6 +22,7 @@ optional metadata — no manual from_dict/to_dict glue required.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
@@ -529,10 +530,9 @@ class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
     tempo_sway_intensity: float = 0.015
 
     # Runtime-only keys (not persisted, injected during playback setup).
-    # Mutable default is safe here — playback configs are short-lived transient objects.
     midi_file: str = ""
     start_offset: float = 0.0
-    raw_pedal_events: list = []
+    raw_pedal_events: Optional[list] = None
 
     def __init__(self, **kwargs: Any) -> None:
         """Accept arbitrary keyword arguments, including non-annotated extras."""
@@ -542,6 +542,8 @@ class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
                 setattr(self, k, v)
             else:
                 object.__setattr__(self, k, v)
+        if self.raw_pedal_events is None:
+            object.__setattr__(self, 'raw_pedal_events', [])
 
     # ---- Mapping protocol ----
 
@@ -628,8 +630,10 @@ class ConfigRepository:
     def save(self, config: Config) -> None:
         """Persist config to disk. Raises on I/O error."""
         self.ensure_config_dir()
-        with open(self.config_path, "w", encoding="utf-8") as f:
+        tmp_path = self.config_path.with_suffix(".json.tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(config.to_dict(), f, indent=4)
+        os.replace(str(tmp_path), str(self.config_path))
 
 
 class ConfigLoadError(Exception):

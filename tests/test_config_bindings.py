@@ -146,6 +146,13 @@ class DummyWidget:
         self.hotkey_manager = DummyHotkeyManager()
         self.restore_calls = []
         self._saved = []
+        self.pedal_mapping = {
+            "Original (from MIDI)": "original",
+            "Automatic": "hybrid",
+            "Always Sustain": "legato",
+        }
+        self.pedal_mapping_inv = {v: k for k, v in self.pedal_mapping.items()}
+        self.pedal_style_combo = DummyCombo(items=[(k, k) for k in self.pedal_mapping])
 
     def _on_file_submode_changed(self):
         self._saved.append(("file_submode", self.input_mode_playlist_radio.isChecked()))
@@ -327,3 +334,19 @@ def test_set_save_log_to_file_and_set_log_level(monkeypatch):
     assert any(e[0] == "enable" for e in events)
     assert any(e[0] == "disable" for e in events)
     assert ("level", "DEBUG") in events
+
+
+
+def test_pedal_style_getter_unknown_text_uses_fallback():
+    """Getter falls back to hybrid when combo text is unknown."""
+    w = DummyWidget()
+    w.pedal_style_combo.setCurrentText("Garbage")
+    result = cb._get_pedal_style(w)
+    assert result == "hybrid"
+
+
+def test_pedal_style_setter_unknown_value_uses_fallback():
+    """Setter falls back to Original when value is unknown."""
+    w = DummyWidget()
+    cb._set_pedal_style(w, "bogus")
+    assert w.pedal_style_combo.currentText() == "Original (from MIDI)"

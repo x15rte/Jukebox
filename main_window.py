@@ -319,9 +319,11 @@ class MainWindow(QMainWindow):
             self.setWindowState(state)
             self.activateWindow()
             self.raise_()
+        self._mark_config_dirty()
 
     def _change_opacity(self, value):
         self.setWindowOpacity(value / 100.0)
+        self._mark_config_dirty()
 
     def _change_hotkey(self):
         self.hk_btn.setText("Listening...")
@@ -334,6 +336,7 @@ class MainWindow(QMainWindow):
         self.hk_btn.setText("Change")
         self.hk_btn.setEnabled(True)
         self._update_play_stop_labels()
+        self._mark_config_dirty()
 
     def _is_playback_locked(self) -> bool:
         state = getattr(self, "playback_state", "stopped")
@@ -482,6 +485,7 @@ class MainWindow(QMainWindow):
         spinbox.setValue(default_val)
         slider.valueChanged.connect(lambda v: spinbox.setValue(v / factor))
         spinbox.valueChanged.connect(lambda v: slider.setValue(int(v * factor)))
+        spinbox.valueChanged.connect(lambda: self._mark_config_dirty())
         return slider, spinbox
 
     def _create_input_output_group(self):
@@ -895,7 +899,6 @@ class MainWindow(QMainWindow):
             self.autoplay_info_label.setStyleSheet(f"font-style: normal; color: {theme.get_theme().accent_primary};")
 
             self.current_notes = final_notes
-            config["start_offset"] = 0.0
             self.timeline_widget.set_data(final_notes, total_dur, tempo_map)
             self.total_song_duration_sec = total_dur
             self.timeline_widget.set_position(0)
@@ -911,7 +914,7 @@ class MainWindow(QMainWindow):
                 config,
                 total_dur,
                 config.get("output_mode", "key"),
-                config.get("use_88_key_layout", False),
+                config.get("use_88_key_layout", True),
                 log_message=self.add_log_message,
             )
             if started:
@@ -964,6 +967,7 @@ class MainWindow(QMainWindow):
         else:
             if self.midi_input_active:
                 self._disconnect_midi_input()
+        self._mark_config_dirty()
 
     def _refresh_midi_inputs(self, show_dialog: bool = True):
         try:
@@ -1099,6 +1103,7 @@ class MainWindow(QMainWindow):
                     dialog_title="Output Unavailable",
                 )
                 self._disconnect_midi_input()
+        self._mark_config_dirty()
 
     def _on_key_layout_changed(self, _checked: bool = False):
         if self.live_backend and self.midi_input_active:
@@ -1117,6 +1122,7 @@ class MainWindow(QMainWindow):
                     dialog_title="Output Unavailable",
                 )
                 self._disconnect_midi_input()
+        self._mark_config_dirty()
 
     def _handle_live_midi_message(self, msg):
         if not self.live_backend:
@@ -1246,6 +1252,7 @@ class MainWindow(QMainWindow):
             )
             check.toggled.connect(slider.setEnabled)
             check.toggled.connect(spinbox.setEnabled)
+            check.toggled.connect(lambda: self._mark_config_dirty())
             detailed_layout.addWidget(check, row_idx, 0)
             detailed_layout.addWidget(slider, row_idx, 2)
             detailed_layout.addWidget(spinbox, row_idx, 3)
@@ -1293,6 +1300,7 @@ class MainWindow(QMainWindow):
         self.all_humanization_checks["tempo_sway"].toggled.connect(
             self.invert_sway_check.setEnabled
         )
+        self.invert_sway_check.toggled.connect(lambda: self._mark_config_dirty())
         detailed_layout.addWidget(self.invert_sway_check, 6, 0)
         main_v_layout.addLayout(detailed_layout)
 
@@ -1309,6 +1317,7 @@ class MainWindow(QMainWindow):
         self.add_log_message("All settings have been reset to their default values.")
         self._reset_playback_group_to_default()
         self._reset_humanization_group_to_default()
+        self._mark_config_dirty()
 
     def _reset_playback_group_to_default(self):
         defaults = Config()
@@ -1321,14 +1330,16 @@ class MainWindow(QMainWindow):
             self.output_mode_combo.setCurrentIndex(default_output_index)
         self._update_88_key_visibility()
         self.countdown_check.setChecked(defaults.countdown)
+        self._mark_config_dirty()
 
     def _reset_humanization_group_to_default(self):
         self.tempo_spinbox.setValue(Config().tempo)
-        self.all_humanization_spinboxes["vary_timing"].setValue(0.010)
-        self.all_humanization_spinboxes["vary_articulation"].setValue(95.0)
-        self.all_humanization_spinboxes["hand_drift"].setValue(25.0)
-        self.all_humanization_spinboxes["mistake_chance"].setValue(0.5)
-        self.all_humanization_spinboxes["tempo_sway"].setValue(0.015)
+        defaults = Config()
+        self.all_humanization_spinboxes["vary_timing"].setValue(defaults.value_timing_variance)
+        self.all_humanization_spinboxes["vary_articulation"].setValue(defaults.value_articulation)
+        self.all_humanization_spinboxes["hand_drift"].setValue(defaults.value_hand_drift_decay)
+        self.all_humanization_spinboxes["mistake_chance"].setValue(defaults.value_mistake_chance)
+        self.all_humanization_spinboxes["tempo_sway"].setValue(defaults.value_tempo_sway_intensity)
         for check in self.all_humanization_checks.values():
             if check.text():
                 check.setChecked(False)
@@ -1750,7 +1761,7 @@ class MainWindow(QMainWindow):
             config,
             total_dur,
             config["output_mode"],
-            config.get("use_88_key_layout", False),
+            config.get("use_88_key_layout", True),
             log_message=self.add_log_message,
         )
         if started is False:

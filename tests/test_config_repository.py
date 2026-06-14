@@ -407,3 +407,49 @@ def test_playback_config_contains_non_string():
     assert (None in pc) is False
     assert (0.5 in pc) is False
 
+
+
+def test_runtime_playback_dict_keys_cover_pipeline_consumers():
+    """All keys consumed by pipeline stages exist in PlaybackConfig."""
+    cfg = Config()
+    # Set non-default values to ensure keys are populated
+    cfg.enable_vary_timing = True
+    cfg.value_timing_variance = 0.05
+    cfg.enable_vary_articulation = True
+    cfg.value_articulation = 90.0
+    cfg.enable_hand_drift = True
+    cfg.value_hand_drift_decay = 50.0
+    cfg.enable_mistakes = True
+    cfg.value_mistake_chance = 3.0
+    cfg.enable_tempo_sway = True
+    cfg.value_tempo_sway_intensity = 0.05
+    cfg.invert_tempo_sway = True
+    cfg.enable_chord_roll = True
+
+    runtime = cfg.to_runtime_playback_dict()
+
+    humanizer_keys = {
+        "vary_timing", "timing_variance", "vary_articulation", "articulation",
+        "enable_drift_correction", "drift_decay_factor", "enable_chord_roll",
+        "drift_shared_factor", "drift_noise_sigma", "enable_tempo_sway",
+        "tempo_sway_intensity", "invert_tempo_sway",
+    }
+    event_compiler_keys = {
+        "pedal_style", "raw_pedal_events", "enable_mistakes", "mistake_chance",
+        "enable_vary_timing", "enable_vary_articulation", "enable_drift_correction",
+        "enable_chord_roll", "enable_tempo_sway",
+    }
+    player_keys = {"countdown", "start_offset"}
+    pedal_generator_keys = {"pedal_style", "raw_pedal_events"}
+
+    union_keys = humanizer_keys | event_compiler_keys | player_keys | pedal_generator_keys
+
+    for key in sorted(union_keys):
+        if key in ("drift_shared_factor", "drift_noise_sigma"):
+            assert key not in runtime, (
+                f"{key} should not exist in to_runtime_playback_dict()"
+            )
+        else:
+            assert key in runtime, (
+                f"Pipeline consumer key '{key}' missing from to_runtime_playback_dict()"
+            )
