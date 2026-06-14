@@ -55,7 +55,7 @@ Open config dir
 ## How can I be sure this isn’t a malware?
 You can verify it in several ways:
 - Review the source code yourself (it’s fully open source).
-- Use AI tools like [Claude](https://claude.com/product/claude-code) or [DeepWiki](https://deepwiki.com/x15rte/Jukebox) to analyze the code.
+- Use LLM tools like [Claude](https://claude.com/product/claude-code) to analyze the code.
 - Run it directly with `python main.py` without downloading any executable. (Recommended method)
 
 Alternatively, if you prefer to use the pre-built executable from the **Immutable** release:
