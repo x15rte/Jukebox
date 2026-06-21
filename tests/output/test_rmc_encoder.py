@@ -394,6 +394,7 @@ def test_send_frame_batched_writes_scans_and_checks_result(monkeypatch):
     frame = [_Input() for _ in range(10)]
     monkeypatch.setattr(rmc, "_frame_inputs", frame, raising=False)
     monkeypatch.setattr(rmc, "_frame_sizeof", 1, raising=False)
+    monkeypatch.setattr(rmc, "_use_batched_sendinput", True)
 
     class _User32:
         @staticmethod
@@ -584,6 +585,7 @@ def test_send_frame_batched_partial_success_calls_send_key_down_up(monkeypatch):
              for _ in range(10)]
     monkeypatch.setattr(rmc, "_frame_inputs", frame, raising=False)
     monkeypatch.setattr(rmc, "_frame_sizeof", 1, raising=False)
+    monkeypatch.setattr(rmc, "_use_batched_sendinput", True)
 
     class _User32:
         @staticmethod
@@ -614,6 +616,7 @@ def test_send_frame_batched_partial_success_odd_result(monkeypatch):
              for _ in range(10)]
     monkeypatch.setattr(rmc, "_frame_inputs", frame, raising=False)
     monkeypatch.setattr(rmc, "_frame_sizeof", 1, raising=False)
+    monkeypatch.setattr(rmc, "_use_batched_sendinput", True)
 
     class _User32:
         @staticmethod
@@ -673,12 +676,14 @@ def test_ensure_numlock_windows_pydirectinput_exception(monkeypatch):
     monkeypatch.setattr(rmc, "_numlock_ensured", False)
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(rmc, "pydirectinput", SimpleNamespace(
+        keyDown=lambda *a, **k: (_ for _ in ()).throw(Exception("pdi fail")),
+        keyUp=lambda *a, **k: None,
+    ))
     monkeypatch.setattr(
         rmc, "_get_windll",
-        lambda: SimpleNamespace(user32=SimpleNamespace(GetKeyState=lambda _: 0))
+        lambda: SimpleNamespace(user32=SimpleNamespace(GetKeyState=lambda _: 0)),
     )
-    monkeypatch.setattr(rmc.pydirectinput, "keyDown", lambda *a, **k: (_ for _ in ()).throw(Exception("pdi fail")))
-    monkeypatch.setattr(rmc.pydirectinput, "keyUp", lambda *a, **k: None)
 
     rmc.ensure_numlock_on()
     assert rmc._numlock_ensured is False
@@ -689,12 +694,15 @@ def test_tap_key_windows_pydirectinput_keyup_exception(monkeypatch):
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
     calls = []
-    monkeypatch.setattr(rmc.pydirectinput, "keyDown", lambda *a, **k: calls.append(("down", a[0])))
 
     def _failing_keyup(*a, **k):
         calls.append(("up_fail", a[0]))
         raise Exception("keyUp error")
-    monkeypatch.setattr(rmc.pydirectinput, "keyUp", _failing_keyup)
+
+    monkeypatch.setattr(rmc, "pydirectinput", SimpleNamespace(
+        keyDown=lambda *a, **k: calls.append(("down", a[0])),
+        keyUp=_failing_keyup,
+    ))
 
     rmc._tap_key("numpad5")
     assert calls == [("down", "numpad5"), ("up_fail", "numpad5")]
@@ -743,6 +751,7 @@ def test_send_key_up_sendinput_failure_warning(monkeypatch):
     """Cover _send_key_up SendInput failure warning (lines 315-317)."""
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(rmc, "pydirectinput", _PDIModule())
 
     class _User32:
         @staticmethod
@@ -778,6 +787,7 @@ def test_send_key_down_sendinput_failure_warning(monkeypatch):
     """Cover _send_key_down SendInput failure warning (lines 332-334)."""
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(rmc, "pydirectinput", _PDIModule())
 
     class _User32:
         @staticmethod

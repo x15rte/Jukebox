@@ -183,6 +183,7 @@ def test_get_macos_vk_for_key_and_modifier_paths(monkeypatch):
     mod = cast(Any, _fresh_module())
 
     monkeypatch.setattr(mod.sys, "platform", "win32")
+    monkeypatch.setattr(mod, "_MACOS_VK", {})
     assert mod.get_macos_vk_for_key("a") is None
     assert mod.get_macos_vk_for_modifier(type("K", (), {"name": "shift"})()) is None
 

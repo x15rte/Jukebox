@@ -306,6 +306,8 @@ def _send_key_up(scancode: int) -> None:
     windll = _get_windll()
     if windll is None:
         return
+    if pydirectinput is None:
+        return
     up = (pydirectinput.Input * 1)()  # type: ignore[union-attr]
     up[0].type = ctypes.c_ulong(_INPUT_KEYBOARD)
     up[0].ii.ki.wVk = 0
@@ -322,6 +324,8 @@ def _send_key_down(scancode: int) -> None:
         return
     windll = _get_windll()
     if windll is None:
+        return
+    if pydirectinput is None:
         return
     down = (pydirectinput.Input * 1)()  # type: ignore[union-attr]
     down[0].type = ctypes.c_ulong(_INPUT_KEYBOARD)
