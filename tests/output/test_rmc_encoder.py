@@ -412,8 +412,8 @@ def test_send_frame_batched_writes_scans_and_checks_result(monkeypatch):
 
 
 def test_send_frame_batched_returns_false_without_windll(monkeypatch):
+    monkeypatch.setattr(rmc, "_use_batched_sendinput", True)
     monkeypatch.setattr(rmc, "_get_windll", lambda: None)
-
     assert rmc._send_frame_batched(1, 2, 3, 4, 5) is False
 
 
@@ -746,6 +746,14 @@ def test_send_key_up_early_return_no_windll(monkeypatch):
     monkeypatch.setattr(rmc, "_get_windll", lambda: None)
     rmc._send_key_up(42)
 
+def test_send_key_up_early_return_pydirectinput_none(monkeypatch):
+    """Cover _send_key_up early return when pydirectinput is None (lines 309-310)."""
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(rmc, "_get_windll", lambda: object())
+    monkeypatch.setattr(rmc, "pydirectinput", None)
+    rmc._send_key_up(42)
+
 
 def test_send_key_up_sendinput_failure_warning(monkeypatch):
     """Cover _send_key_up SendInput failure warning (lines 315-317)."""
@@ -780,6 +788,14 @@ def test_send_key_down_early_return_no_windll(monkeypatch):
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
     monkeypatch.setattr(rmc, "_get_windll", lambda: None)
+    rmc._send_key_down(42)
+
+def test_send_key_down_early_return_pydirectinput_none(monkeypatch):
+    """Cover _send_key_down early return when pydirectinput is None (lines 328-329)."""
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(rmc, "_get_windll", lambda: object())
+    monkeypatch.setattr(rmc, "pydirectinput", None)
     rmc._send_key_down(42)
 
 

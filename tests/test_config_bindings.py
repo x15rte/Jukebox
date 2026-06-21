@@ -321,6 +321,29 @@ def test_set_window_geometry_empty_and_invalid(monkeypatch):
     assert w.restore_calls == []
 
 
+def test_set_window_geometry_invalid_restores_to_screen_center(monkeypatch):
+    """Cover invalid geometry fallback: screen center calculation (lines 342-344)."""
+    w = DummyWidget()
+    moved: list = []
+    monkeypatch.setattr(w, "move", lambda *a: moved.append(a))
+
+    class MockPoint:
+        def __sub__(self, _other):
+            return MockPoint()
+
+    class MockRect:
+        center = MockPoint
+
+    class MockScreen:
+        @staticmethod
+        def availableGeometry():
+            return MockRect()
+
+    monkeypatch.setattr(cb.QApplication, "primaryScreen", lambda: MockScreen())
+    cb._set_window_geometry(w, "QUJD")
+    assert moved
+
+
 def test_set_save_log_checkbox_blocks_signals():
     w = DummyWidget()
     cb._set_save_log_to_file_checkbox(w, True)
