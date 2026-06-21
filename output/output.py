@@ -653,8 +653,8 @@ class KeyboardBackend(OutputBackend):
                         for mod_key in stale_mod_keys:
                             try:
                                 self._kb.release(mod_key)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                self._log_exception("KeyboardBackend stale mod key release error", e)
                         self._kb.release(base_key)
                     try:
                         # Keep modifiers held — store for release in note_off
@@ -672,13 +672,12 @@ class KeyboardBackend(OutputBackend):
                         for mod in reversed(mod_keys):
                             try:
                                 self._kb.release(mod)
-                            except Exception:
-                                pass
-                        if was_active:
+                            except Exception as cleanup_e:
+                                self._log_exception("KeyboardBackend note_on cleanup release error", cleanup_e)
                             try:
                                 self._kb.press(base_key)
-                            except Exception:
-                                pass
+                            except Exception as cleanup_e:
+                                self._log_exception("KeyboardBackend note_on cleanup re-press error", cleanup_e)
                         self._log_exception("KeyboardBackend note_on error", e)
                         return
                     with self._lock:

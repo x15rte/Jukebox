@@ -1258,8 +1258,8 @@ class MainWindow(QMainWindow):
             if old_backend is not None:
                 try:
                     old_backend.shutdown()
-                except Exception:
-                    pass
+                except Exception as shutdown_e:
+                    jukebox_logger.error(f"Error shutting down live backend: {shutdown_e}", exc_info=True)
             self._log_error(
                 f"Live MIDI output failed: {e}",
                 show_dialog=True,
@@ -2033,17 +2033,17 @@ class MainWindow(QMainWindow):
 
         try:
             self.autoplay_next_timer.timeout.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            jukebox_logger.debug(f"Error disconnecting autoplay_next_timer: {e}")
         self._config_save_timer.stop()
         try:
             self._config_save_timer.timeout.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            jukebox_logger.debug(f"Error disconnecting config_save_timer: {e}")
         try:
             self._log_filter_timer.timeout.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            jukebox_logger.debug(f"Error disconnecting log_filter_timer: {e}")
         # Stop playback first (so UI re-enables, then save accurate state)
         try:
             if self.playback_controller.is_running:

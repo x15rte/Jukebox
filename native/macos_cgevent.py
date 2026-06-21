@@ -259,10 +259,10 @@ def post_macos_key_event(key_code: int, key_down: bool, flags: int = 0) -> bool:
         if event:
             try:
                 _macos_core_foundation.CFRelease(event)
-            except Exception:
-                pass
+            except Exception as e:
+                jukebox_logger.debug(f"CFRelease(event) failed: {e}")
         if source:
             try:
                 _macos_core_foundation.CFRelease(source)
-            except Exception:
-                pass
+            except Exception as e:
+                jukebox_logger.debug(f"CFRelease(source) failed: {e}")

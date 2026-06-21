@@ -25,7 +25,7 @@ class Humanizer:
         self.config = config
         self.left_hand_drift = 0.0
         self.right_hand_drift = 0.0
-        self._rng = Random(42)  # fixed seed for reproducibility
+        self._rng = Random(42)  # nosec: fixed seed for reproducibility, not security
         # Allow tests to inject deterministic RNG via class-level overrides.
         # These are checked before self._rng so global random monkeypatches still work.
         self._test_gauss = getattr(Humanizer, '_test_gauss_override', None)
@@ -43,7 +43,7 @@ class Humanizer:
         if self._test_random is not None:  # pragma: no cover
             return self._test_random()  # pragma: no cover
         if random.random is not _original_random:
-            return random.random()
+            return random.random()  # nosec: not used for security
         return self._rng.random()
     def prepare_shared_offsets(self, all_notes: List[Note]) -> None:
         """Precompute one timing offset per combined time group for shared drift (both hands). Call before apply_to_hand."""
