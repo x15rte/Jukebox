@@ -43,7 +43,7 @@ def test_main_wires_app_icon_window_and_exec(monkeypatch, tmp_path):
     monkeypatch.setattr(app_main, "QApplication", FakeApp)
     monkeypatch.setattr(app_main, "MainWindow", FakeWindow)
     monkeypatch.setattr(app_main, "QIcon", FakeIcon)
-    monkeypatch.setattr(app_main, "APP_VERSION", "vX")
+    monkeypatch.setattr(app_main, "get_version", lambda: "vX")
     monkeypatch.setattr(app_main, "APP_ID", "jukebox.id")
     monkeypatch.setattr(app_main, "set_app_user_model_id", lambda app_id: events.append(("app_id", app_id)))
     monkeypatch.setattr(app_main.theme, "apply_global_palette", lambda app: events.append("palette"))
@@ -135,7 +135,7 @@ def test_main_module_name_guard_invokes_main(monkeypatch, tmp_path):
     fake_main_window.APP_ID = "jukebox.id"
 
     fake_version = cast(Any, ModuleType("version"))
-    fake_version.APP_VERSION = "vX"
+    fake_version.get_version = lambda: "vX"
     fake_version._resource_dir = lambda: tmp_path
 
     fake_platform_utils = cast(Any, ModuleType("platform_utils"))

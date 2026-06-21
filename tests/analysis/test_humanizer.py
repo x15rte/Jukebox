@@ -33,8 +33,7 @@ def test_apply_to_hand_applies_roll_and_duration_floor(monkeypatch):
         "enable_chord_roll": True,
     }
     hz = Humanizer(cfg)
-    monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *a, **k: 0.0)
-    monkeypatch.setattr("analysis.humanizer.random.random", lambda *a, **k: 1.0)
+    hz._rng = type("FakeRng", (), {"gauss": lambda self, mu, sigma: 0.0, "random": lambda self: 1.0})()  # type: ignore[assignment]
 
     notes = [
         make_note(1, 60, 0.0, 0.01, hand="right"),
@@ -43,8 +42,9 @@ def test_apply_to_hand_applies_roll_and_duration_floor(monkeypatch):
     hz.apply_to_hand(notes, "right", set())
 
     assert notes[0].start_time <= notes[1].start_time
-    assert notes[0].duration == 0.03
-    assert notes[1].duration == 0.03
+    # With proportional floor (10% of original 0.01 = 0.001, minimum 0.01)
+    assert notes[0].duration == 0.01
+    assert notes[1].duration == 0.01
 
 
 @pytest.mark.parametrize(
@@ -105,12 +105,11 @@ def test_apply_tempo_rubato_fast_and_slow_invert(monkeypatch):
 def test_prepare_shared_offsets_populates_and_clamps(monkeypatch):
     hz = Humanizer(
         {
-            "vary_timing": True,
             "enable_drift_correction": True,
-            "timing_variance": 0.01,
+            "drift_shared_sigma": 0.01,
         }
     )
-    monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *_a, **_k: 0.2)
+    hz._rng = type("FakeRng", (), {"gauss": lambda self, mu, sigma: 0.2, "random": lambda self: 0.5})()  # type: ignore[assignment]
     notes = [
         make_note(1, 60, 0.123, 0.2, hand="left"),
         make_note(2, 64, 0.127, 0.2, hand="right"),
@@ -119,7 +118,7 @@ def test_prepare_shared_offsets_populates_and_clamps(monkeypatch):
     hz.prepare_shared_offsets(notes)
 
     assert hz._shared_drift_offsets
-    key = round(notes[0].start_time, 2)
+    key = round(notes[0].start_time, 3)
     assert hz._shared_drift_offsets[key] == 0.03
 
 
@@ -141,7 +140,8 @@ def test_apply_to_hand_resync_and_drift_update(monkeypatch, hand, decay, drift_a
             "drift_noise_sigma": 0.01,
         }
     )
-    monkeypatch.setattr("analysis.humanizer.random.gauss", lambda *_a, **_k: 0.0)
+    # Override the per-instance RNG to return deterministic values
+    hz._rng = type("FakeRng", (), {"gauss": lambda self, mu, sigma: 0.0, "random": lambda self: 0.5})()  # type: ignore[assignment]
     notes = [make_note(1, note_pitch, note_start, 0.2, hand=hand)]
     setattr(hz, drift_attr, 0.4)
     hz._shared_drift_offsets = {note_start: shared_offset}

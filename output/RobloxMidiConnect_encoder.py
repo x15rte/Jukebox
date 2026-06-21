@@ -8,12 +8,16 @@ the game client and **must not** be changed.
 """
 
 import math
+import threading
 import time
 import platform
 import ctypes
 from typing import Tuple
 
+import sys
 from logger_core import jukebox_logger
+
+_batch_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +63,12 @@ _SCAN_CODES = {
 # ---------------------------------------------------------------------------
 
 _platform = platform.system()
+if _platform == "Darwin":
+    from native import post_macos_key_event as _pmke
+else:
+    _pmke = None
 _numlock_ensured = False
+_numlock_lock = threading.Lock()
 
 
 def reset_batched_sendinput() -> None:
@@ -69,8 +78,9 @@ def reset_batched_sendinput() -> None:
     permanently degrade to per-key fallback.
     """
     global _use_batched_sendinput
-    if _platform == "Windows" and _use_pydirectinput and not _use_batched_sendinput:
-        _use_batched_sendinput = True
+    with _batch_lock:
+        if _platform == "Windows" and _use_pydirectinput and not _use_batched_sendinput:
+            _use_batched_sendinput = True
 
 
 
@@ -129,8 +139,11 @@ if _platform == "Windows":
             )
         _frame_sizeof = ctypes.sizeof(pydirectinput.Input)
         _use_batched_sendinput = True
-    except ImportError:
+    except Exception:
         _use_pydirectinput = False
+
+if _platform != "Windows":
+    pydirectinput = None  # type: ignore[assignment]
 
 # pynput transport for Linux/other non-Windows, non-macOS platforms.
 _kb = None
@@ -214,20 +227,25 @@ def ensure_numlock_on() -> None:
     global _numlock_ensured
     if _numlock_ensured:
         return
-    _numlock_ensured = True
-    if _platform != "Windows":
-        return
-    try:
-        windll = _get_windll()
-        if windll is None or windll.user32.GetKeyState(0x90) & 1:
+    with _numlock_lock:
+        if _numlock_ensured:
             return
-        if _use_pydirectinput:
-            pydirectinput.keyDown("numlock", _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
-            pydirectinput.keyUp("numlock", _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
-    except Exception as e:
-        jukebox_logger.debug(f"Failed to ensure NumLock state: {e}")  # debug is appropriate — best-effort
-        return
-
+        if _platform != "Windows":
+            return
+        try:
+            windll = _get_windll()
+            if windll is None or windll.user32.GetKeyState(0x90) & 1:
+                _numlock_ensured = True
+                return
+            if _use_pydirectinput:
+                try:
+                    pydirectinput.keyDown("numlock", _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
+                    pydirectinput.keyUp("numlock", _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
+                    _numlock_ensured = True
+                except Exception as e:
+                    jukebox_logger.warning(f"Failed to ensure NumLock state: {e}")
+        except Exception as e:
+            jukebox_logger.debug(f"Failed to ensure NumLock state: {e}")  # debug is appropriate — best-effort
 
 def _tap_key(name: str) -> None:
     """Press and release a single numpad key with the platform transport."""
@@ -239,62 +257,124 @@ def _tap_key(name: str) -> None:
             return
         try:
             pydirectinput.keyDown(name, _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
+        except Exception as e:
+            jukebox_logger.warning(f"pydirectinput key send failed for '{name}': {e}", exc_info=True)
+            return
+        try:
             pydirectinput.keyUp(name, _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
         except Exception as e:
-            jukebox_logger.warning(
-                f"pydirectinput key send failed for '{name}': {e}",
-                exc_info=True,
-            )
-            return
+            jukebox_logger.warning(f"pydirectinput keyUp failed for '{name}': {e}", exc_info=True)
         return
 
     if _platform == "Darwin":
         vk = _platform_map.get(name)
-        if vk is not None:
+        if vk is not None and _pmke is not None:
             try:
-                from native import post_macos_key_event
-
-                post_macos_key_event(vk, True, 0)
-                post_macos_key_event(vk, False, 0)
+                if not _pmke(vk, True, 0):
+                    jukebox_logger.warning(f"macOS CGEvent keyDown failed for '{name}'")
+                if not _pmke(vk, False, 0):
+                    jukebox_logger.warning(f"macOS CGEvent keyUp failed for '{name}'")
             except Exception as e:
                 jukebox_logger.warning(
                     f"macOS CGEvent key send failed for '{name}': {e}",
                     exc_info=True,
                 )
-                return
         return
 
     kc = _precomputed_keys.get(name)
-    if kc is not None:
-        kb = _keyboard
-        if kb is not None:
-            try:
-                kb.press(kc)
-                kb.release(kc)
-            except Exception as e:
-                jukebox_logger.warning(
-                    f"pynput key send failed for '{name}': {e}",
-                    exc_info=True,
-                )
-                return
+    if kc is None:
+        jukebox_logger.warning(f"Cannot send key '{name}': key not found in precomputed mappings")
+        return
+    kb = _keyboard
+    if kb is None:
+        jukebox_logger.warning(f"Cannot send key '{name}': pynput keyboard controller not available")
+        return
+    try:
+        kb.press(kc)
+        kb.release(kc)
+    except Exception as e:
+        jukebox_logger.warning(
+            f"pynput key send failed for '{name}': {e}",
+            exc_info=True,
+        )
+
+
+def _send_key_up(scancode: int) -> None:
+    """Send a single KEYUP INPUT event via SendInput."""
+    if _platform != "Windows" or not _use_pydirectinput:
+        return
+    windll = _get_windll()
+    if windll is None:
+        return
+    up = (pydirectinput.Input * 1)()  # type: ignore[union-attr]
+    up[0].type = ctypes.c_ulong(_INPUT_KEYBOARD)
+    up[0].ii.ki.wVk = 0
+    up[0].ii.ki.wScan = scancode
+    up[0].ii.ki.dwFlags = _KEYEVENTF_SCANCODE | _KEYEVENTF_KEYUP
+    up[0].ii.ki.time = 0
+    sent = windll.user32.SendInput(1, up, ctypes.sizeof(pydirectinput.Input))  # type: ignore[union-attr]
+    if sent != 1:
+        jukebox_logger.warning(f"SendInput KEYUP for scancode {scancode:#x} returned {sent}")
+
+def _send_key_down(scancode: int) -> None:
+    """Send a single KEYDOWN INPUT event via SendInput."""
+    if _platform != "Windows" or not _use_pydirectinput:
+        return
+    windll = _get_windll()
+    if windll is None:
+        return
+    down = (pydirectinput.Input * 1)()  # type: ignore[union-attr]
+    down[0].type = ctypes.c_ulong(_INPUT_KEYBOARD)
+    down[0].ii.ki.wVk = 0
+    down[0].ii.ki.wScan = scancode
+    down[0].ii.ki.dwFlags = _KEYEVENTF_SCANCODE
+    down[0].ii.ki.time = 0
+    sent = windll.user32.SendInput(1, down, ctypes.sizeof(pydirectinput.Input))  # type: ignore[union-attr]
+    if sent != 1:
+        jukebox_logger.warning(f"SendInput KEYDOWN for scancode {scancode:#x} returned {sent}")
 
 
 def _send_frame_batched(sc0, sc1, sc2, sc3, sc4) -> bool:
     """Send 5 key taps as 10 INPUT events in a single SendInput call."""
+    if not _use_batched_sendinput:
+        return False
     windll = _get_windll()
     if windll is None:
         return False
     _frame_inputs[0].ii.ki.wScan = sc0
+    _frame_inputs[0].ii.ki.dwFlags = _KEYEVENTF_SCANCODE
     _frame_inputs[1].ii.ki.wScan = sc0
+    _frame_inputs[1].ii.ki.dwFlags = _KEYEVENTF_SCANCODE | _KEYEVENTF_KEYUP
     _frame_inputs[2].ii.ki.wScan = sc1
+    _frame_inputs[2].ii.ki.dwFlags = _KEYEVENTF_SCANCODE
     _frame_inputs[3].ii.ki.wScan = sc1
+    _frame_inputs[3].ii.ki.dwFlags = _KEYEVENTF_SCANCODE | _KEYEVENTF_KEYUP
     _frame_inputs[4].ii.ki.wScan = sc2
+    _frame_inputs[4].ii.ki.dwFlags = _KEYEVENTF_SCANCODE
     _frame_inputs[5].ii.ki.wScan = sc2
+    _frame_inputs[5].ii.ki.dwFlags = _KEYEVENTF_SCANCODE | _KEYEVENTF_KEYUP
     _frame_inputs[6].ii.ki.wScan = sc3
+    _frame_inputs[6].ii.ki.dwFlags = _KEYEVENTF_SCANCODE
     _frame_inputs[7].ii.ki.wScan = sc3
+    _frame_inputs[7].ii.ki.dwFlags = _KEYEVENTF_SCANCODE | _KEYEVENTF_KEYUP
     _frame_inputs[8].ii.ki.wScan = sc4
+    _frame_inputs[8].ii.ki.dwFlags = _KEYEVENTF_SCANCODE
     _frame_inputs[9].ii.ki.wScan = sc4
-    return windll.user32.SendInput(10, _frame_inputs, _frame_sizeof) == 10
+    _frame_inputs[9].ii.ki.dwFlags = _KEYEVENTF_SCANCODE | _KEYEVENTF_KEYUP
+    result = windll.user32.SendInput(10, _frame_inputs, _frame_sizeof)
+    if result == 10:
+        return True
+    if result > 0:
+        scs = [sc0, sc1, sc2, sc3, sc4]
+        fully_sent = result // 2
+        if result % 2 == 1:  # KEYDOWN sent but KEYUP not sent for this key
+            _send_key_up(scs[fully_sent])
+            fully_sent += 1
+        for i in range(fully_sent, 5):
+            _send_key_down(scs[i])
+            _send_key_up(scs[i])
+        return True  # handled partial success
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -307,32 +387,31 @@ def encode_and_send_message(
 ) -> None:
     """Send one RMC protocol frame: multiply prefix followed by 4 encoded digits."""
     global _use_batched_sendinput
-    ensure_numlock_on()
+    with _batch_lock:
+        ensure_numlock_on()
+        if _use_batched_sendinput and inter_key_delay <= 0:
+            ok = _send_frame_batched(
+                _MULTIPLY_SCAN,
+                _ENCODED_SCAN[max(0, min(11, a))],
+                _ENCODED_SCAN[max(0, min(11, b))],
+                _ENCODED_SCAN[max(0, min(11, c))],
+                _ENCODED_SCAN[max(0, min(11, d))],
+            )
+            if ok:
+                return
+        _tap_key("multiply")
+        for val in (a, b, c, d):
+            if inter_key_delay > 0:
+                time.sleep(inter_key_delay)
+            _tap_key(ENCODED_KEYS[max(0, min(11, val))])
 
-    if _use_batched_sendinput and inter_key_delay <= 0:
-        ok = _send_frame_batched(
-            _MULTIPLY_SCAN,
-            _ENCODED_SCAN[max(0, min(11, a))],
-            _ENCODED_SCAN[max(0, min(11, b))],
-            _ENCODED_SCAN[max(0, min(11, c))],
-            _ENCODED_SCAN[max(0, min(11, d))],
-        )
-        if not ok:
-            _use_batched_sendinput = False
-        else:
-            return
-
-    _tap_key("multiply")
-    for val in (a, b, c, d):
-        if inter_key_delay > 0:
-            time.sleep(inter_key_delay)
-        _tap_key(ENCODED_KEYS[max(0, min(11, val))])
 
 
 def _encode_note_components(
     note: int, velocity: int, is_note_off: bool
 ) -> Tuple[int, int, int, int]:
     """Encode note + velocity into four base-12 values."""
+    note = max(0, min(127, note))
     octave = math.floor(note / 12)
     note_in_octave = math.floor(note % 12)
     if is_note_off:

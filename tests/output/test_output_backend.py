@@ -11,9 +11,11 @@ def test_execute_batch_orders_pedal_release_press():
     ]
     b.execute_batch(events)
 
-    assert b.calls[0][0] == "pedal_on"
-    assert b.calls[1][0] == "note_off"
-    assert b.calls[2][0] == "note_on"
+    # execute_batch entry is recorded first, then individual calls from super()
+    assert b.calls[0][0] == "execute_batch"
+    assert b.calls[1][0] == "pedal_on"
+    assert b.calls[2][0] == "note_off"
+    assert b.calls[3][0] == "note_on"
 
 
 def test_create_backend_midi_numpad(monkeypatch):

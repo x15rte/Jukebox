@@ -1,66 +1,96 @@
-"""Hotkey management: global key listener for play/pause toggle."""
+"""Hotkey management: global hotkey for play/pause toggle via Qt QShortcut.
+
+Uses Qt's QShortcut for the toggle hotkey (no global hooks, no AV false positives).
+Binding mode captures the next key press via a QApplication event filter.
+"""
 
 from __future__ import annotations
 
-from pynput import keyboard
-from pynput.keyboard import Key, KeyCode
-from PyQt6.QtCore import QObject, pyqtSignal as Signal
+from PyQt6.QtCore import QObject, QEvent, Qt, pyqtSignal as Signal
+from PyQt6.QtGui import QShortcut, QKeySequence, QKeyEvent
+from PyQt6.QtWidgets import QApplication, QWidget
 
-from logger_core import jukebox_logger
-
-
-def parse_hotkey_string(s: str | None) -> Key | KeyCode:
-    """Parse config string to pynput Key or KeyCode (special key name or single char); default Key.f8."""
-    if not s or not isinstance(s, str):
-        return Key.f8
-    s = s.strip().lower()
-    special = getattr(Key, s, None)
-    if special is not None:
-        return special
-    if len(s) == 1:
-        try:
-            return KeyCode.from_char(s)
-        except Exception:
-            jukebox_logger.debug(f"Invalid hotkey character '{s}', using default F8.")
-            return Key.f8
-    return Key.f8
 
 
 class HotkeyManager(QObject):
-    """Global hotkey listener: current_key triggers toggle; start_binding() captures next key and emits bound_updated."""
+    """Application-scope hotkey toggle using QShortcut.
+
+    Signals:
+        toggle_requested: emitted when the current hotkey is pressed.
+        bound_updated: emitted with the new key string when a binding is captured.
+    """
 
     toggle_requested = Signal()
     bound_updated = Signal(str)
 
-    def __init__(self):
-        super().__init__()
-        self.current_key = Key.f8
-        self.listener = None
-        self.listening_for_bind = False
-        self._start_listener()
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._parent = parent
+        self.current_key: str = "F8"
+        self._listening_for_bind = False
+        self._shortcut: QShortcut | None = None
+        self._update_shortcut()
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
-    def _start_listener(self):
-        self.listener = keyboard.Listener(on_press=self.on_press)
-        self.listener.start()
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        """Capture key press during binding mode."""
+        if self._listening_for_bind and event.type() == QEvent.Type.KeyPress:
+            ke: QKeyEvent = event  # type: ignore[assignment]
+            if ke.isAutoRepeat():
+                return False
+            key = ke.key()
+            mods = ke.modifiers()
+            ks = QKeySequence(int(key) | mods.value)
+            key_str = ks.toString(QKeySequence.SequenceFormat.NativeText)
+            if key_str:
+                self._listening_for_bind = False
+                self.current_key = key_str
+                self._update_shortcut()
+                self.bound_updated.emit(key_str)
+                return True
+            else:
+                self._listening_for_bind = False
+                # Modifier-only keys (Ctrl, Shift, Alt) cannot be used as hotkeys.
+                self.current_key = "F8"  # keep previous
+                self.bound_updated.emit("(modifier only — press a key combo)")
+                return True
+        return super().eventFilter(obj, event)
 
-    def format_key_string(self, key):
-        if hasattr(key, "char") and key.char:
-            return key.char
-        return str(key).replace("Key.", "")
+    def _update_shortcut(self) -> None:
+        """Replace the QShortcut with one for the current key."""
+        if self._shortcut is not None:
+            self._shortcut.setEnabled(False)
+            self._shortcut.deleteLater()
+        ks = QKeySequence(self.current_key)
+        self._shortcut = QShortcut(ks, self._parent)
+        self._shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._shortcut.activated.connect(self.toggle_requested.emit)
 
-    def on_press(self, key):
-        if self.listening_for_bind:
-            self.current_key = key
-            self.listening_for_bind = False
-            self.bound_updated.emit(self.format_key_string(key))
-            return
-        if key == self.current_key:
-            self.toggle_requested.emit()
+    @staticmethod
+    def format_key_string(key_str: str) -> str:
+        """Return the key string as-is (already display-ready from QKeySequence)."""
+        return key_str
 
-    def start_binding(self):
-        self.listening_for_bind = True
+    def start_binding(self) -> None:
+        """Enter binding mode: the next key press applies the hotkey."""
+        self._listening_for_bind = True
 
-    def stop(self):
-        """Stop the pynput listener. Call during application shutdown."""
-        if self.listener is not None:
-            self.listener.stop()
+    def set_hotkey(self, key_str: str) -> None:
+        """Set the toggle hotkey from a key string (e.g. 'F8', 'Ctrl+Shift+A')."""
+        self.current_key = key_str
+        self._update_shortcut()
+
+    def get_current_key(self) -> str:
+        """Return the current hotkey as a key string."""
+        return self.current_key
+    def stop(self) -> None:
+        """Disable the shortcut and remove event filter. Called during shutdown."""
+        app = QApplication.instance()
+        if self._shortcut is not None:
+            self._shortcut.setEnabled(False)
+            self._shortcut.deleteLater()
+            self._shortcut = None
+        if app is not None:
+            app.removeEventFilter(self)

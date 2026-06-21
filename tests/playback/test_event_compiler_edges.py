@@ -5,6 +5,7 @@ import math
 import pytest
 
 from playback.player import EventCompiler
+from models import KeyEvent
 from tests.helpers.builders import make_note
 
 
@@ -96,7 +97,12 @@ def test_compile_empty_sections_returns_events(monkeypatch):
     notes = [make_note(1, 60, 0.0, 0.5, hand="right")]
     _stub_humanizer(monkeypatch)
     out = EventCompiler.compile(notes, [], {"pedal_style": "none"})
-    assert out
+    assert len(out) == 2  # press + release
+    assert all(isinstance(e, KeyEvent) for e in out)
+    assert out[0].time == 0.0
+    assert out[0].action == "press"
+    assert out[1].time == 0.5
+    assert out[1].action == "release"
 
 
 # -- Private-method unit tests moved from test_event_compiler.py --

@@ -19,32 +19,33 @@ def test_stop_sets_stop_and_clears_pause():
 def test_seek_while_paused_updates_start_and_pause_ts(monkeypatch):
     p = pmod.Player([FakeEvent(0.1, 2, "press", pitch=60)], FakeBackend(), {}, 1.0)
     prog = FakeSignal()
-    vis = FakeSignal()
     p.progress_updated = cast(Any, prog)
-    p.visualizer_updated = cast(Any, vis)
     p.pause_event.set()
     monkeypatch.setattr(pmod.time, "perf_counter", lambda: 10.0)
 
     p.seek(0.1)
 
     assert p.start_time == 9.9
-    assert p._pause_ts == 10.0
+    assert p._pause_ts == 0.0
     assert prog.emitted[-1] == (0.1,)
-    assert vis.emitted[-1] == ([],)
 
 
 def test_countdown_emits_status_and_sleeps(monkeypatch):
     p = pmod.Player([], FakeBackend(), {}, 1.0)
     status = FakeSignal()
     p.status_updated = cast(Any, status)
-    sleeps = []
-    monkeypatch.setattr(pmod.time, "sleep", lambda s: sleeps.append(s))
+    waits = []
+    orig_wait = p.stop_event.wait
+    def fake_wait(timeout=None):
+        waits.append(timeout)
+        return False  # never set
+    p.stop_event.wait = fake_wait
 
     p._countdown()
 
     assert status.emitted[0] == ("Get ready...",)
     assert status.emitted[1:] == [("3...",), ("2...",), ("1...",)]
-    assert sleeps == [1, 1, 1]
+    assert waits == [1, 1, 1]
 
 
 def test_run_loop_restores_timer_and_switch_interval(monkeypatch):
@@ -174,5 +175,7 @@ def test_execute_batch_ignores_events_without_pitch_values():
     )
 
     assert backend.calls and backend.calls[-1][0] == "execute_batch"
+    assert not any(c[0] in ("note_on", "note_off") for c in backend.calls), \
+        "Pitch-less events should not generate note_on/note_off backend calls"
     assert p._active_pitches == {60}
     assert vis.emitted == []

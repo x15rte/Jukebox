@@ -87,3 +87,32 @@ def test_play_reports_shutdown_error(monkeypatch):
 
     assert any("shutdown boom" in value for value in statuses.values)
     assert finished.count == 1
+
+
+def test_execute_batch_same_batch_press_release_tracks_state():
+    """A pitch pressed AND released in the same batch is added to _active_pitches.
+
+    The backend processes release → press, so the key ends up pressed.
+    _active_pitches must reflect that state for correct pause/resume restoration.
+    """
+    backend = FakeBackend()
+    p = Player([], backend, {}, 1.0)
+    rec = Recorder()
+    p.visualizer_updated = cast(Any, rec)
+
+    # Both press and release of the same pitch in one batch
+    p._execute_batch(
+        cast(
+            list[KeyEvent],
+            [
+                FakeEvent(0.0, 4, "release", pitch=60),  # release first (higher priority)
+                FakeEvent(0.0, 2, "press", pitch=60),    # press second
+            ],
+        )
+    )
+
+    # After the batch, pitch should be in _active_pitches (backend pressed it)
+    assert 60 in p._active_pitches
+    # Visualizer was updated
+    assert rec.values
+    assert 60 in set(rec.values[-1])

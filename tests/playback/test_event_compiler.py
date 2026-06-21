@@ -305,8 +305,8 @@ def test_compile_original_raw_pedal_normalizes_transition_state_machine_before_r
 
     pedal_events = _pedal_events(events)
 
-    assert [e.key_char for e in pedal_events] == ["down", "up", "down"]
-    assert [e.time for e in pedal_events] == pytest.approx([0.05, 0.55, 1.05])
+    assert [e.key_char for e in pedal_events] == ["down", "up", "down", "up"]
+    assert [e.time for e in pedal_events] == pytest.approx([0.05, 0.55, 1.05, 1.15])
 
 
 def test_compile_original_raw_pedal_preserves_alternating_repedal_order(monkeypatch):

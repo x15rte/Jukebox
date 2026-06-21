@@ -10,11 +10,11 @@ applied after a full config load but skipped during normal UI→Config reads.
 from dataclasses import dataclass, fields
 from typing import Any, Callable, Iterable
 
-from PyQt6.QtCore import QByteArray
+from PyQt6.QtCore import QByteArray, Qt
+from PyQt6.QtWidgets import QApplication
 
 from config_repository import Config
 from logger_core import jukebox_logger, LOG_FILENAME
-from ui import parse_hotkey_string
 
 
 @dataclass(frozen=True)
@@ -38,8 +38,8 @@ class ConfigBinding:
 def _get_pedal_style(w: Any) -> str:
     val = w.pedal_mapping.get(w.pedal_style_combo.currentText())
     if val is None:
-        jukebox_logger.warning(f"Unknown pedal style text: {w.pedal_style_combo.currentText()}, falling back to hybrid")
-        val = "hybrid"
+        jukebox_logger.warning(f"Unknown pedal style text: {w.pedal_style_combo.currentText()}, falling back to original")
+        val = "original"
     return val
 
 
@@ -49,7 +49,9 @@ def _set_pedal_style(w: Any, v: str) -> None:
         jukebox_logger.warning(f"Unknown pedal style value: {v}, falling back to Original")
         mapped = "Original (from MIDI)"
     w.pedal_style_combo.setCurrentText(mapped)
-
+    if w.pedal_style_combo.currentText() != mapped:
+        jukebox_logger.warning(f"Pedal style '{mapped}' not in combo, using first option")
+        w.pedal_style_combo.setCurrentIndex(0)
 
 
 CONFIG_UI_BINDINGS: list[ConfigBinding] = [
@@ -187,11 +189,11 @@ CONFIG_UI_BINDINGS: list[ConfigBinding] = [
     ConfigBinding(
         "opacity",
         lambda w: w.opacity_slider.value(),
-        lambda w, v: w.opacity_slider.setValue(v) or w._change_opacity(v),
+        lambda w, v: w.opacity_slider.setValue(v),
     ),
     ConfigBinding(
         "hotkey",
-        lambda w: w.hotkey_manager.format_key_string(w.hotkey_manager.current_key),
+        lambda w: w.hotkey_manager.format_key_string(w.hotkey_manager.get_current_key()),
         lambda w, v: _set_hotkey_from_config(w, v),
     ),
     ConfigBinding(
@@ -279,7 +281,8 @@ def _apply_input_mode(widget, value):
     if use_piano and hasattr(widget, "_refresh_midi_inputs"):
         widget._refresh_midi_inputs(show_dialog=False)
     elif not use_piano and getattr(widget, "midi_input_active", False):
-        widget._disconnect_midi_input()
+        if hasattr(widget, "_disconnect_midi_input"):
+            widget._disconnect_midi_input()
 
 
 def _set_file_submode(widget, use_playlist: bool):
@@ -292,7 +295,9 @@ def _set_file_submode(widget, use_playlist: bool):
     finally:
         widget.input_mode_single_radio.blockSignals(False)
         widget.input_mode_playlist_radio.blockSignals(False)
-    widget._on_file_submode_changed()
+    if not widget.input_mode_piano_radio.isChecked():
+        if hasattr(widget, "_on_file_submode_changed"):
+            widget._on_file_submode_changed(True)
 
 
 def _set_output_mode_combo(widget, value):
@@ -301,19 +306,26 @@ def _set_output_mode_combo(widget, value):
         if widget.output_mode_combo.itemData(i) == value:
             widget.output_mode_combo.setCurrentIndex(i)
             break
-    widget._update_88_key_visibility()
+    else:
+        jukebox_logger.warning(f"Output mode '{value}' not available, using first option")
+        widget.output_mode_combo.setCurrentIndex(0)
+    if hasattr(widget, "_update_88_key_visibility"):
+        widget._update_88_key_visibility()
 
 
 def _set_hotkey_from_config(widget, value):
     if not value:
         return
-    widget.hotkey_manager.current_key = parse_hotkey_string(value)
+    # QKeySequence is case-insensitive for special keys; pass the config value directly
+    widget.hotkey_manager.set_hotkey(value)
     widget.hk_label.setText(
-        f"Start/Stop Hotkey: {widget.hotkey_manager.format_key_string(widget.hotkey_manager.current_key)}"
+        f"Start/Stop Hotkey: {widget.hotkey_manager.format_key_string(widget.hotkey_manager.get_current_key())}"
     )
-
-
 def _get_window_geometry(widget):
+    ws = widget.windowState()
+    flag = getattr(ws, "value", ws)  # get int value from enum, or use directly if already int
+    if flag & Qt.WindowState.WindowMinimized.value:
+        return None  # saveGeometry().size() is 0 when iconified
     g = widget.saveGeometry()
     return g.toBase64().data().decode("ascii") if g.size() else None
 
@@ -323,38 +335,66 @@ def _set_window_geometry(widget, value):
         return
     data = QByteArray.fromBase64(value.encode("ascii"))
     if not data.isEmpty():
-        widget.restoreGeometry(data)
+        if not widget.restoreGeometry(data):
+            # Saved geometry is invalid (screen disconnected, etc.)
+            # Move to center of primary screen
+            screen = QApplication.primaryScreen()
+            if screen:
+                geo = screen.availableGeometry()
+                widget.move(geo.center() - widget.rect().center())
 
 
 def _set_save_log_to_file_checkbox(widget, value):
     widget.log_save_to_file_check.blockSignals(True)
-    widget.log_save_to_file_check.setChecked(bool(value))
-    widget.log_save_to_file_check.blockSignals(False)
+    try:
+        widget.log_save_to_file_check.setChecked(bool(value))
+    finally:
+        widget.log_save_to_file_check.blockSignals(False)
 
 
 def _set_log_level_combo(widget, value):
     if not value:
         value = "INFO"
     level = str(value).upper()
-    if level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
+    if level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
         level = "INFO"
     if widget.log_level_combo.currentText() != level:
         widget.log_level_combo.blockSignals(True)
-        widget.log_level_combo.setCurrentText(level)
-        widget.log_level_combo.blockSignals(False)
+        try:
+            widget.log_level_combo.setCurrentText(level)
+        finally:
+            widget.log_level_combo.blockSignals(False)
 
 
 def _set_save_log_to_file(widget, value):
     _set_save_log_to_file_checkbox(widget, value)
-    log_path = widget.config_dir / LOG_FILENAME
+    log_dir = getattr(widget, "config_dir", None)
+    if log_dir is None:
+        if value:
+            jukebox_logger.warning(
+                "Cannot enable file logging: config_dir is not set. "
+                "File logging will be activated once config_dir is available."
+            )
+        return
+    log_path = log_dir / LOG_FILENAME
     if value:
-        widget.config_dir.mkdir(parents=True, exist_ok=True)
-        jukebox_logger.enable_file_logging(str(log_path))
-        widget.add_log_message(f"Log is being saved to: {log_path}")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            jukebox_logger.enable_file_logging(str(log_path))
+            widget.add_log_message(f"Log is being saved to: {log_path}")
+        except Exception as e:
+            widget.add_log_message(f"Failed to enable file logging: {e}")
     else:
         jukebox_logger.disable_file_logging()
 
 
 def _set_log_level(widget, value):
-    _set_log_level_combo(widget, value)
-    jukebox_logger.set_level(widget.log_level_combo.currentText())
+    normalized = str(value).upper()
+    _set_log_level_combo(widget, normalized)
+    actual_level = widget.log_level_combo.currentText()
+    if actual_level != normalized:
+        jukebox_logger.warning(f"Log level '{value}' not available, using '{actual_level}'")
+        value = actual_level
+    else:
+        value = normalized
+    jukebox_logger.set_level(value)

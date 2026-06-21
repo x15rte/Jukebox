@@ -10,14 +10,14 @@ import random
 import bisect
 import threading
 from collections.abc import Mapping
-from typing import Any, List, Set, Optional, Tuple
+from typing import Any, Dict, List, Set, Optional, Tuple
 
 from PyQt6.QtCore import QObject, pyqtSignal as Signal
 
 from models import Note, KeyEvent, MusicalSection
 from core import KeyMapper
 from analysis import Humanizer, PedalGenerator
-from output import OutputBackend
+from output import OutputBackend, OutputBackendError
 from native import set_timer_resolution, restore_timer_resolution, precise_sleep
 from logger_core import jukebox_logger
 
@@ -45,15 +45,16 @@ class EventCompiler:
         if humanization_enabled:
             humanizer = Humanizer(config)
             left = [n for n in work if n.hand == "left"]
-            right = [n for n in work if n.hand == "right"]
-            resync = {round(n.start_time, 2) for n in left} & {
-                round(n.start_time, 2) for n in right
+            right = [n for n in work if n.hand in ("right", "unknown")]
+            resync = {round(n.start_time, 3) for n in left} & {
+                round(n.start_time, 3) for n in right
             }
             humanizer.prepare_shared_offsets(work)
             humanizer.apply_to_hand(left, "left", resync)
             humanizer.apply_to_hand(right, "right", resync)
             work = sorted(left + right, key=lambda n: n.start_time)
             humanizer.apply_tempo_rubato(work, sections)
+            work.sort(key=lambda n: n.start_time)
 
         effective_pedal_style = EventCompiler._effective_pedal_style(config)
         pedal_config = config
@@ -85,7 +86,8 @@ class EventCompiler:
         # --- build press / release events ---
         heap: list = []
         use_mistakes = config.get("enable_mistakes", False)
-        mistake_chance = config.get("mistake_chance", 0) / 100.0
+        raw_mc = config.get("mistake_chance", 0)
+        mistake_chance = (raw_mc if isinstance(raw_mc, (int, float)) else 0) / 100.0
         played_in_section: Set[int] = set()
         sec_idx = 0
 
@@ -141,8 +143,12 @@ class EventCompiler:
                     heap,
                     KeyEvent(note.end_time, 4, "release", "", pitch=pitch, velocity=0),
                 )
-
-            played_in_section.add(pitch)
+            if did_mistake:
+                played_in_section.add(pitch)
+                if mp is not None:
+                    played_in_section.add(mp)
+            else:
+                played_in_section.add(pitch)
 
         # --- pedal events (from analysis.py) ---
         for pe in PedalGenerator.generate_events(
@@ -156,9 +162,12 @@ class EventCompiler:
         return events
 
     @staticmethod
-    def _effective_pedal_style(config: Mapping[str, Any]) -> Optional[str]:
+    def _effective_pedal_style(config: Mapping[str, Any]) -> str:
         style = config.get("pedal_style")
+        if style is None:
+            return "none"
         if style == "original" and not config.get("raw_pedal_events"):
+            jukebox_logger.info(f"No raw pedal events in MIDI; falling back from '{style}' to 'hybrid'")
             return "hybrid"
         return style
 
@@ -240,10 +249,11 @@ class EventCompiler:
     def _normalize_raw_pedal_transitions(
         raw_events: List[Tuple[float, int]],
     ) -> List[Tuple[float, int]]:
+        sorted_events = sorted(raw_events, key=lambda x: x[0])
         transitions: List[Tuple[float, int]] = []
         pedal_down = False
 
-        for event_time, value in raw_events:
+        for event_time, value in sorted_events:
             is_down = value >= 64
             if is_down and not pedal_down:
                 transitions.append((event_time, 127))
@@ -386,17 +396,18 @@ class EventCompiler:
     def _pair_raw_pedal_spans(
         normalized_events: List[Tuple[float, int]],
     ) -> Tuple[List[Tuple[float, float]], Optional[float]]:
+        sorted_events = sorted(normalized_events, key=lambda x: x[0])
         spans: List[Tuple[float, float]] = []
         trailing_down_time: Optional[float] = None
         idx = 0
 
-        while idx < len(normalized_events):
-            down_time, _value = normalized_events[idx]
-            if idx + 1 >= len(normalized_events):
+        while idx < len(sorted_events):
+            down_time, _value = sorted_events[idx]
+            if idx + 1 >= len(sorted_events):
                 trailing_down_time = down_time
                 break
 
-            up_time, _next_value = normalized_events[idx + 1]
+            up_time, _next_value = sorted_events[idx + 1]
             spans.append((down_time, up_time))
             idx += 2
 
@@ -451,6 +462,8 @@ class EventCompiler:
     ) -> List[Tuple[float, int]]:
         normalized = EventCompiler._normalize_raw_pedal_transitions(raw_events)
         if not normalized:
+            # No pedal transitions to remap — pedals were never pressed.
+            # Return as-is to preserve "original" style semantics.
             return raw_events
 
         onset_deltas, release_deltas = EventCompiler._build_note_timing_deltas(
@@ -555,12 +568,16 @@ class Player(QObject):
         self.stop_event = threading.Event()
         self.pause_event = threading.Event()
         self._pause_lock = threading.Lock()
+        self._state_lock = threading.Lock()
         self._pending_pause = False
 
         self.start_time = 0.0
         self.total_paused_time = 0.0
         self._pause_ts = 0.0
-        self._pending_shutdown = False
+        self._pause_confirmed = False
+        self._seek_pending = False
+        self._seek_version: int = 0
+        self._active_lock = threading.Lock()
 
         # Precompute event times for fast seeking / resume logic.
         self._event_times: List[float] = [e.time for e in self.events]
@@ -568,6 +585,8 @@ class Player(QObject):
         # Track currently active MIDI pitches for the visualizer; updated in
         # batches and emitted as a list via visualizer_updated.
         self._active_pitches: Set[int] = set()
+        self._paused_pitches: Optional[Set[int]] = None
+        self._pitch_velocities: Dict[int, int] = {}
 
     # -- public API (called from main thread) --
 
@@ -580,13 +599,15 @@ class Player(QObject):
                 return
 
             start_offset = self.config.get("start_offset", 0.0)
-            self.status_updated.emit("Playing!")
-            self.start_time = time.perf_counter() - start_offset
-            self.total_paused_time = 0.0
-            if start_offset > 0 and self._event_times:
-                self.event_index = bisect.bisect_left(self._event_times, start_offset)
-            else:
-                self.event_index = 0
+            if not self.pause_event.is_set():
+                self.status_updated.emit("Playing!")
+            with self._state_lock:
+                self.start_time = time.perf_counter() - start_offset
+                self.total_paused_time = 0.0
+                if start_offset > 0 and self._event_times:
+                    self.event_index = bisect.bisect_left(self._event_times, start_offset)
+                else:
+                    self.event_index = 0
             self._run_loop()
         except Exception as e:
             self.status_updated.emit(f"Error: {e}")
@@ -596,6 +617,7 @@ class Player(QObject):
             except Exception as e:
                 self.status_updated.emit(f"Error: {e}")
             finally:
+                self.visualizer_updated.emit([])  # clear stale visualizer state
                 self.playback_finished.emit()
 
     def stop(self):
@@ -603,37 +625,46 @@ class Player(QObject):
             self.status_updated.emit("Stopping playback...")
             self.stop_event.set()
             self.pause_event.clear()
+            with self._pause_lock:
+                self._pending_pause = False
 
     def toggle_pause(self):
+        if self.stop_event.is_set():
+            return
         if self.pause_event.is_set():
-            if self.event_index >= len(self.events):
+            with self._state_lock:
+                needs_seek = self.event_index >= len(self.events)
+                pause_dur = time.perf_counter() - self._pause_ts
+                if self._pause_confirmed:
+                    self.total_paused_time += pause_dur
+                self._pause_confirmed = False
+            if needs_seek:
                 self.seek(0.0)
-            pause_dur = time.perf_counter() - self._pause_ts
-            self.total_paused_time += pause_dur
-            self.pause_event.clear()
             self.status_updated.emit("Resuming...")
+            self.pause_event.clear()
         else:
             self._pause_ts = time.perf_counter()
             with self._pause_lock:
+                if self.stop_event.is_set():
+                    return  # stop() was called before we could pause
                 self._pending_pause = True
             self.pause_event.set()
             self.status_updated.emit("Paused.")
 
     def seek(self, target_time: float):
-        self._pending_shutdown = True
-        self._active_pitches.clear()
-        self.visualizer_updated.emit([])
-        if self._event_times:
-            self.event_index = bisect.bisect_left(self._event_times, target_time)
-        else:
-            self.event_index = 0
-        now = time.perf_counter()
-        if self.pause_event.is_set():
-            self.total_paused_time = 0.0
-            self.start_time = now - target_time
-            self._pause_ts = now
-        else:
-            self.start_time = now - target_time - self.total_paused_time
+        target_time = max(0.0, target_time)
+        with self._state_lock:
+            if self._event_times:
+                self.event_index = bisect.bisect_left(self._event_times, target_time)
+            else:
+                self.event_index = 0
+            now = time.perf_counter()
+            if self.pause_event.is_set():
+                self.start_time = now - target_time - self.total_paused_time
+            else:
+                self.start_time = now - target_time - self.total_paused_time
+            self._seek_pending = True
+            self._seek_version += 1
         self.progress_updated.emit(target_time)
 
     # -- internal --
@@ -644,7 +675,11 @@ class Player(QObject):
             if self.stop_event.is_set():
                 return
             self.status_updated.emit(f"{i}...")
-            time.sleep(1)
+            if self.stop_event.wait(1):  # returns True if event was set
+                return
+            if self.pause_event.is_set():
+                self.status_updated.emit("Paused.")
+                return
 
     def _run_loop(self):
         _old_switch = sys.getswitchinterval()
@@ -656,59 +691,157 @@ class Player(QObject):
             restore_timer_resolution(1)
             sys.setswitchinterval(_old_switch)
 
+
+    def _reconcile_active_pitches(self) -> None:
+        with self._state_lock:
+            held: Set[int] = set()
+            idx = self.event_index
+            for i in range(0, idx):
+                e = self.events[i]
+                if e.action == "press" and e.pitch is not None:
+                    held.add(e.pitch)
+                elif e.action == "release" and e.pitch is not None:
+                    held.discard(e.pitch)
+        with self._active_lock:
+            self._active_pitches = held
+            self._pitch_velocities.clear()
+            for i in range(0, idx):
+                e = self.events[i]
+                if e.action == "press" and e.pitch is not None:
+                    self._pitch_velocities[e.pitch] = e.velocity
+        self.visualizer_updated.emit(list(self._active_pitches))
+
+    def _release_all_notes(self) -> None:
+        """Release all currently-held notes through the backend without finalizing it."""
+        with self._active_lock:
+            for pitch in list(self._active_pitches):
+                self.backend.note_off(pitch)
+            self._active_pitches.clear()
+            self._pitch_velocities.clear()
+
+    def _restore_backend_state(self) -> None:
+        """After seek or resume, re-press all pitches that should be held."""
+        with self._active_lock:
+            if self._paused_pitches is not None:
+                for pitch in self._paused_pitches:
+                    vel = self._pitch_velocities.get(pitch, 100)
+                    self.backend.note_on(pitch, vel)
+                self._active_pitches = self._paused_pitches
+                self._paused_pitches = None
+                self.visualizer_updated.emit(list(self._active_pitches))
+            else:
+                for pitch in self._active_pitches:
+                    vel = self._pitch_velocities.get(pitch, 100)
+                    self.backend.note_on(pitch, vel)
+
     def _loop_body(self):
         last_progress = 0.0
         progress_iv = 1.0 / 30.0
-
+        was_paused = False
         while not self.stop_event.is_set():
-            if self._pending_shutdown:
-                self._pending_shutdown = False
-                self.backend.shutdown()
+            now = time.perf_counter()
+            with self._state_lock:
+                seek_version = self._seek_version
+                pt = (now - self.start_time) - self.total_paused_time
+                if self.event_index >= len(self.events):
+                    past_end = True
+                else:
+                    past_end = False
+                    nxt = self.events[self.event_index]
+                seek_pending = self._seek_pending
+            if seek_pending:
+                with self._state_lock:
+                    self._seek_pending = False
+                    seek_version = self._seek_version
+                self._release_all_notes()
+                self._paused_pitches = None
+                self._reconcile_active_pitches()
+                if not self.pause_event.is_set():
+                    self._restore_backend_state()
+                    was_paused = False
+                else:
+                    # Save reconciled pitches for restoration on resume.
+                    with self._active_lock:
+                        self._paused_pitches = set(self._active_pitches)
+                continue
 
             if self.pause_event.is_set():
+                paused_this_iter = False
                 with self._pause_lock:
                     if self._pending_pause:
                         self._pending_pause = False
-                        self.backend.shutdown()
-                        self._active_pitches.clear()
-                        self.visualizer_updated.emit([])
-                time.sleep(0.05)
+                        with self._active_lock:
+                            self._paused_pitches = set(self._active_pitches)
+                            for pitch in self._paused_pitches:
+                                self.backend.note_off(pitch)
+                            self._active_pitches.clear()
+                            self.visualizer_updated.emit([])
+                        paused_this_iter = True
+                if paused_this_iter:
+                    was_paused = True
+                    self._pause_confirmed = True
+                if self.stop_event.wait(0.05):
+                    return
                 continue
 
-            now = time.perf_counter()
-            pt = (now - self.start_time) - self.total_paused_time
-
-            if self.event_index >= len(self.events):
+            if past_end:
                 if pt > self.total_duration + 0.1:
+                    self.stop_event.set()
                     self.status_updated.emit("Playback finished.")
                     break
-                time.sleep(0.005)
+                if self.stop_event.wait(0.005):
+                    return
+                if self.pause_event.is_set():
+                    continue
+                was_paused = False
                 continue
 
-            nxt = self.events[self.event_index]
+            if was_paused:
+                with self._state_lock:
+                    idx = self.event_index
+                if self._paused_pitches:
+                    # Remove pitches whose release event already passed during pause
+                    for i in range(idx, len(self.events)):
+                        e = self.events[i]
+                        if e.time > pt:
+                            break  # Future events — note should be re-pressed
+                        if e.action == "release" and e.pitch is not None and e.pitch in self._paused_pitches:
+                            self._paused_pitches.discard(e.pitch)
+                self._restore_backend_state()
+                was_paused = False
+
             wait = nxt.time - pt
 
             if wait > 0:
-                precise_sleep(wait)
+                precise_sleep(wait, self.stop_event, self.pause_event)
+
+            if self.pause_event.is_set():
+                continue
 
             batch: List[KeyEvent] = []
             batch_time = nxt.time
-            while self.event_index < len(self.events):
-                e = self.events[self.event_index]
-                if e.time <= batch_time + 0.0005:
-                    batch.append(e)
-                    self.event_index += 1
-                else:
-                    break
-
+            with self._state_lock:
+                pre_batch_now = time.perf_counter()
+                if self._seek_version != seek_version:
+                    continue  # seek happened while we were sleeping — restart
+                while self.event_index < len(self.events):
+                    e = self.events[self.event_index]
+                    if e.time <= batch_time + 0.0005:
+                        batch.append(e)
+                        self.event_index += 1
+                    else:
+                        break
+            if self._seek_version != seek_version:
+                # seek() changed state while batch was collected — discard and restart
+                continue
             if batch:
                 self._execute_batch(batch)
 
-            now = time.perf_counter()
-            pt = (now - self.start_time) - self.total_paused_time
-            if now - last_progress >= progress_iv:
+            with self._state_lock:
+                pt = (pre_batch_now - self.start_time) - self.total_paused_time
+            if pre_batch_now - last_progress >= progress_iv:
                 self.progress_updated.emit(pt)
-                last_progress = now
+                last_progress = pre_batch_now
 
     def _execute_batch(self, events: List[KeyEvent]):
         """Execute a batch of events that fall within the same time-slice.
@@ -717,30 +850,29 @@ class Player(QObject):
         """
         if self.stop_event.is_set():
             return
-
         self.backend.execute_batch(events)
+        with self._active_lock:
+            state_changed = False
 
-        state_changed = False
+            # Process releases: discard from _active_pitches
+            for e in events:
+                if e.action != "release" or e.pitch is None:
+                    continue
+                if e.pitch in self._active_pitches:
+                    self._active_pitches.discard(e.pitch)
+                    self._pitch_velocities.pop(e.pitch, None)
+                    state_changed = True
+            # Process presses: add to _active_pitches if pressed
+            # A pitch pressed AND released in the same batch is added then removed by the
+            # release loop above, then re-added here. The net effect IS held — correct for
+            # the visualizer since the backend processes release→press and the key ends up pressed.
+            for e in events:
+                if e.action != "press" or e.pitch is None:
+                    continue
+                if e.pitch not in self._active_pitches:
+                    self._active_pitches.add(e.pitch)
+                    state_changed = True
+                self._pitch_velocities[e.pitch] = e.velocity
 
-        for e in events:
-            if e.action != "release":
-                continue
-            pitch = e.pitch
-            if pitch is None:
-                continue
-            if pitch in self._active_pitches:
-                self._active_pitches.discard(pitch)
-                state_changed = True
-
-        for e in events:
-            if e.action != "press":
-                continue
-            pitch = e.pitch
-            if pitch is None:
-                continue
-            if pitch not in self._active_pitches:
-                self._active_pitches.add(pitch)
-                state_changed = True
-
-        if state_changed:
-            self.visualizer_updated.emit(list(self._active_pitches))
+            if state_changed:
+                self.visualizer_updated.emit(list(self._active_pitches))

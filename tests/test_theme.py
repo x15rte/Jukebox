@@ -1,6 +1,7 @@
 from typing import Any, cast
 
 import theme
+import pytest
 
 theme = cast(Any, theme)
 
@@ -16,6 +17,8 @@ def test_apply_global_palette_sets_all_color_roles():
             ButtonText = "ButtonText"
             ToolTipBase = "ToolTipBase"
             ToolTipText = "ToolTipText"
+            Highlight = "Highlight"
+            HighlightedText = "HighlightedText"
 
         def __init__(self):
             self.calls = []
@@ -37,10 +40,11 @@ def test_apply_global_palette_sets_all_color_roles():
     app = App()
     theme.apply_global_palette(cast(Any, app))
 
-    assert len(app.p.calls) == 8
+    assert len(app.p.calls) == 10
     roles = {role for role, _ in app.p.calls}
     all_roles = {"Window", "Base", "AlternateBase", "Text",
-                 "WindowText", "ButtonText", "ToolTipBase", "ToolTipText"}
+                 "WindowText", "ButtonText", "ToolTipBase", "ToolTipText",
+                 "Highlight", "HighlightedText"}
     assert roles == all_roles
     assert app.set_palette_called is True
 
@@ -62,10 +66,8 @@ def test_get_theme_lazy_init_and_cache():
 
 
 def test_apply_global_palette_handles_none_app():
-    try:
+    with pytest.raises(AttributeError):
         theme.apply_global_palette(None)  # type: ignore[arg-type]
-    except AttributeError:
-        pass
 
 
 
@@ -73,6 +75,6 @@ def test_theme_helpers_and_dark_theme_payload():
 
     t = theme.get_dark_cyber_theme()
     assert t.background_main.startswith("#")
-    assert t.logs.warning == t.accent_warning
-    assert t.logs.error == t.accent_error
+    assert t.logs.warning.name().lower() == t.accent_warning.lower()
+    assert t.logs.error.name().lower() == t.accent_error.lower()
     assert "QPushButton#PrimaryButton" in t.qss

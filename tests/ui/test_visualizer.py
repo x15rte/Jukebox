@@ -26,6 +26,9 @@ class FakePainter:
     def setRenderHint(self, *_a, **_k):
         self.calls.append(("hint",))
 
+    def scale(self, *_a, **_k):
+        self.calls.append(("scale",))
+
     def setBrush(self, *_a, **_k):
         self.calls.append(("brush",))
 
@@ -149,6 +152,7 @@ def test_timeline_set_data_boundary_exception_logs_debug(qtbot, monkeypatch):
 def test_timeline_set_position_respects_dragging(qtbot):
     tw = TimelineWidget()
     qtbot.addWidget(tw)
+    tw.set_data([], 5.0)  # Set a duration that accommodates test times
 
     tw.is_dragging = False
     tw.set_position(1.5)

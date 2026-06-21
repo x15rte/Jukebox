@@ -54,6 +54,10 @@ class _KeyNamespace:
             self._cache[canonical] = key
         return key
 
+    @property
+    def __members__(self) -> dict[str, _KeyValue]:
+        return {name: self.__getattr__(name) for name in self._known_keys}
+
 
 @dataclass(frozen=True)
 class _KeyCodeValue:

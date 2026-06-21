@@ -190,7 +190,7 @@ def test_repair_utf8_mojibake_decode_errors_return_original_text():
     assert _repair_utf8_mojibake("ÿ") == "ÿ"
 
 
-def test_decode_midi_text_true_but_empty_bytes_returns_empty_string():
+def test_decode_midi_text_true_but_empty_bytes_falls_back_to_name():
     class EmptyBytes:
         def __bool__(self):
             return True
@@ -199,7 +199,7 @@ def test_decode_midi_text_true_but_empty_bytes_returns_empty_string():
             return b""
 
     msg = DummyMsg(data=EmptyBytes(), name="fallback")
-    assert _decode_midi_text(msg) == ""
+    assert _decode_midi_text(msg) == "fallback"
 
 
 def test_decode_midi_text_appends_environment_encodings(monkeypatch):

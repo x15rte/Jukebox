@@ -19,28 +19,24 @@ out = cast(Any, out)
 def test_release_key_if_unused_handles_backend_exception(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "linux")
     monkeypatch.setattr(out, "Controller", FakeController)
-
     logs = []
     monkeypatch.setattr(
         out.jukebox_logger, "error",
         lambda m, **k: logs.append(m),
     )
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
-
     key_data = kb._mapper.get_key_data(60)
     assert key_data is not None
     base = key_data["key"]
     kb._active_pitches[base] = set()
     kb._state_for(base)
-
     class BadKB:
         def release(self, _k):
             raise RuntimeError("release failed")
-
     kb._kb = cast(Any, BadKB())
     kb._release_key_if_unused(base)
-
-    assert base not in kb._active_pitches
+    # Pop-on-failure fix: key tracking preserved when release fails
+    assert base in kb._active_pitches
     assert any("release_key_if_unused" in msg for msg in logs)
 
 
@@ -57,6 +53,7 @@ def test_note_on_with_unknown_pitch_noop(monkeypatch):
 
 def test_note_off_macos_releases_only_when_no_active_pitches(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
 
     vk_by_key = {}
 
@@ -85,13 +82,16 @@ def test_note_off_macos_releases_only_when_no_active_pitches(monkeypatch):
 
     base_key = key_data_1["key"]
     base_vk = _vk_for_key(base_key)
-
     kb.note_on(p1, 100)
     kb.note_on(p2, 100)
+    n_events_before_off = len(events)
     kb.note_off(p1)
 
-    release_calls_after_first = [e for e in events if e[0] == base_vk and e[1] is False]
-    assert not release_calls_after_first
+    # Bug 1 repress fix: second note_on already added a repress release for the
+    # base key. note_off(p1) should NOT add another release since p2 is still active.
+    new_events = events[n_events_before_off:]
+    new_releases = [e for e in new_events if e[0] == base_vk and e[1] is False]
+    assert not new_releases, f"note_off(p1) should not release base key: {new_releases}"
 
     kb.note_off(p2)
     release_calls_after_second = [e for e in events if e[0] == base_vk and e[1] is False]
@@ -228,6 +228,7 @@ def test_pdi_key_down_up_noop_when_missing(monkeypatch):
 
 def test_note_on_macos_returns_when_vk_missing(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
     monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: None)
 
     kb = out.KeyboardBackend(use_88_key_layout=False)
@@ -236,6 +237,7 @@ def test_note_on_macos_returns_when_vk_missing(monkeypatch):
 
 def test_note_on_off_macos_ctrl_alt_and_none_modifier(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
     monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 42)
 
     def _mod_vk(mod):
@@ -318,7 +320,9 @@ def test_pedal_on_off_extra_branches(monkeypatch):
     kb._kb = cast(Any, BadKB())
     kb.pedal_on()
     kb.pedal_on()
+    kb._pedal_down = True
     kb.pedal_off()
+    kb._pedal_down = True
     kb.pedal_off()
 
     assert any("pedal_on error" in m for m in logs)
@@ -348,6 +352,7 @@ def test_pedal_off_releases_empty_active_keys(monkeypatch):
 
 def test_keyboard_shutdown_macos_releases_keys_pedal_and_modifiers(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
     monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 40)
     monkeypatch.setattr(out, "get_macos_vk_for_modifier", lambda _k: 50)
     events = []
@@ -443,10 +448,13 @@ def test_output_backend_execute_batch_pedal_up_and_empty_branch():
     keyboard_backend.execute_batch([])
 
     assert b.calls == [("pedal_off",)]
+    assert keyboard_backend._pedal_down is False
+    assert keyboard_backend._active_pitches == {}
 
 
 def test_create_backend_macos_numpad_does_not_use_toggle(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
 
     backend = out.create_backend("midi_numpad")
 
@@ -474,6 +482,7 @@ def test_note_on_returns_when_mapper_has_no_data(monkeypatch):
     ids=["without-base-vk", "with-base-vk"],
 )
 def test_pedal_off_macos_releases_empty_keys(monkeypatch, vk_for_key, expected_releases):
+    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
     monkeypatch.setattr(out.sys, "platform", "darwin")
 
     calls = []
@@ -490,7 +499,7 @@ def test_pedal_off_macos_releases_empty_keys(monkeypatch, vk_for_key, expected_r
     assert kb._active_pitches == {}
     assert kb._states == {}
     released_vks = {vk for vk, down, _ in calls if down is False}
-    assert expected_releases <= released_vks
+    assert expected_releases == released_vks
 
 
 def test_execute_batch_non_empty_delegates_to_super(monkeypatch):
@@ -552,7 +561,7 @@ def test_keyboard_windows_pydirectinput_exception_branches(monkeypatch):
         kb2.pedal_off()
     # --- shutdown individual pydirectinput error path ---
     # Force _windows_transport=None so shutdown takes the per-key pydirectinput branch
-    kb3 = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+    kb3 = out.KeyboardBackend(use_88_key_layout=False, log_message=None)
     kb3._windows_transport = None
     kb3._active_pitches = {"a": {60}, "b": {62}}
     kb3._state_for("a").press()
@@ -563,6 +572,9 @@ def test_keyboard_windows_pydirectinput_exception_branches(monkeypatch):
     monkeypatch.setattr(kb3, "_pdi_key_up", failing_key_up)
 
     kb3._pedal_down = True
+    # M12: _log_exception now uses jukebox_logger.error directly; monkeypatch to capture
+    import logger_core
+    monkeypatch.setattr(logger_core.jukebox_logger, "error", logs.append)
     kb3.shutdown()
 
     assert any("note release error" in m for m in logs)

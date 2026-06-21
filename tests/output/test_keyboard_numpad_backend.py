@@ -51,12 +51,16 @@ def test_keyboard_backend_overlapping_same_base_key(monkeypatch):
 
     kb.note_on(60, 100)
     kb.note_on(61, 100)
-    kb.note_off(60)
+    # note_on(61) releases 't' for polyphony (was_active=True) then re-presses it
+    assert ctrl.releases.count(base_key) == 1
 
-    assert base_key not in ctrl.releases
+    kb.note_off(60)
+    # note_off(60) should NOT add another release — pitch 61 is still active
+    assert ctrl.releases.count(base_key) == 1
 
     kb.note_off(61)
-    assert base_key in ctrl.releases
+    # now release should happen
+    assert ctrl.releases.count(base_key) == 2
 
 
 def test_keyboard_backend_pedal_and_shutdown(monkeypatch):
@@ -93,7 +97,6 @@ def test_numpad_backend_note_pedal_and_shutdown(monkeypatch):
     assert "pedal" in kinds
     assert "reset" in kinds
 
-
 def test_keyboard_backend_note_on_off_exact_key_and_modifier_sequence(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "linux")
     monkeypatch.setattr(out, "Controller", FakeController)
@@ -108,9 +111,11 @@ def test_keyboard_backend_note_on_off_exact_key_and_modifier_sequence(monkeypatc
     assert key_data is not None
     base_key = key_data["key"]
 
-    assert ctrl.pressed_modifiers == [(out.Key.shift,)]
-    assert ctrl.presses == [base_key]
-    assert ctrl.releases == [base_key]
+    # Modifiers are now pressed individually (not via context manager) and
+    # released in note_off via _release_key_if_unused.
+    assert ctrl.pressed_modifiers == []  # no longer uses context manager
+    assert ctrl.presses == [out.Key.shift, base_key]  # modifier pressed first
+    assert ctrl.releases == [base_key, out.Key.shift]  # base key then modifier
 
 
 def test_output_backend_execute_batch_matches_in_game_event_order(monkeypatch):
@@ -192,12 +197,14 @@ def test_windows_key_backend_note_sequences(monkeypatch):
     kb.note_off(21)
 
     assert fake_pdi.sent_batches == [
-        [(normal_base, True)],
-        [(normal_base, False)],
-        [("shiftleft", True), (shift_base, True), ("shiftleft", False)],
-        [(shift_base, False)],
-        [("ctrlleft", True), (ctrl_base, True), ("ctrlleft", False)],
-        [(ctrl_base, False)],
+        [(normal_base, True)],            # note_on(60)
+        [(normal_base, False)],           # note_off(60) - key_up
+        [("shiftleft", True), (shift_base, True)],  # note_on(61) - mods stay held
+        [(shift_base, False)],            # note_off(61) - key_up base
+        [("shiftleft", False)],           # note_off(61) - key_up modifier
+        [("ctrlleft", True), (ctrl_base, True)],    # note_on(21) - mods stay held
+        [(ctrl_base, False)],             # note_off(21) - key_up base
+        [("ctrlleft", False)],            # note_off(21) - key_up modifier
     ]
     assert fake_pdi.down == [
         normal_base,
@@ -208,10 +215,10 @@ def test_windows_key_backend_note_sequences(monkeypatch):
     ]
     assert fake_pdi.up == [
         normal_base,
-        "shiftleft",
         shift_base,
-        "ctrlleft",
+        "shiftleft",
         ctrl_base,
+        "ctrlleft",
     ]
 
 
@@ -241,31 +248,27 @@ def test_windows_key_backend_overlapping_same_base_release(monkeypatch):
 def test_windows_key_backend_execute_batch_inserts_release_press_gap(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "win32")
     fake_pdi = pydirectinput_stub.install(monkeypatch)
-    sleeps = []
-    monkeypatch.setattr(out.time, "sleep", lambda seconds: sleeps.append(seconds))
 
     kb = out.KeyboardBackend(use_88_key_layout=False)
-    first_data = kb._mapper.get_key_data(60)
-    second_data = kb._mapper.get_key_data(67)
-    assert first_data is not None
-    assert second_data is not None
-    first_base = first_data["key"]
-    second_base = second_data["key"]
+    data = kb._mapper.get_key_data(60)
+    assert data is not None
+    base = data["key"]
 
     kb.note_on(60, 100)
     fake_pdi.sent_batches.clear()
 
+    # Release and press of the same pitch — base-class repress sleep is removed
+    # (each backend's note_on handles its own repress delay internally).
     kb.execute_batch(
         [
             FakeEvent(0.0, 4, "release", key_char="", pitch=60, velocity=0),
-            FakeEvent(0.0, 2, "press", key_char="", pitch=67, velocity=100),
+            FakeEvent(0.0, 2, "press", key_char="", pitch=60, velocity=100),
         ]
     )
 
-    assert sleeps == [out._WINDOWS_KEY_REPRESS_DELAY]
     assert fake_pdi.sent_batches == [
-        [(first_base, False)],
-        [(second_base, True)],
+        [(base, False)],
+        [(base, True)],
     ]
 
 
@@ -331,23 +334,30 @@ def test_windows_key_backend_missing_pydirectinput_is_unavailable(monkeypatch):
         out.KeyboardBackend(use_88_key_layout=False)
 
 
-def test_windows_key_backend_send_failure_raises(monkeypatch):
+def test_windows_key_backend_send_failure_handled(monkeypatch):
+    """Send failure is caught internally; modifiers cleaned up, no leak."""
     monkeypatch.setattr(out.sys, "platform", "win32")
     fake_pdi = pydirectinput_stub.install(monkeypatch)
     kb = out.KeyboardBackend(use_88_key_layout=False)
 
     fake_pdi.send_exception = RuntimeError("send failed")
 
-    with pytest.raises(out.OutputBackendSendError, match="send failed"):
-        kb.note_on(60, 100)
+    # Error is caught internally; no exception propagates
+    kb.note_on(60, 100)
+    # State should be clean — no leaked press or modifier tracking
+    assert kb._active_pitches == {}
+    assert kb._held_modifiers == {}
 
 
-def test_windows_key_backend_partial_send_raises(monkeypatch):
+def test_windows_key_backend_partial_send_handled(monkeypatch):
+    """Partial send (result=0) is caught internally; no leak."""
     monkeypatch.setattr(out.sys, "platform", "win32")
     fake_pdi = pydirectinput_stub.install(monkeypatch)
     kb = out.KeyboardBackend(use_88_key_layout=False)
 
     fake_pdi.send_result = 0
 
-    with pytest.raises(out.OutputBackendSendError, match="sent 0 of 1"):
-        kb.note_on(60, 100)
+    # Error is caught internally; no exception propagates
+    kb.note_on(60, 100)
+    assert kb._active_pitches == {}
+    assert kb._held_modifiers == {}

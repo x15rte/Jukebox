@@ -148,7 +148,7 @@ def test_autoplay_scan_folder_with_files(
     assert len(w.autoplay_file_list) == 2
     assert os.path.basename(w.autoplay_file_list[0]) == "a.mid"
     assert os.path.basename(w.autoplay_file_list[1]) == "b.mid"
-    assert w.autoplay_current_index == -1
+    assert w.autoplay_current_index == 0
     assert w.autoplay_file_listbox.count() == 2
     assert "2 MIDI file(s) found." in w.autoplay_info_label.text()
 
@@ -209,7 +209,9 @@ def test_autoplay_jump_to_song_stops_playback(
     monkeypatch.setattr(w, "add_log_message", lambda m: None)
 
     w._autoplay_jump_to_song(w.autoplay_file_listbox.item(0))
-    assert w.autoplay_current_index == 0
+    # Jump is deferred — pending jump stored, index not yet set
+    assert w.autoplay_current_index == -1
+    assert w._pending_autoplay_jump == 0
 
 
 def test_autoplay_jump_to_song_previews(
@@ -732,7 +734,7 @@ def test_on_playback_finished_autoplay_all_done(
     monkeypatch.setattr(w, "_autoplay_play_current", lambda: called.append(True))
 
     w.on_playback_finished()
-    assert w.autoplay_current_index == -1
+    assert w.autoplay_current_index == 1
     assert called == []
     assert "All songs played." in w.autoplay_info_label.text()
 

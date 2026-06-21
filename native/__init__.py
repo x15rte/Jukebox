@@ -12,6 +12,7 @@ from .timer_utils import (
     has_high_res_timer,
 )
 from .macos_cgevent import (
+    _init_macos_cgevent,
     is_macos_accessibility_trusted,
     open_macos_accessibility_preferences,
     get_macos_vk_for_key,

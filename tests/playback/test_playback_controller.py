@@ -38,17 +38,22 @@ def test_controller_finishes_and_cleans_up(monkeypatch):
     backend = FakeBackend()
 
     monkeypatch.setattr("playback.playback_controller.create_backend", lambda *a, **k: backend)
-    monkeypatch.setattr("playback.playback_controller.QThread", FakeThread)
+    thread = FakeThread()
+    monkeypatch.setattr("playback.playback_controller.QThread", lambda: thread)
     monkeypatch.setattr("playback.playback_controller.Player", FakePlaybackPlayer)
+    monkeypatch.setattr("playback.playback_controller.QTimer.singleShot", lambda _ms, cb: cb())
 
     assert ctrl.start([], {}, 1.0, "key", False) is True
     player = ctrl.player
     assert player is not None
 
+    monkeypatch.setattr(ctrl, "sender", lambda: player)
+    # FakeThread.quit() doesn't set _running=False (matching real QThread),
+    # so simulate the thread finishing via wait() before triggering cleanup.
+    thread.wait(0)
     ctrl._on_playback_finished_internal()
     assert ctrl.state == "stopped"
     assert ctrl.player is None
-
 
 def test_controller_start_backend_unavailable_returns_false(monkeypatch):
     ctrl = PlaybackController()

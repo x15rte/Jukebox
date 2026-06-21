@@ -57,8 +57,14 @@ class PlaybackService:
                     elif role == "Right Hand":
                         new_note.hand = "right"
                     final_notes.append(new_note)
-
+        # Deduplicate consecutive same-value pedal events at the same timestamp
         raw_pedal_events.sort(key=lambda pe: pe[0])
+        deduped = []
+        for t, val in raw_pedal_events:
+            if deduped and deduped[-1][0] == t and deduped[-1][1] == val:
+                continue
+            deduped.append((t, val))
+        raw_pedal_events = deduped
         config = dict(config)
         config["raw_pedal_events"] = raw_pedal_events
 
@@ -75,7 +81,20 @@ class PlaybackService:
         analyzer = SectionAnalyzer(final_notes, tempo_map)
         sections = analyzer.analyze()
 
-        total_dur = max(n.end_time for n in final_notes) if final_notes else 1.0
+        total_dur = max(n.end_time for n in final_notes) if final_notes else 0.0
+        if total_dur == 0.0 and raw_pedal_events:
+            last_time = max(pe[0] for pe in raw_pedal_events)
+            # If last pedal event is a press without matching release, extend duration
+            last_val = raw_pedal_events[-1][1]
+            if last_val >= 64:
+                last_time += 2.0
+            total_dur = last_time
+        if total_dur <= 0.0:
+            total_dur = 1.0
 
         compiled_events = EventCompiler.compile(final_notes, sections, config)
+        if compiled_events:
+            total_dur = max(e.time for e in compiled_events)
+            if total_dur < 0.1:
+                total_dur = 0.1
         return final_notes, sections, compiled_events, total_dur, tempo_map

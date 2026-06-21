@@ -48,6 +48,7 @@ def test_keyboard_backend_uses_pydirectinput_on_windows(monkeypatch):
 def test_keyboard_backend_macos_cgevent_path(monkeypatch):
     events = []
     monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
     monkeypatch.setattr(out, "get_macos_vk_for_key", lambda k: 42)
     monkeypatch.setattr(
         out,
@@ -68,6 +69,7 @@ def test_keyboard_backend_macos_cgevent_path(monkeypatch):
 
 def test_keyboard_backend_macos_does_not_create_pynput_controller(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
 
     def fail_controller():
         raise AssertionError("pynput Controller must not be created on macOS KEY mode")

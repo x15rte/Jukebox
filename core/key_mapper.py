@@ -14,7 +14,7 @@ class KeyMapper:
 
 
     # --- game-defined key tables ---
-    LEFT_CTRL_KEYS = "1234567890qwert"
+    LEFT_CTRL_KEYS = "1234567890qwerty"
     MIDDLE_WHITE_KEYS = "1234567890qwertyuiopasdfghjklzxcvbnm"
     RIGHT_CTRL_KEYS = "yuiopasdfghj"
 
@@ -33,20 +33,29 @@ class KeyMapper:
         if self.use_88_key_layout:
             p = self.PITCH_START_LEFT
             for ch in self.LEFT_CTRL_KEYS:
-                self.key_map[p] = {"key": ch, "modifiers": [Key.ctrl]}
+                modifiers = [Key.ctrl]
+                if self.is_black_key(p):
+                    modifiers.append(Key.shift)
+                self.key_map[p] = {"key": ch, "modifiers": modifiers}
                 p += 1
             p = self.PITCH_START_RIGHT
             for ch in self.RIGHT_CTRL_KEYS:
-                self.key_map[p] = {"key": ch, "modifiers": [Key.ctrl]}
+                modifiers = [Key.ctrl]
+                if self.is_black_key(p):
+                    modifiers.append(Key.shift)
+                self.key_map[p] = {"key": ch, "modifiers": modifiers}
                 p += 1
 
         wi = 0
         p = self.PITCH_START_MIDDLE
-        while p <= 108 and wi < len(self.MIDDLE_WHITE_KEYS):
+        while p <= self.max_pitch and wi < len(self.MIDDLE_WHITE_KEYS):
             ch = self.MIDDLE_WHITE_KEYS[wi]
             if p not in self.key_map:
                 self.key_map[p] = {"key": ch, "modifiers": []}
             nxt = p + 1
+            if nxt > self.max_pitch:
+                p += 2 if self.is_black_key(nxt) else 1
+                continue
             if self.is_black_key(nxt):
                 if nxt not in self.key_map:
                     self.key_map[nxt] = {"key": ch, "modifiers": [Key.shift]}
@@ -56,10 +65,8 @@ class KeyMapper:
             wi += 1
 
     def get_key_data(self, pitch: int) -> Optional[Dict]:
-        if pitch < self.min_pitch:
-            pitch = self.min_pitch
-        elif pitch > self.max_pitch:
-            pitch = self.max_pitch
+        if pitch < self.min_pitch or pitch > self.max_pitch:
+            return None
         return self.key_map.get(pitch)
 
 

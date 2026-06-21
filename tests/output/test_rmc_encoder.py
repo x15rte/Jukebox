@@ -88,9 +88,10 @@ def test_encode_and_send_message_falls_back_when_batched_send_fails(monkeypatch)
 
     rmc.encode_and_send_message(1, 2, 3, 4)
 
-    assert rmc._use_batched_sendinput is False
+    # Fallback to _tap_key when batched send fails
     assert tapped == ["multiply", "numpad1", "numpad2", "numpad3", "numpad4"]
 
+    # Second call should still try batched (no permanent fallback)
     tapped.clear()
     rmc.encode_and_send_message(1, 2, 3, 4)
     assert tapped[0] == "multiply"
@@ -306,7 +307,7 @@ def test_ensure_numlock_non_windows_noop(monkeypatch):
     monkeypatch.setattr(rmc, "_numlock_ensured", False)
     monkeypatch.setattr(rmc, "_platform", "Linux")
     rmc.ensure_numlock_on()
-    assert rmc._numlock_ensured is True
+    assert rmc._numlock_ensured is False
 
 
 def test_tap_key_handles_pydirectinput_exception(monkeypatch):
@@ -335,17 +336,8 @@ def test_tap_key_macos_cgevent_paths(monkeypatch):
     monkeypatch.setattr(rmc, "_use_pydirectinput", False)
     monkeypatch.setattr(rmc, "_platform", "Darwin")
     monkeypatch.setattr(rmc, "_platform_map", {"numpad1": 42})
-
-    class _Native:
-        @staticmethod
-        def post_macos_key_event(vk, down, flags):
-            events.append((vk, down, flags))
-
-    import sys
-
-    monkeypatch.setitem(sys.modules, "native", _Native)
+    monkeypatch.setattr(rmc, "_pmke", lambda vk, down, flags: events.append((vk, down, flags)))
     rmc._tap_key("numpad1")
-
     assert events == [(42, True, 0), (42, False, 0)]
 
 
@@ -356,16 +348,11 @@ def test_tap_key_macos_cgevent_logs_on_exception(monkeypatch):
     monkeypatch.setattr(rmc, "_platform", "Darwin")
     monkeypatch.setattr(rmc, "_platform_map", {"numpad1": 42})
 
-    class _Native:
-        @staticmethod
-        def post_macos_key_event(vk, down, flags):
-            raise RuntimeError("cg boom")
+    def _raise(_, __, ___):
+        raise RuntimeError("cg boom")
 
-    import sys
-
-    monkeypatch.setitem(sys.modules, "native", _Native)
+    monkeypatch.setattr(rmc, "_pmke", _raise)
     rmc._tap_key("numpad1")
-
     assert any("macOS CGEvent key send failed" in m for m in logs)
 
 
@@ -587,3 +574,63 @@ def test_import_linux_path_pynput_missing(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(rmc)
+
+
+def test_send_frame_batched_partial_success_calls_send_key_down_up(monkeypatch):
+    """Partial SendInput (result=6) calls _send_key_down/_send_key_up for remaining 2 keys."""
+    frame = [SimpleNamespace(ii=SimpleNamespace(ki=SimpleNamespace(wScan=0)))
+             for _ in range(10)]
+    monkeypatch.setattr(rmc, "_frame_inputs", frame, raising=False)
+    monkeypatch.setattr(rmc, "_frame_sizeof", 1, raising=False)
+
+    class _User32:
+        @staticmethod
+        def SendInput(n, _inputs, _sz):
+            return 6  # 3 full keys sent (6 of 10 events)
+
+    monkeypatch.setattr(
+        rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False
+    )
+
+    key_down_calls: list[int] = []
+    key_up_calls: list[int] = []
+    monkeypatch.setattr(rmc, "_send_key_down", lambda sc: key_down_calls.append(sc))
+    monkeypatch.setattr(rmc, "_send_key_up", lambda sc: key_up_calls.append(sc))
+
+    ok = rmc._send_frame_batched(1, 2, 3, 4, 5)
+
+    assert ok is True
+    # 3 full keys handled by SendInput (result 6 → fully_sent=3),
+    # remaining keys 4 and 5 get _send_key_down + _send_key_up
+    assert key_down_calls == [4, 5]
+    assert key_up_calls == [4, 5]
+
+
+def test_send_frame_batched_partial_success_odd_result(monkeypatch):
+    """Odd partial result: KEYUP sent for the incomplete key, then _send_key_down/up for rest."""
+    frame = [SimpleNamespace(ii=SimpleNamespace(ki=SimpleNamespace(wScan=0)))
+             for _ in range(10)]
+    monkeypatch.setattr(rmc, "_frame_inputs", frame, raising=False)
+    monkeypatch.setattr(rmc, "_frame_sizeof", 1, raising=False)
+
+    class _User32:
+        @staticmethod
+        def SendInput(n, _inputs, _sz):
+            return 7  # 3 full keys + 1 incomplete (KEYDOWN only of 4th key)
+
+    monkeypatch.setattr(
+        rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False
+    )
+
+    key_down_calls: list[int] = []
+    key_up_calls: list[int] = []
+    monkeypatch.setattr(rmc, "_send_key_down", lambda sc: key_down_calls.append(sc))
+    monkeypatch.setattr(rmc, "_send_key_up", lambda sc: key_up_calls.append(sc))
+
+    ok = rmc._send_frame_batched(1, 2, 3, 4, 5)
+
+    assert ok is True
+    # result=7 → fully_sent=3, result%2=1 → send_key_up(scs[3]=4), fully_sent=4
+    # then send_key_down(5) + send_key_up(5)
+    assert key_down_calls == [5]
+    assert key_up_calls == [4, 5]

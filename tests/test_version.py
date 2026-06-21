@@ -40,6 +40,7 @@ def test_get_git_version_paths(monkeypatch):
 
 
 def test_get_version_frozen_and_source(monkeypatch):
+    version._VERSION_CACHED = None
     monkeypatch.setattr(version.sys, "frozen", True, raising=False)
 
     import builtins
@@ -55,8 +56,9 @@ def test_get_version_frozen_and_source(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", imp_ok)
-    assert version._get_version() == "1.2.3"
+    assert version.get_version() == "1.2.3"
 
+    version._VERSION_CACHED = None
     class BuildModEmpty:
         BUILD_VERSION = ""
 
@@ -66,7 +68,8 @@ def test_get_version_frozen_and_source(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", imp_empty)
-    assert version._get_version() == "packaged"
+    assert version.get_version() == "0.0.0"
+    version._VERSION_CACHED = None
 
     def imp_fail(name, *args, **kwargs):
         if name == "_build_version":
@@ -74,8 +77,9 @@ def test_get_version_frozen_and_source(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", imp_fail)
-    assert version._get_version() == "packaged"
+    assert version.get_version() == "0.0.0"
+    version._VERSION_CACHED = None
 
     monkeypatch.setattr(version.sys, "frozen", False, raising=False)
     monkeypatch.setattr(version, "_get_git_version", lambda: "gitver")
-    assert version._get_version() == "gitver"
+    assert version.get_version() == "gitver"

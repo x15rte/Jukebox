@@ -6,11 +6,10 @@ from tests.helpers.fakes import FakeBackend, FakeEvent, FakeSignal, RecorderBack
 
 pmod = cast(Any, pmod)
 
-
-def test_loop_body_handles_pending_shutdown(monkeypatch):
+def test_loop_body_handles_seek_pending(monkeypatch):
     backend = FakeBackend()
     p = pmod.Player([], backend, {}, total_duration=0.1)
-    p._pending_shutdown = True
+    p._seek_pending = True
 
     times = iter([0.0, 0.5])
     monkeypatch.setattr(pmod.time, "perf_counter", lambda: next(times))
@@ -18,11 +17,12 @@ def test_loop_body_handles_pending_shutdown(monkeypatch):
 
     p._loop_body()
 
+    # Seek no longer calls backend.shutdown(); _release_all_notes() releases notes instead.
     shutdown_calls = [c for c in backend.calls if c[0] == "shutdown"]
-    assert shutdown_calls
+    assert not shutdown_calls
 
 
-def test_loop_body_pause_branch_runs_shutdown_once(monkeypatch):
+def test_loop_body_pause_branch_releases_held_notes(monkeypatch):
     backend = FakeBackend()
     p = pmod.Player([], backend, {}, total_duration=10.0)
     p.pause_event.set()
@@ -31,18 +31,17 @@ def test_loop_body_pause_branch_runs_shutdown_once(monkeypatch):
     vis = FakeSignal()
     p.visualizer_updated = cast(Any, vis)
 
-    calls = {"sleep": 0}
-
-    def _sleep(_s):
-        calls["sleep"] += 1
+    # Mock stop_event.wait to set stop_event on first call (replaces old time.sleep mock)
+    original_wait = p.stop_event.wait
+    def _mock_wait(timeout=None):
         p.stop_event.set()
-
-    monkeypatch.setattr(pmod.time, "sleep", _sleep)
+        return True
+    p.stop_event.wait = _mock_wait  # type: ignore[assignment]
 
     p._loop_body()
 
-    shutdown_calls = [c for c in backend.calls if c[0] == "shutdown"]
-    assert shutdown_calls
+    note_off_calls = [c for c in backend.calls if c[0] == "note_off"]
+    assert note_off_calls == [("note_off", 60)]
     assert vis.emitted[-1] == ([],)
 
 
@@ -61,7 +60,7 @@ def test_loop_body_waits_with_precise_sleep_and_batches(monkeypatch):
     sleeps = []
 
     monkeypatch.setattr(pmod.time, "perf_counter", lambda: next(perf, 3.0))
-    monkeypatch.setattr(pmod, "precise_sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(pmod, "precise_sleep", lambda s, _e=None, _p=None: sleeps.append(s))
     monkeypatch.setattr(pmod.time, "sleep", lambda _s: None)
 
     p._loop_body()
@@ -80,10 +79,10 @@ def test_loop_body_emits_progress_periodically(monkeypatch):
     progress = FakeSignal()
     p.progress_updated = cast(Any, progress)
 
-    perf = iter([0.0, 0.05, 0.05, 0.10, 0.10])
+    perf = iter([0.1, 0.1, 0.1, 0.1, 0.1])
 
     monkeypatch.setattr(pmod.time, "perf_counter", lambda: next(perf))
-    monkeypatch.setattr(pmod, "precise_sleep", lambda _s: None)
+    monkeypatch.setattr(pmod, "precise_sleep", lambda _s, _e=None, _p=None: None)
 
     orig_execute = p._execute_batch
 
@@ -103,10 +102,12 @@ def test_countdown_stops_early_when_stop_event_set(monkeypatch):
     status = FakeSignal()
     p.status_updated = cast(Any, status)
 
-    def _sleep(_s):
+    # Mock stop_event.wait to set stop_event on first call (fast replacement for old time.sleep mock)
+    def _mock_wait(timeout=None):
         p.stop_event.set()
+        return True
+    p.stop_event.wait = _mock_wait  # type: ignore[assignment]
 
-    monkeypatch.setattr(pmod.time, "sleep", _sleep)
     p._countdown()
 
     assert status.emitted[0] == ("Get ready...",)
@@ -146,12 +147,12 @@ def test_player_golden_sequence_chord_with_pedal(monkeypatch):
     monkeypatch.setattr(pmod, "set_timer_resolution", lambda _v: None)
     monkeypatch.setattr(pmod, "restore_timer_resolution", lambda _v: None)
     monkeypatch.setattr(pmod.time, "perf_counter", lambda: next(perf))
-    monkeypatch.setattr(pmod, "precise_sleep", lambda _s: None)
+    monkeypatch.setattr(pmod, "precise_sleep", lambda _s, _e=None, _p=None: None)
     monkeypatch.setattr(pmod.time, "sleep", lambda _s: None)
 
     p.play()
 
-    assert backend.calls == [
+    assert [c for c in backend.calls if c[0] != "execute_batch"] == [
         ("pedal_on",),
         ("note_on", 60, 95),
         ("note_on", 64, 100),
@@ -179,12 +180,13 @@ def test_player_golden_sequence_same_time_release_before_press(monkeypatch):
     monkeypatch.setattr(pmod, "set_timer_resolution", lambda _v: None)
     monkeypatch.setattr(pmod, "restore_timer_resolution", lambda _v: None)
     monkeypatch.setattr(pmod.time, "perf_counter", lambda: next(perf))
-    monkeypatch.setattr(pmod, "precise_sleep", lambda _s: None)
+    monkeypatch.setattr(pmod, "precise_sleep", lambda _s, _e=None, _p=None: None)
     monkeypatch.setattr(pmod.time, "sleep", lambda _s: None)
 
     p.play()
 
-    assert backend.calls[:3] == [
+    individual = [c for c in backend.calls if c[0] != "execute_batch"]
+    assert individual[:3] == [
         ("note_on", 60, 90),
         ("note_off", 60),
         ("note_on", 67, 110),

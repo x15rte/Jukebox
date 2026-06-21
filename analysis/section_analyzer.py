@@ -1,6 +1,7 @@
 """Musical section analysis: segmentation by measures or silence, articulation/pace classification."""
 
-from typing import List
+import math
+from typing import List, Optional, Set
 
 from models import Note, MusicalSection
 from core import TempoMap
@@ -57,9 +58,12 @@ class SectionAnalyzer:
         """Merge consecutive measures with same articulation/pace into sections."""
         total_dur = max(n.end_time for n in self.notes)
         measures = self.tempo_map.get_measure_boundaries(total_dur)
+        if not measures:
+            return self._analyze_by_silence()
         sections = []
-        current_section_start = measures[0][0] if measures else 0
+        current_section_start: Optional[float] = None
         current_notes_in_section = []
+        seen_ids: Set[int] = set()  # Accumulates across all sections — prevents long notes spanning multiple measures from appearing in multiple sections.
         prev_style = None
         prev_pace = None
 
@@ -74,7 +78,7 @@ class SectionAnalyzer:
             notes_in_measure = [
                 n
                 for n in self.notes
-                if n.start_time >= m_start and n.start_time < m_end
+                if n.start_time < m_end and n.end_time > m_start
             ]
             if not notes_in_measure:
                 style, pace = (prev_style or "legato"), (prev_pace or "normal")
@@ -83,16 +87,22 @@ class SectionAnalyzer:
             if prev_style is None:
                 prev_style = style
                 prev_pace = pace
-                current_notes_in_section.extend(notes_in_measure)
+                new_notes = [n for n in notes_in_measure if n.id not in seen_ids]
+                seen_ids.update(n.id for n in new_notes)
+                if new_notes:
+                    if current_section_start is None:
+                        current_section_start = m_start
+                current_notes_in_section.extend(new_notes)
                 continue
-            if style != prev_style:
+            if style != prev_style or pace != prev_pace:
                 if current_notes_in_section:
-                    sec_end = m_start
-                    s_beat = self.tempo_map.time_to_beat(current_section_start)
+                    section_start = current_section_start if current_section_start is not None else current_notes_in_section[0].start_time
+                    sec_end = max(n.end_time for n in current_notes_in_section)
+                    s_beat = self.tempo_map.time_to_beat(section_start)
                     e_beat = self.tempo_map.time_to_beat(sec_end)
                     sections.append(
                         MusicalSection(
-                            current_section_start,
+                            section_start,
                             sec_end,
                             list(current_notes_in_section),
                             prev_style or "legato",
@@ -103,17 +113,21 @@ class SectionAnalyzer:
                     )
                 current_section_start = m_start
                 current_notes_in_section = []
+                seen_ids = set()
                 prev_style = style
                 prev_pace = pace
-            current_notes_in_section.extend(notes_in_measure)
+            new_notes = [n for n in notes_in_measure if n.id not in seen_ids]
+            seen_ids.update(n.id for n in new_notes)
+            current_notes_in_section.extend(new_notes)
 
         if current_notes_in_section:
-            sec_end = measures[-1][1]
-            s_beat = self.tempo_map.time_to_beat(current_section_start)
+            section_start = current_section_start if current_section_start is not None else current_notes_in_section[0].start_time
+            sec_end = max(n.end_time for n in current_notes_in_section)
+            s_beat = self.tempo_map.time_to_beat(section_start)
             e_beat = self.tempo_map.time_to_beat(sec_end)
             sections.append(
                 MusicalSection(
-                    current_section_start,
+                    section_start,
                     sec_end,
                     list(current_notes_in_section),
                     prev_style or "legato",
@@ -132,10 +146,7 @@ class SectionAnalyzer:
         last_end_time = self.notes[0].end_time
         for i in range(1, len(self.notes)):
             current_start = self.notes[i].start_time
-            gap_sec = current_start - last_end_time
-            tempo = self.tempo_map.get_tempo_at(last_end_time)
-            sec_per_beat = tempo / 1_000_000.0
-            gap_beats = gap_sec / sec_per_beat
+            gap_beats = self.tempo_map.time_to_beat(current_start) - self.tempo_map.time_to_beat(last_end_time)
             if gap_beats > 2.0:
                 indices.append(i)
             last_end_time = max(last_end_time, self.notes[i].end_time)
@@ -156,9 +167,15 @@ class SectionAnalyzer:
             curr_beat = self.tempo_map.time_to_beat(curr.start_time)
             next_beat = self.tempo_map.time_to_beat(next_n.start_time)
             ioi_beats = next_beat - curr_beat
+            if math.isnan(ioi_beats):
+                continue
             if ioi_beats <= 0:
                 continue
             dur_beats = self.tempo_map.time_to_beat(curr.end_time) - curr_beat
+            if math.isnan(dur_beats):
+                continue
+            if dur_beats < 0:
+                continue
             ratio = dur_beats / ioi_beats
             total_overlap += min(ratio, 1.2)
             total_possible += 1.0
@@ -174,9 +191,8 @@ class SectionAnalyzer:
     def _classify_pace_beats(
         self, notes: List[Note], start_beat: float, end_beat: float
     ) -> str:
-        """Fast / slow / normal from notes per beat in the span."""
         duration_beats = end_beat - start_beat
-        if duration_beats <= 0:
+        if duration_beats <= 0 or math.isnan(duration_beats):
             return "normal"
         npb = len(notes) / duration_beats
         if npb > 3.5:

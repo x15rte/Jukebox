@@ -305,6 +305,7 @@ def test_handle_play_returns_when_tracks_missing_after_config(
     window_factory, monkeypatch, tmp_path
 ):
     w = window_factory()
+    errs = []
 
     class Ctrl:
         is_running = False
@@ -315,9 +316,12 @@ def test_handle_play_returns_when_tracks_missing_after_config(
     w.playback_controller = Ctrl()
     monkeypatch.setattr(w, "gather_config", lambda: {"midi_file": "x.mid", "output_mode": "key"})
     monkeypatch.setattr(w, "_save_config", lambda: None)
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: errs.append((m, k)))
     w.selected_tracks_info = None
 
     w.handle_play()
+
+    assert errs and "No tracks selected" in errs[0][0]
 
 
 def test_handle_play_prepare_error_logs(window_factory, monkeypatch, tmp_path):
@@ -397,7 +401,7 @@ def test_handle_play_success_sets_start_offset_and_starts_controller(
     assert any(e[0] == "start" for e in events)
     start_call = [e for e in events if e[0] == "start"][0]
     start_cfg = start_call[1][1]
-    assert start_cfg["start_offset"] == pytest.approx(4.0)
+    assert start_cfg["start_offset"] == pytest.approx(0.0)
     assert any("KEY mode does not preserve MIDI velocity dynamics" in m for m in logs)
     assert w.stop_button.isEnabled() is True
 
@@ -555,7 +559,7 @@ def test_parse_select_then_handle_play_workflow_uses_selected_tracks_and_seek_ra
     start_call = [e for e in events if e[0] == "start"][0]
     start_cfg = start_call[1][1]
     assert start_cfg["midi_file"] == "C:/tmp/song.mid"
-    assert start_cfg["start_offset"] == pytest.approx(2.5)
+    assert start_cfg["start_offset"] == pytest.approx(0.0)
     assert w.current_notes == prepared_notes
     assert w.total_song_duration_sec == 10.0
     assert any("Preparing playback..." in m for m in logs)

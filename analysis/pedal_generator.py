@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from typing import Any, List, Optional, Tuple
+import math
 
 from models import Note, KeyEvent, MusicalSection
 from core import get_time_groups
@@ -74,7 +75,9 @@ class PedalGenerator:
 
         section_events: List[KeyEvent] = []
         PedalGenerator._generate_harmonic_pedal(section_events, lh_notes)
-        return PedalGenerator._events_to_intervals(section_events)
+        return PedalGenerator._coalesce_overlapping_intervals(
+            PedalGenerator._events_to_intervals(section_events)
+        )
 
     @staticmethod
     def _coalesce_overlapping_intervals(
@@ -90,7 +93,7 @@ class PedalGenerator:
                 continue
 
             current_start, current_end = merged[-1]
-            if start < current_end:
+            if start <= current_end:
                 merged[-1] = (current_start, max(current_end, end))
             else:
                 merged.append((start, end))
@@ -138,7 +141,7 @@ class PedalGenerator:
     @staticmethod
     def _intervals_to_events(intervals: List[Tuple[float, float]]) -> List[KeyEvent]:
         events: List[KeyEvent] = []
-        for start, end in intervals:
+        for start, end in sorted(intervals):
             if end <= start:
                 continue
             events.append(KeyEvent(start, 1, "pedal", "down"))
@@ -150,14 +153,19 @@ class PedalGenerator:
         intervals: List[Tuple[float, float]] = []
         active_start: Optional[float] = None
 
-        for event in events:
+        for event in sorted(events, key=lambda e: e.time):
             if event.action != "pedal":
                 continue
             if event.key_char == "down":
+                if active_start is not None:
+                    intervals.append((active_start, event.time))
                 active_start = event.time
             elif event.key_char == "up" and active_start is not None:
                 intervals.append((active_start, max(active_start, event.time)))
                 active_start = None
+
+        if active_start is not None:
+            intervals.append((active_start, active_start + 0.1))
 
         return intervals
 
@@ -171,9 +179,10 @@ class PedalGenerator:
 
         PEDAL_LAG = 0.05  # Seconds between pedal up and down when repedaling.
         UNSAFE_INTERVALS = {1, 6}  # m2, tritone; repedal to avoid clash.
-
+        _last_was_early_release = False
         for i in range(len(driver_notes)):
             curr = driver_notes[i]
+            window_notes: List[Note] = []
             next_n = driver_notes[i + 1] if i < len(driver_notes) - 1 else None
 
             if i == 0:
@@ -201,13 +210,17 @@ class PedalGenerator:
                             for n in all_notes
                             if abs(n.start_time - next_n.start_time) <= 0.05
                         ]
-                        if window_notes:
-                            lowest_pitch = min(n.pitch for n in window_notes)
-                            for n in window_notes:
-                                interval = abs(n.pitch - lowest_pitch) % 12
+
+                    # Full pairwise interval check for all notes in the window
+                    if not should_repedal and window_notes:
+                        for j in range(len(window_notes)):
+                            for k in range(j + 1, len(window_notes)):
+                                interval = abs(window_notes[j].pitch - window_notes[k].pitch) % 12
                                 if interval in UNSAFE_INTERVALS:
                                     should_repedal = True
                                     break
+                            if should_repedal:
+                                break
 
                 if should_repedal and next_n:
                     events.append(KeyEvent(next_n.start_time, 0, "pedal", "up"))
@@ -215,8 +228,16 @@ class PedalGenerator:
                         KeyEvent(next_n.start_time + PEDAL_LAG, 1, "pedal", "down")
                     )
 
-        final_end = max(n.end_time for n in driver_notes)
-        events.append(KeyEvent(final_end, 0, "pedal", "up"))
+        # Pedal-up early if trailing silence > 0.35s after the last driver note.
+        last_end = max(n.end_time for n in driver_notes)
+        final_end = last_end
+        if all_notes:
+            overall_end = max(n.end_time for n in all_notes)
+            if overall_end - last_end > 0.35:
+                events.append(KeyEvent(last_end, 0, "pedal", "up"))
+                _last_was_early_release = True
+        if not _last_was_early_release:
+            events.append(KeyEvent(final_end, 0, "pedal", "up"))
         return events
 
     @staticmethod
@@ -227,19 +248,31 @@ class PedalGenerator:
         current_bass_pitch = -1
         for i, note in enumerate(bass_notes):
             is_new_harmony = note.pitch != current_bass_pitch
-            prev_end = bass_notes[i - 1].end_time if i > 0 else 0
+            prev_end = bass_notes[i - 1].end_time if i > 0 else bass_notes[i].start_time
             has_gap = (note.start_time - prev_end) > 0.15
             if i == 0:
-                events.append(KeyEvent(note.start_time, 1, "pedal", "down"))
+                # Check if the next bass note starts at the same time with a different pitch.
+                # If so, the harmony-change lift at the same time would cancel this down;
+                # skip it and let the harmony-change down (T+0.02) be the effective start.
+                if (i + 1 < len(bass_notes)
+                        and abs(bass_notes[i + 1].start_time - note.start_time) < 1e-9
+                        and bass_notes[i + 1].pitch != note.pitch):
+                    pass  # skip initial down
+                else:
+                    events.append(KeyEvent(note.start_time, 1, "pedal", "down"))
             elif has_gap:
                 events.append(KeyEvent(prev_end, 0, "pedal", "up"))
                 events.append(KeyEvent(note.start_time, 1, "pedal", "down"))
             elif is_new_harmony:
+                # Lift pedal briefly for harmony change, even during overlap.
+                # A short 20ms lift resets the sustain without audible gap.
+                lift_time = note.start_time + 0.02
                 events.append(KeyEvent(note.start_time, 0, "pedal", "up"))
-                events.append(KeyEvent(note.start_time, 1, "pedal", "down"))
+                events.append(KeyEvent(lift_time, 1, "pedal", "down"))
             current_bass_pitch = note.pitch
         final_end = max(n.end_time for n in bass_notes)
         events.append(KeyEvent(final_end, 0, "pedal", "up"))
+        events.sort()
 
     @staticmethod
     def _convert_raw_pedal(raw_events: list) -> List[KeyEvent]:
@@ -253,4 +286,7 @@ class PedalGenerator:
             elif value < 64 and pedal_down:
                 events.append(KeyEvent(t, 0, "pedal", "up"))
                 pedal_down = False
+        if pedal_down:
+            last_time = events[-1].time if events else 0.0
+            events.append(KeyEvent(last_time + 0.1, 0, "pedal", "up"))
         return events

@@ -119,7 +119,12 @@ def test_analyze_by_measures_with_empty_measure_uses_prev_style(monkeypatch):
     )
 
     sections = sa._analyze_by_measures()
-    assert sections
+    assert len(sections) >= 1
+    for s in sections:
+        assert s.start_time >= 0
+        assert s.end_time > s.start_time
+        assert s.articulation_label in ("legato", "staccato", "hybrid")
+        assert s.pace_label in ("fast", "slow", "normal")
 
 
 def test_analyze_by_measures_style_change_splits_sections(monkeypatch):

@@ -9,8 +9,8 @@ def make_note(
     *,
     velocity: int = 100,
     hand: str = "unknown",
-    track_index: int = 0,
-    channel: int = 0,
+    track_index: int = -1,
+    channel: int = -1,
 ) -> Note:
     return Note(
         id=note_id,

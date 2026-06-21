@@ -1,4 +1,5 @@
 from __future__ import annotations
+import threading
 
 from typing import Any
 
@@ -61,6 +62,10 @@ class RecorderBackend(OutputBackend):
     def shutdown(self):
         self.calls.append(("shutdown",))
 
+    def execute_batch(self, events):
+        self.calls.append(("execute_batch", list(events)))
+        super().execute_batch(events)
+
 
 class FakeLiveBackend(OutputBackend):
     def __init__(self):
@@ -81,6 +86,10 @@ class FakeLiveBackend(OutputBackend):
     def shutdown(self):
         self.calls.append(("shutdown",))
 
+    def execute_batch(self, events):
+        self.calls.append(("execute_batch", list(events)))
+        super().execute_batch(events)
+
 
 class FakeSignal:
     def __init__(self):
@@ -95,6 +104,17 @@ class FakeSignal:
         for fn in list(self._subs):
             fn(*args)
 
+    def disconnect(self, fn=None):
+        """Disconnect a specific receiver, or disconnect all if fn is None."""
+        if fn is None:
+            self._subs.clear()
+        else:
+            if fn not in self._subs:
+                raise TypeError(
+                    f"disconnect() argument '{fn}' is not connected"
+                )
+            self._subs = [f for f in self._subs if f is not fn]
+
 
 class FakeListener:
     def __init__(self, on_press=None):
@@ -104,6 +124,9 @@ class FakeListener:
 
     def start(self):
         self.started = True
+
+    def is_alive(self):
+        return self.started and not self.stopped
 
     def stop(self):
         self.stopped = True
@@ -156,9 +179,21 @@ class FakeThread:
 
     def quit(self):
         self.quit_called = True
-        self._running = False
+        # Do NOT set _running to False — real QThread.quit() posts to the event
+        # loop and isRunning() stays True until the loop exits.
 
     def wait(self, timeout=None):
+        if timeout is None:
+            import warnings
+            warnings.warn(
+                "FakeThread.wait(None) never blocks — "
+                "calls that use indefinite wait are not exercised",
+                stacklevel=2,
+            )
+        else:
+            # Simulate brief blocking to exercise timeout paths
+            import threading
+            threading.Event().wait(min(timeout, 0.001))
         self.wait_calls.append(timeout)
         self._running = False
         return True
@@ -170,6 +205,8 @@ class FakePlaybackPlayer:
         self.backend = backend
         self.config = config
         self.total_duration = total_duration
+        self.pause_event = threading.Event()
+        self.stop_event = threading.Event()
         self.playback_finished = FakeSignal()
         self.status_updated = FakeSignal()
         self.progress_updated = FakeSignal()
@@ -181,16 +218,21 @@ class FakePlaybackPlayer:
 
     def moveToThread(self, thread):
         self.thread = thread
-
+        return None
     def play(self):
         return None
 
     def stop(self):
         self.stopped = True
         self.stop_calls += 1
+        self.playback_finished.emit()
 
     def toggle_pause(self):
         self.paused_toggles += 1
+        if self.pause_event.is_set():
+            self.pause_event.clear()
+        else:
+            self.pause_event.set()
 
     def seek(self, target):
         self.seek_calls.append(target)

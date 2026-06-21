@@ -26,7 +26,7 @@ def test_handle_live_midi_message_routes_to_backend(window_factory, monkeypatch,
 def test_on_midi_input_finished_resets_state(window_factory, monkeypatch, tmp_path):
     w = window_factory()
     w.midi_input_active = True
-    w.midi_input_thread = object()
+    w.midi_input_thread = FakeThread()
     w.midi_input_worker = object()
 
     w._on_midi_input_finished()
@@ -95,8 +95,12 @@ def test_disconnect_midi_input_handles_worker_stop_exception(
 ):
     w = window_factory()
     logs = []
-
     class Worker:
+        message_received = FakeSignal()
+        connected = FakeSignal()
+        connection_error = FakeSignal()
+        warning = FakeSignal()
+        finished = FakeSignal()
         def stop(self):
             raise RuntimeError("stop fail")
 
@@ -106,6 +110,8 @@ def test_disconnect_midi_input_handles_worker_stop_exception(
 
         def wait(self, _timeout=None):
             logs.append("wait")
+        def terminate(self):
+            logs.append("terminate")
 
     w.midi_input_active = True
     w.midi_input_worker = Worker()
@@ -116,7 +122,6 @@ def test_disconnect_midi_input_handles_worker_stop_exception(
     w._disconnect_midi_input()
 
     assert any("Error stopping MIDI input worker" in str(x) for x in logs)
-    assert "quit" in logs
     assert "wait" in logs
     assert "release_all" in logs
 
@@ -313,6 +318,7 @@ def test_on_midi_input_connected_updates_ui_and_log(window_factory, monkeypatch,
     w = window_factory()
     events = []
     monkeypatch.setattr(w, "add_log_message", lambda m: events.append(m))
+    w.midi_input_active = True
 
     w._on_midi_input_connected("My Device")
 
@@ -419,15 +425,15 @@ def test_live_midi_backend_recreation_workflow(window_factory, monkeypatch, tmp_
     assert backend_b is not backend_a
 
     w._handle_live_midi_message(SimpleNamespace(type="note_off", note=60, velocity=0))
+    worker = w.midi_input_worker
     w._disconnect_midi_input()
 
     assert ("note_on", 60, 90) in backend_a.calls
     assert ("shutdown",) in backend_a.calls
     assert ("note_off", 60) in backend_b.calls
     assert ("shutdown",) in backend_b.calls
-    assert w.midi_input_worker.stop_calls == 1
-    assert w.midi_input_thread.quit_called is True
-    assert w.midi_input_thread.wait_calls[-1] == 2000
+    assert worker.stop_calls == 1
+    assert worker.thread.wait_calls[-1] == 5000
 
 
 def test_live_midi_output_mode_recreate_failure_disconnects(

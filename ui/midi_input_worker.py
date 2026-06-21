@@ -27,12 +27,6 @@ class MidiInputWorker(QObject):
 
     def stop(self):
         self._stop_event.set()
-        port = self._inport
-        if port is not None:
-            try:
-                port.close()
-            except OSError as e:
-                self.warning.emit(f"Failed to close MIDI input port: {e}")
 
     def run(self):
         try:
@@ -43,21 +37,24 @@ class MidiInputWorker(QObject):
             return
         self.connected.emit()
         try:
+            inport = self._inport
             while not self._stop_event.is_set():
-                for msg in self._inport.iter_pending():
-                    if self._stop_event.is_set():
-                        break
+                for msg in inport.iter_pending():
                     self.message_received.emit(msg)
                 self._stop_event.wait(0.005)
+        except OSError as e:
+            if not self._stop_event.is_set():
+                self.connection_error.emit(str(e))
         except Exception as e:
-            self.connection_error.emit(str(e))
+            if not self._stop_event.is_set():
+                self.connection_error.emit(str(e))
         finally:
             if self._inport is not None:
                 try:
                     self._inport.close()
-                except OSError as e:
+                except Exception as e:
                     self.warning.emit(
                         f"Failed to close MIDI input port during cleanup: {e}"
                     )
                 self._inport = None
-        self.finished.emit()
+            self.finished.emit()

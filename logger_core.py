@@ -17,6 +17,7 @@ import sys
 import threading
 import traceback
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Callable, List, Optional
 
 # Callback signature: (level: str, message: str) -> None
@@ -57,8 +58,9 @@ class JukeboxLogger:
             # Handle Unicode characters that may not be representable in the
             # active console code page (e.g. cp437 on Windows).
             try:
-                stream_handler.stream.errors = "replace"  # type: ignore[union-attr]
-            except (AttributeError, TypeError, ValueError):
+                if hasattr(sys.stderr, 'reconfigure'):
+                    sys.stderr.reconfigure(errors='replace')  # type: ignore[attr-defined]
+            except (OSError, ValueError):
                 pass
             self._logger.addHandler(stream_handler)
 
@@ -88,7 +90,8 @@ class JukeboxLogger:
 
     @property
     def current_level_name(self) -> str:
-        return logging.getLevelName(self._logger.level)
+        with self._lock:
+            return logging.getLevelName(self._logger.level)
 
     @property
     def callback_count(self) -> int:
@@ -139,7 +142,8 @@ class JukeboxLogger:
         """
         name = level_name.upper()
         level = _LEVELS.get(name, logging.INFO)
-        self._logger.setLevel(level)
+        with self._lock:
+            self._logger.setLevel(level)
 
     # ------------------------------------------------------------------
     # File logging (with rotation)
@@ -147,49 +151,81 @@ class JukeboxLogger:
 
     def enable_file_logging(
         self,
-        path: str,
+        path: str | Path,
         max_bytes: int = 5 * 1024 * 1024,
-        backup_count: int = 3,
+        backup_count: int = 2,
     ) -> None:
         """Enable rotating file logging to *path*.
 
-        Subsequent calls with the same parameters are cheap; changing the
-        path or rotation settings will recreate the handler.
-
-        A *path* that is empty or falsy is silently ignored.
+        If a file handler is already active for the same *path*, this is a no-op.
         """
-        if not path:
-            return
+        abs_path = Path(path).resolve()
+        # Directory creation outside the lock to avoid blocking on I/O
+        try:
+            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        except OSError:
+            pass
+
+        # Quick check outside lock, then double-check with lock
         with self._lock:
-            abs_path = os.path.abspath(path)
-            # Fast path — same handler already active.
             if (
                 self._file_handler is not None
-                and os.path.normcase(self._file_handler.baseFilename) == os.path.normcase(abs_path)
+                and self._file_handler.baseFilename == str(abs_path)
                 and self._file_handler.maxBytes == max_bytes
                 and self._file_handler.backupCount == backup_count
+                and hasattr(self._file_handler, 'stream')
+                and self._file_handler.stream is not None
+                and not self._file_handler.stream.closed
             ):
                 return
+            # Remember the old handler for disposal outside the lock
+            old_handler = self._file_handler
+            self._file_handler = None
 
-            # Tear down existing handler.
-            if self._file_handler is not None:
-                self._logger.removeHandler(self._file_handler)
-                try:
-                    self._file_handler.close()
-                except Exception as e:
-                    self._logger.debug("Error closing previous file handler: %s", e)
-                self._file_handler = None
-
-            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        try:
             handler = RotatingFileHandler(
                 abs_path,
                 maxBytes=max_bytes,
                 backupCount=backup_count,
                 encoding="utf-8",
             )
+        except (OSError, PermissionError) as e:
+            self._logger.warning("Could not enable file logging: %s", e)
+            with self._lock:
+                if self._file_handler is None:
+                    self._file_handler = old_handler
+                elif old_handler is not None:
+                    # Another thread set a handler while we were creating ours.
+                    # Dispose old_handler since it's no longer tracked.
+                    self._logger.removeHandler(old_handler)
+                    try:
+                        old_handler.close()
+                    except Exception as ce:
+                        self._logger.debug("Error closing previous file handler: %s", ce)
+            return
+
+        with self._lock:
+            if self._file_handler is not None:
+                # Another thread set a handler while we were creating ours
+                if old_handler is not None:
+                    self._logger.removeHandler(old_handler)
+                    try:
+                        old_handler.close()
+                    except Exception as e:
+                        self._logger.debug("Error closing previous file handler: %s", e)
+                handler.close()
+                return
             handler.setFormatter(logging.Formatter(_FORMAT))
             self._logger.addHandler(handler)
             self._file_handler = handler
+
+        # Dispose old handler outside the lock
+        if old_handler is not None:
+            self._logger.removeHandler(old_handler)
+            try:
+                old_handler.close()
+            except Exception as e:
+                self._logger.debug("Error closing previous file handler: %s", e)
 
     def disable_file_logging(self) -> None:
         """Disable file logging and close the current file handler, if any."""
@@ -214,20 +250,25 @@ class JukeboxLogger:
         (i.e. inside an ``except`` block), the traceback is appended to the
         GUI callback message.  If *exc_info* is ``True`` but no exception is
         active, the traceback is silently omitted.
+
+        .. note::
+            Callbacks registered via add_gui_callback are stored indefinitely.
+            For dynamically-created callbacks (lambdas, bound methods), caller
+            MUST call remove_gui_callback when the callback is no longer needed
+            to prevent reference leaks.
         """
         lvl_name = level.upper()
         lvl = _LEVELS.get(lvl_name, logging.INFO)
+
+        with self._lock:
+            if not self._logger.isEnabledFor(lvl):
+                return
+            callbacks = list(self._gui_callbacks) if self._gui_callbacks else []
+
         self._logger.log(lvl, message, exc_info=exc_info)
 
-        # Only notify GUI callbacks when this level is enabled.
-        if not self._logger.isEnabledFor(lvl):
+        if not callbacks:
             return
-
-        # Bail early if there are no GUI listeners.
-        with self._lock:
-            if not self._gui_callbacks:
-                return
-            callbacks = list(self._gui_callbacks)
 
         if exc_info and sys.exc_info()[0] is not None:
             full_message = message + "\n" + traceback.format_exc()

@@ -23,11 +23,15 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import math
+import threading
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, Dict, Iterator, Optional, Set, Tuple, Union, get_type_hints
+from logger_core import jukebox_logger
 
 
 CONFIG_DIR_NAME = ".jukebox_piano"
@@ -77,28 +81,34 @@ class _FieldMeta:
 
 def _resolve_type(tp: type) -> type:
     """Resolve a type annotation to a simple type, unwrapping Optional."""
+    import types
     origin = getattr(tp, "__origin__", None)
-    if origin is Union:
-        args = getattr(tp, "__args__", ())
+    if origin is Union or isinstance(tp, types.UnionType):
+        args = getattr(tp, "__args__", ()) if origin is Union else tp.__args__
         non_none = [a for a in args if a is not type(None)]
         return non_none[0] if non_none else str
-    if origin is list or origin is dict:
-        return str
+    if origin in (list, dict):
+        return origin
     return tp
 
 
 def _build_field_meta(cls: type) -> Dict[str, _FieldMeta]:
     """Build a dict of field_name → _FieldMeta from dataclass field metadata and annotations."""
     meta: Dict[str, _FieldMeta] = {}
+    hints: Dict[str, type] = {}
     try:
         hints = get_type_hints(cls)
-    except Exception:
-        hints = {}
+    except Exception as e:
+        jukebox_logger.warning(f"_build_field_meta: get_type_hints failed for {cls.__name__}: {e}")
+        pass  # hints stays empty; each field falls back individually
     for f in fields(cls):
         if f.name.startswith("_"):
             continue
         raw = f.metadata or {}
-        resolved_type = _resolve_type(hints.get(f.name, str))
+        try:
+            resolved_type = _resolve_type(hints.get(f.name, str))
+        except Exception:
+            resolved_type = str  # per-field fallback — one bad annotation doesn't kill all
         meta[f.name] = _FieldMeta(
             old_names=raw.get("old_names", ()),
             cls_type=resolved_type,
@@ -121,6 +131,8 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
+        if value not in (0, 1):
+            return default
         return bool(value)
     if isinstance(value, str):
         lowered = value.strip().lower()
@@ -135,10 +147,15 @@ def _coerce_float(value: Any, default: float) -> float:
     if isinstance(value, bool):
         return default
     if isinstance(value, (int, float)):
+        if isinstance(value, float) and (math.isinf(value) or math.isnan(value)):
+            return default
         return float(value)
     if isinstance(value, str):
         try:
-            return float(value.strip())
+            val = float(value.strip())
+            if math.isinf(val) or math.isnan(val):
+                return default
+            return val
         except ValueError:
             return default
     return default
@@ -150,11 +167,16 @@ def _coerce_int(value: Any, default: int) -> int:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
-        return int(value)
+        if math.isinf(value) or math.isnan(value):
+            return default
+        return round(value)
     if isinstance(value, str):
         try:
-            return int(float(value.strip()))
-        except ValueError:
+            val = float(value.strip())
+            if math.isinf(val) or math.isnan(val):
+                return default
+            return round(val)
+        except (ValueError, TypeError, OverflowError):
             return default
     return default
 
@@ -164,6 +186,10 @@ def _coerce_optional_str(value: Any) -> Optional[str]:
     if value is None:
         return None
     if not isinstance(value, str):
+        jukebox_logger.warning(
+            f"Invalid type for optional string field: "
+            f"expected str, got {type(value).__name__}: {value!r}. Returning None."
+        )
         return None
     stripped = value.strip()
     return stripped if stripped else None
@@ -173,45 +199,68 @@ def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
 
 
-def _coerce_field(value: Any, meta: _FieldMeta, default: Any) -> Any:
+def _coerce_field(value: Any, meta: _FieldMeta, default: Any, field_name: str = "") -> Any:
     """Coerce *value* according to the field's type metadata, falling back to *default*."""
     tp = meta.cls_type
 
     if tp is bool:
-        return _coerce_bool(value, default)
+        result = _coerce_bool(value, default)
+        if result == default and value != default:
+            jukebox_logger.warning(f"Config field '{field_name}': invalid value {str(value)[:200]!r}, using default {default!r}")
+        return result
 
     if tp is float:
         result = _coerce_float(value, default)
+        if result == default and value != default:
+            jukebox_logger.warning(f"Config field '{field_name}': invalid value {str(value)[:200]!r}, using default {default!r}")
         if meta.range_:
-            result = _clamp(result, meta.range_[0], meta.range_[1])
+            clamped = _clamp(result, meta.range_[0], meta.range_[1])
+            if clamped != result:
+                jukebox_logger.warning(f"Config field '{field_name}': value {result} clamped to range [{meta.range_[0]}, {meta.range_[1]}]")
+            result = clamped
         return result
 
     if tp is int:
         result = _coerce_int(value, default)
+        if result == default and value != default:
+            jukebox_logger.warning(f"Config field '{field_name}': invalid value {str(value)[:200]!r}, using default {default!r}")
         if meta.range_:
-            result = int(_clamp(float(result), meta.range_[0], meta.range_[1]))
+            clamped = int(_clamp(float(result), meta.range_[0], meta.range_[1]))
+            if clamped != result:
+                jukebox_logger.warning(f"Config field '{field_name}': value {result} clamped to range [{meta.range_[0]}, {meta.range_[1]}]")
+            result = clamped
         return result
 
     if tp is str:
-        if isinstance(value, str):
-            val = value.strip()
-            if meta.choices:
-                # Case-fold for choice matching (e.g. "warning" → "WARNING")
-                for choice in meta.choices:
-                    if val.upper() == choice.upper():
-                        return choice
-                return default
+        if not isinstance(value, str):
             if meta.is_optional:
-                return val if val else None
-            return val
+                jukebox_logger.warning(
+                    f"Config field '{field_name}': invalid value {str(value)[:200]!r}, clearing to None"
+                )
+                return None
+            jukebox_logger.warning(
+                f"Config field '{field_name}': invalid value {str(value)[:200]!r}, using default {default!r}"
+            )
+            return default
+        val = value.strip()
+        if meta.choices:
+            for choice in meta.choices:
+                if val.upper() == choice.upper():
+                    return choice
+            jukebox_logger.warning(f"Config field '{field_name}': invalid value {str(value)[:200]!r}, using default {default!r}")
+            if meta.is_optional:
+                return None  # clear the field when is_optional and value is invalid
+            return default
+        if meta.is_optional:
+            return val if val else None
+        return val
+
+
+
+    if not isinstance(value, tp):
+        jukebox_logger.warning(f"Config field '{field_name}': invalid value {str(value)[:200]!r}, using default {default!r}")
         return default
-
-    # Optional[str] — resolved type is str but we handle None separately
-    if tp is type(None):
-        coerced = _coerce_optional_str(value)
-        return coerced if coerced is not None else default
-
-    return value if isinstance(value, tp) else default
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +394,7 @@ class Config:
     save_log_to_file: bool = field(default=False)
     log_level: str = field(
         default="INFO",
-        metadata={"choices": {"DEBUG", "INFO", "WARNING", "ERROR"}},
+        metadata={"choices": {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}},
     )
 
     # ------------------------------------------------------------------
@@ -375,6 +424,7 @@ class Config:
         to_pop = [k for k, v in d.items() if v is None and meta.get(k, _FieldMeta()).omit_if_none]
         for k in to_pop:
             d.pop(k, None)
+        d["_config_version"] = 2
         return d
 
     def to_runtime_playback_dict(self) -> "PlaybackConfig":
@@ -392,10 +442,13 @@ class Config:
         for key, fm in meta.items():
             if fm.runtime_alias:
                 val = raw.get(key, getattr(self, key))
+                if val is None:
+                    continue  # Don't propagate None through runtime alias
                 if fm.runtime_scale != 1.0 and isinstance(val, (int, float)):
                     val = val * fm.runtime_scale
                 runtime_overrides[fm.runtime_alias] = val
 
+        raw.pop("_config_version", None)
         # Merge and return as a PlaybackConfig (which behaves like a dict)
         merged = dict(raw)
         merged.update(runtime_overrides)
@@ -433,16 +486,24 @@ class Config:
         # (old persisted values might be 0-1 range rather than our new 0-100)
         # Only applies when the new key was NOT in the original data (i.e. the
         # value came from an old-name migration above or was the raw old key).
+        format_version = data.get("_config_version", 1)
+        if not isinstance(format_version, int):
+            try:
+                format_version = int(float(str(format_version)))
+            except (ValueError, TypeError):
+                format_version = 1
         if "articulation" in migrated and "value_articulation" not in original_keys:
             val = migrated["articulation"]
-            if isinstance(val, (int, float)) and val <= 1.0:
+            if format_version < 2 and isinstance(val, (int, float)) and val <= 1.0:
                 migrated["value_articulation"] = val * 100.0
             else:
                 migrated["value_articulation"] = val
         if "drift_decay_factor" in migrated and "value_hand_drift_decay" not in original_keys:
             val = migrated["drift_decay_factor"]
-            if isinstance(val, (int, float)):
+            if format_version < 2 and isinstance(val, (int, float)) and val <= 1.0:
                 migrated["value_hand_drift_decay"] = val * 100.0
+            else:
+                migrated["value_hand_drift_decay"] = val
 
         # Phase 3: filter to known fields only
         known = cls.known_field_names()
@@ -456,7 +517,7 @@ class Config:
         coerced: Dict[str, Any] = {}
         for k, v in filtered.items():
             default_val = getattr(defaults, k)
-            coerced[k] = _coerce_field(v, meta[k], default_val)
+            coerced[k] = _coerce_field(v, meta[k], default_val, field_name=k)
 
         # Phase 5: build instance
         config = cls(**coerced)
@@ -532,7 +593,7 @@ class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
     # Runtime-only keys (not persisted, injected during playback setup).
     midi_file: str = ""
     start_offset: float = 0.0
-    raw_pedal_events: Optional[list] = None
+    raw_pedal_events: Optional[list] = None  # __init__ replaces with per-instance list
 
     def __init__(self, **kwargs: Any) -> None:
         """Accept arbitrary keyword arguments, including non-annotated extras."""
@@ -542,8 +603,9 @@ class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
                 setattr(self, k, v)
             else:
                 object.__setattr__(self, k, v)
+        # Ensure per-instance mutable list.
         if self.raw_pedal_events is None:
-            object.__setattr__(self, 'raw_pedal_events', [])
+            self.raw_pedal_events = []
 
     # ---- Mapping protocol ----
 
@@ -554,7 +616,13 @@ class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
             raise KeyError(key) from e
 
     def __iter__(self) -> Iterator[str]:
-        return (k for k in self.__annotations__ if hasattr(self, k))
+        seen = set()
+        for k in type(self).__annotations__:
+            seen.add(k)
+            yield k
+        for k in self.__dict__:
+            if k not in seen:
+                yield k
 
     def __len__(self) -> int:
         return sum(1 for _ in self)
@@ -562,7 +630,7 @@ class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
     def __contains__(self, key: object) -> bool:
         if not isinstance(key, str):
             return False
-        return hasattr(self, key)
+        return key in type(self).__annotations__ or key in self.__dict__
 
     # ---- Mutability ----
 
@@ -584,6 +652,9 @@ class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
             for k in self.__annotations__
             if hasattr(self, k)
         )
+        extra = {k: self.__dict__[k] for k in self.__dict__ if k not in self.__annotations__ and not k.startswith('_')}
+        if extra:
+            items += f", ...extra: {extra}"
         return f"PlaybackConfig({items})"
 
 
@@ -594,6 +665,7 @@ class PlaybackConfig(Mapping[str, Any]):  # type: ignore[type-arg]
 
 class ConfigRepository:
     """Load and save Config to a JSON file under user config dir."""
+    _save_lock = threading.Lock()
 
     def __init__(self, config_dir: Optional[Path] = None):
         self.config_dir = config_dir or (Path.home() / CONFIG_DIR_NAME)
@@ -604,23 +676,30 @@ class ConfigRepository:
 
     def load(self) -> Config:
         """Load config from disk. Missing file returns defaults; invalid files raise ConfigLoadError."""
-        if not self.config_path.exists():
-            return Config()
-        try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return Config.from_dict(data)
-        except (json.JSONDecodeError, TypeError) as e:
-            backup_path = self._backup_corrupt_config()
-            raise ConfigLoadError(self.config_path, e, backup_path=backup_path) from e
-        except OSError as e:
-            raise ConfigLoadError(self.config_path, e) from e
+        with self._save_lock:
+            if not self.config_path.exists():
+                return Config()
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except json.JSONDecodeError as e:
+                backup_path = self._backup_corrupt_config()
+                raise ConfigLoadError(self.config_path, e, backup_path=backup_path) from e
+            except OSError as e:
+                if isinstance(e, FileNotFoundError):
+                    return Config()  # File disappeared between exists() and open()
+                raise ConfigLoadError(self.config_path, e) from e
+            try:
+                return Config.from_dict(data)
+            except TypeError as e:
+                backup_path = self._backup_corrupt_config()
+                raise ConfigLoadError(self.config_path, e, backup_path=backup_path) from e
 
     def _backup_corrupt_config(self) -> Optional[Path]:
         try:
             if not self.config_path.exists():
                 return None
-            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
             backup_path = self.config_dir / f"config.corrupt.{stamp}.json"
             self.config_path.replace(backup_path)
             return backup_path
@@ -629,11 +708,36 @@ class ConfigRepository:
 
     def save(self, config: Config) -> None:
         """Persist config to disk. Raises on I/O error."""
-        self.ensure_config_dir()
-        tmp_path = self.config_path.with_suffix(".json.tmp")
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(config.to_dict(), f, indent=4)
-        os.replace(str(tmp_path), str(self.config_path))
+        with self._save_lock:
+            self.ensure_config_dir()
+            tmp_path = self.config_path.with_suffix(".json.tmp")
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError as e:
+                jukebox_logger.warning(f"Failed to clean up temp file {tmp_path}: {e}")
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(config.to_dict(), f, indent=4)
+                try:
+                    os.replace(str(tmp_path), str(self.config_path))
+                except OSError:
+                    # Fall back to copy2 for cross-device / permission scenarios
+                    try:
+                        shutil.copy2(str(tmp_path), str(self.config_path))
+                    except OSError as e2:
+                        jukebox_logger.warning(f"Failed to save config: {e2}")
+                        raise
+                    # copy2 succeeded but is non-atomic — warn
+                    jukebox_logger.warning(
+                        "Config file write used non-atomic copy2 fallback; "
+                        "concurrent readers may see partial content."
+                    )
+            finally:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
 
 
 class ConfigLoadError(Exception):

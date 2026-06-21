@@ -1,3 +1,5 @@
+import pytest
+
 from models import KeyEvent, KeyState, MidiTrack, Note
 
 
@@ -29,7 +31,7 @@ def test_midi_track_instrument_name_ranges_and_drum_override():
     assert t.instrument_name == "Ensemble"
 
     t.program_change = 99
-    assert t.instrument_name == "Instrument 99"
+    assert t.instrument_name == "Synth Effects"
 
     t.is_drum = True
     assert t.instrument_name == "Drums/Percussion"
@@ -71,5 +73,24 @@ def test_key_event_ordering_by_time_then_priority():
 def test_note_end_time_with_zero_duration():
     n1 = Note(1, 60, 100, 1.0, 0.0)
     assert n1.end_time == 1.0
-    n2 = Note(2, 60, 100, 1.0, -0.5)
-    assert n2.end_time == 0.5
+    with pytest.raises(ValueError, match="duration .* must be >= 0"):
+        Note(2, 60, 100, 1.0, -0.5)
+
+
+def test_key_event_equality_uses_all_fields():
+    """KeyEvent equality should distinguish different action/pitch/velocity at same time+priority."""
+    base = KeyEvent(0.0, 2, "press", "c", 60, 100)
+    same = KeyEvent(0.0, 2, "press", "c", 60, 100)
+    diff_action = KeyEvent(0.0, 2, "release", "c", 60, 100)
+    diff_pitch = KeyEvent(0.0, 2, "press", "c", 64, 100)
+    diff_velocity = KeyEvent(0.0, 2, "press", "c", 60, 80)
+    diff_key_char = KeyEvent(0.0, 2, "press", "d", 60, 100)
+    diff_time = KeyEvent(0.5, 2, "press", "c", 60, 100)
+
+    assert base == same
+    assert base != diff_action
+    assert base != diff_pitch
+    assert base != diff_velocity
+    assert base != diff_key_char
+    assert base != diff_time
+

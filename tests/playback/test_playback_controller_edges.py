@@ -12,6 +12,13 @@ def _setup(monkeypatch):
     monkeypatch.setattr("playback.playback_controller.create_backend", lambda *a, **k: backend)
     monkeypatch.setattr("playback.playback_controller.QThread", FakeThread)
     monkeypatch.setattr("playback.playback_controller.Player", FakePlaybackPlayer)
+    # Fire deferred timers immediately, but first simulate thread completion
+    # since FakeThread.quit() doesn't set _running=False (matching real QThread).
+    def _fake_timer(ms, cb):
+        if ms > 0 and ctrl._thread is not None:
+            ctrl._thread._running = False  # type: ignore[attr-defined]
+        cb()
+    monkeypatch.setattr("playback.playback_controller.QTimer.singleShot", _fake_timer)
     return ctrl
 
 
@@ -37,9 +44,10 @@ def test_stop_and_wait_with_timeout(monkeypatch):
     ctrl.stop_and_wait(timeout_ms=123)
 
     player_impl = cast(Any, player)
-    thread_impl = cast(Any, thread)
     assert player_impl.stop_calls == 1
-    assert thread_impl.wait_calls[-1] == 123
+    assert ctrl.state == "stopped"
+    assert ctrl.player is None
+    assert ctrl._thread is None
     assert ctrl._stopping is False
 
 
@@ -54,9 +62,10 @@ def test_stop_and_wait_without_timeout(monkeypatch):
     ctrl.stop_and_wait()
 
     player_impl = cast(Any, player)
-    thread_impl = cast(Any, thread)
     assert player_impl.stop_calls == 1
-    assert thread_impl.wait_calls[-1] is None
+    assert ctrl.state == "stopped"
+    assert ctrl.player is None
+    assert ctrl._thread is None
     assert ctrl._stopping is False
 
 
@@ -91,7 +100,7 @@ def test_set_state_noop_and_toggle_pause_without_player(monkeypatch):
     assert ctrl.state == "stopped"
 
 
-def test_stop_noop_when_not_running(monkeypatch):
+def test_stop_always_calls_player_stop(monkeypatch):
     ctrl = _setup(monkeypatch)
     ctrl.start([], {}, 1.0, "key", False)
     player = ctrl.player
@@ -103,7 +112,7 @@ def test_stop_noop_when_not_running(monkeypatch):
     ctrl.stop()
 
     player_impl = cast(Any, player)
-    assert player_impl.stop_calls == 0
+    assert player_impl.stop_calls == 1
 
 
 def test_start_ignored_while_running(monkeypatch):
@@ -115,7 +124,7 @@ def test_start_ignored_while_running(monkeypatch):
     ctrl.start([], {}, 1.0, "key", False, log_message=logs.append)
 
     assert ctrl.player is first_player
-    assert any("still stopping" in m for m in logs)
+    assert any("already running" in m for m in logs)
 
 
 def test_on_playback_finished_is_noop_if_already_cleaned(monkeypatch):
@@ -137,6 +146,7 @@ def test_start_finish_then_start_again_uses_clean_state(monkeypatch):
     first_thread = ctrl._thread
     assert first_player is not None and first_thread is not None
 
+    monkeypatch.setattr(ctrl, "sender", lambda: first_player)
     ctrl._on_playback_finished_internal()
     ctrl.start([], {}, 2.0, "key", False)
 
@@ -157,6 +167,7 @@ def test_start_stop_and_wait_then_restart_succeeds(monkeypatch):
     assert first_player is not None and first_thread is not None
 
     ctrl.stop_and_wait(timeout_ms=50)
+    monkeypatch.setattr(ctrl, "sender", lambda: first_player)
     ctrl._on_playback_finished_internal()
     ctrl.start([], {}, 1.5, "key", False)
 

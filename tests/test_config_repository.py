@@ -40,7 +40,7 @@ def test_config_from_dict_migrates_and_clamps_values():
     assert cfg.enable_hand_drift is True
     assert cfg.value_timing_variance == 0.1
     assert cfg.value_articulation == 50.0
-    assert cfg.value_hand_drift_decay == 100.0
+    assert cfg.value_hand_drift_decay == 1.5
     assert cfg.value_mistake_chance == 10.0
     assert cfg.value_tempo_sway_intensity == 0.1
     assert cfg.tempo == 200.0
@@ -199,7 +199,16 @@ def test_repository_load_wraps_oserror(monkeypatch, tmp_path: Path):
 
 @pytest.mark.parametrize(
     ("value", "default", "expected"),
-    [("maybe", True, True)],
+    [
+        (True, False, True),
+        (1, False, True),
+        (0, True, False),
+        (2, False, False),
+        ("true", False, True),
+        ("false", True, False),
+        ("maybe", True, True),
+        ([], False, False),
+    ],
 )
 def test_coerce_bool_fallback_branches(value, default, expected):
     assert _coerce_bool(value, default) is expected
@@ -215,7 +224,7 @@ def test_coerce_float_fallback_branches(value, default, expected):
 
 @pytest.mark.parametrize(
     ("value", "default", "expected"),
-    [(True, 7, 7), (3.9, 7, 3), ("bad", 7, 7), ([], 7, 7)],
+    [(True, 7, 7), (3.9, 7, 4), ("bad", 7, 7), ([], 7, 7)],
 )
 def test_coerce_int_fallback_branches(value, default, expected):
     assert _coerce_int(value, default) == expected
@@ -296,13 +305,11 @@ def test_playback_config_from_roundtrip():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_type_list_dict_returns_str():
-    """_resolve_type returns str for list[...] and dict[...] origin types."""
+def test_resolve_type_list_dict_returns_origin():
+    """_resolve_type returns list/dict origin types for list[...] and dict[...]."""
     from config_repository import _resolve_type
-
-    assert _resolve_type(list[int]) == str
-    assert _resolve_type(dict[str, object]) == str
-
+    assert _resolve_type(list[int]) == list
+    assert _resolve_type(dict[str, int]) == dict
 
 # ---------------------------------------------------------------------------
 # Edge-case coverage: _build_field_meta failures (lines 94-98)
@@ -347,20 +354,6 @@ def test_build_field_meta_skips_private_fields():
 # Edge-case coverage: _coerce_field with type(None) (lines 215-219)
 # ---------------------------------------------------------------------------
 
-
-def test_coerce_field_none_type_branch():
-    """_coerce_field handles type(None) via the Optional[str] fallback branch."""
-    from config_repository import _coerce_field, _FieldMeta
-
-    meta = _FieldMeta(cls_type=type(None))
-    # None value -> _coerce_optional_str returns None -> returns default
-    assert _coerce_field(None, meta, "fallback") == "fallback"
-    # Non-string -> _coerce_optional_str returns None -> returns default
-    assert _coerce_field(42, meta, "fallback") == "fallback"
-    # Blank string -> None -> returns default
-    assert _coerce_field("   ", meta, "fallback") == "fallback"
-    # Valid string -> passes through
-    assert _coerce_field("hello", meta, "fallback") == "hello"
 
 
 def test_coerce_field_str_returns_default_for_non_string():

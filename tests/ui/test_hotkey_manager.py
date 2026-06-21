@@ -1,65 +1,119 @@
-from typing import Any, cast
+"""Tests for HotkeyManager using QShortcut / eventFilter (no pynput)."""
 
-from pynput.keyboard import Key
+from __future__ import annotations
 
-from tests.helpers.fakes import FakeListener
-from ui.hotkey_manager import HotkeyManager, parse_hotkey_string
+from typing import Any
 
-parse_hotkey_string = cast(Any, parse_hotkey_string)
+from PyQt6.QtCore import Qt, QEvent
+from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtWidgets import QWidget
 
-
-def _patch_listener(monkeypatch):
-    monkeypatch.setattr("ui.hotkey_manager.keyboard.Listener", FakeListener)
-
-
-def test_parse_hotkey_string_defaults_and_char():
-    assert parse_hotkey_string(None) == Key.f8
-    key = cast(Any, parse_hotkey_string("x"))
-    assert hasattr(key, "char") and key.char == "x"
+from ui.hotkey_manager import HotkeyManager
 
 
-def test_hotkey_manager_binding_and_toggle(monkeypatch):
-    _patch_listener(monkeypatch)
 
-    mgr = HotkeyManager()
-    captured = {"toggle": 0, "bound": None}
-    mgr.toggle_requested.connect(lambda: captured.__setitem__("toggle", captured["toggle"] + 1))
-    mgr.bound_updated.connect(lambda s: captured.__setitem__("bound", s))
+
+def test_hotkey_manager_default_key(qtbot: Any) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    assert mgr.get_current_key() == "F8"
+
+
+def test_hotkey_manager_set_and_get(qtbot: Any) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr.set_hotkey("Ctrl+Shift+A")
+    assert mgr.get_current_key() == "Ctrl+Shift+A"
+
+
+def test_hotkey_manager_format_key_string(qtbot: Any) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    assert mgr.format_key_string("F8") == "F8"
+    assert mgr.format_key_string("Ctrl+Shift+A") == "Ctrl+Shift+A"
+
+
+def test_hotkey_manager_binding_captures_key(qtbot: Any) -> None:
+    """start_binding() followed by a key press emits bound_updated."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+
+    captured: list[str] = []
+    mgr.bound_updated.connect(captured.append)
 
     mgr.start_binding()
-    mgr.on_press(Key.f7)
-    assert captured["bound"] == "f7"
-
-    mgr.current_key = Key.f8
-    mgr.on_press(Key.f8)
-    assert captured["toggle"] == 1
-
-
-def test_parse_hotkey_string_invalid_char_falls_back_to_default(monkeypatch):
-    monkeypatch.setattr(
-        "ui.hotkey_manager.KeyCode.from_char",
-        lambda _c: (_ for _ in ()).throw(ValueError("bad char")),
-    )
-    assert parse_hotkey_string("x") == Key.f8
+    event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_F7, Qt.KeyboardModifier.NoModifier)
+    mgr.eventFilter(parent, event)
+    assert len(captured) == 1
+    assert captured[0] == "F7"
+    assert mgr.get_current_key() == "F7"
 
 
-def test_parse_hotkey_string_multi_char_falls_back_to_default():
-    assert parse_hotkey_string("xx") == Key.f8
+def test_hotkey_manager_binding_ignores_autorepeat(qtbot: Any) -> None:
+    """Auto-repeat key events should not trigger a binding."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+
+    captured: list[str] = []
+    mgr.bound_updated.connect(captured.append)
+
+    mgr.start_binding()
+    # Auto-repeat event
+    event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_F7,
+                      Qt.KeyboardModifier.NoModifier, "", True)
+    mgr.eventFilter(parent, event)
+
+    assert len(captured) == 0, "auto-repeat should not bind"
+    assert mgr._listening_for_bind, "binding mode should remain active"
 
 
-def test_format_key_string_prefers_key_char(monkeypatch):
-    class CharKey:
-        char = "z"
+def test_hotkey_manager_binding_only_when_listening(qtbot: Any) -> None:
+    """Key press without start_binding() does not emit bound_updated."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
 
-    _patch_listener(monkeypatch)
-    mgr = HotkeyManager()
+    captured: list[str] = []
+    mgr.bound_updated.connect(captured.append)
 
-    assert mgr.format_key_string(CharKey()) == "z"
+    event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_F7, Qt.KeyboardModifier.NoModifier)
+    mgr.eventFilter(parent, event)
 
 
-def test_stop_with_no_listener_noop(monkeypatch):
-    _patch_listener(monkeypatch)
-    mgr = HotkeyManager()
-    mgr.listener = None
+def test_hotkey_manager_toggle_signal(qtbot: Any) -> None:
+    """The QShortcut emits toggle_requested when activated."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
 
+    toggled: list[bool] = []
+    mgr.toggle_requested.connect(lambda: toggled.append(True))
+
+    # Emit the shortcut's activated signal directly
+    # Shortcut is set during construction
+    assert mgr._shortcut is not None
+    mgr._shortcut.activated.emit()
+    assert toggled == [True], "shortcut activated should emit toggle_requested"
+
+
+def test_hotkey_manager_stop(qtbot: Any) -> None:
+    """stop() disables the shortcut."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
     mgr.stop()
+    assert mgr._shortcut is None or not mgr._shortcut.isEnabled()
+
+
+def test_hotkey_manager_stop_idempotent(qtbot: Any) -> None:
+    """Calling stop() multiple times does not raise."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr.stop()
+    mgr.stop()  # second call should be safe

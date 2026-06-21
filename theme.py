@@ -34,12 +34,14 @@ def apply_global_palette(app: QApplication) -> None:
     palette = app.palette()
     palette.setColor(palette.ColorRole.Window, WINDOW_BG)
     palette.setColor(palette.ColorRole.Base, PANEL_BG)
-    palette.setColor(palette.ColorRole.AlternateBase, PANEL_BG)
+    palette.setColor(palette.ColorRole.AlternateBase, QColor(38, 38, 42))
     palette.setColor(palette.ColorRole.Text, TEXT_PRIMARY)
     palette.setColor(palette.ColorRole.WindowText, TEXT_PRIMARY)
     palette.setColor(palette.ColorRole.ButtonText, TEXT_PRIMARY)
     palette.setColor(palette.ColorRole.ToolTipBase, PANEL_BG)
     palette.setColor(palette.ColorRole.ToolTipText, TEXT_PRIMARY)
+    palette.setColor(palette.ColorRole.Highlight, QColor(60, 120, 200))
+    palette.setColor(palette.ColorRole.HighlightedText, TEXT_PRIMARY)
     app.setPalette(palette)
 
 
@@ -64,11 +66,11 @@ class PianoColors:
 
 @dataclass(frozen=True)
 class LogColors:
-    debug: str
-    info: str
-    warning: str
-    error: str
-    critical: str
+    debug: QColor
+    info: QColor
+    warning: QColor
+    error: QColor
+    critical: QColor
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,7 @@ _theme_cache: Theme | None = None
 
 def get_theme() -> Theme:
     """Return the cached dark-cyber theme instance (lazy-init)."""
+    # Called only from main thread (QApplication init); no lock needed.
     global _theme_cache
     if _theme_cache is None:
         _theme_cache = get_dark_cyber_theme()
@@ -149,11 +152,11 @@ def get_dark_cyber_theme() -> Theme:
     )
 
     logs = LogColors(
-        debug="#8888A0",
-        info=text_secondary,
-        warning=accent_warning,
-        error=accent_error,
-        critical="#FF3333",
+        debug=QColor("#8888A0"),
+        info=QColor(text_secondary),
+        warning=QColor(accent_warning),
+        error=QColor(accent_error),
+        critical=QColor("#FF3333"),
     )
 
     # Global stylesheet for common widgets; conservative so it plays well cross‑platform.

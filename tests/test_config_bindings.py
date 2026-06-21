@@ -102,6 +102,12 @@ class DummyHotkeyManager:
     def format_key_string(self, key):
         return str(key)
 
+    def set_hotkey(self, key) -> None:
+        self.current_key = key
+
+    def get_current_key(self):
+        return self.current_key
+
 
 class DummyGeometry:
     def __init__(self, payload=b""):
@@ -153,6 +159,15 @@ class DummyWidget:
         }
         self.pedal_mapping_inv = {v: k for k, v in self.pedal_mapping.items()}
         self.pedal_style_combo = DummyCombo(items=[(k, k) for k in self.pedal_mapping])
+        self._window_state = 0
+
+    def windowState(self):
+        return self._window_state
+    def move(self, *args):
+        pass
+
+    def rect(self):
+        return __import__("PyQt6").QtCore.QRect(0, 0, 100, 100)
 
     def _on_file_submode_changed(self):
         self._saved.append(("file_submode", self.input_mode_playlist_radio.isChecked()))
@@ -341,11 +356,11 @@ def test_set_save_log_to_file_and_set_log_level(monkeypatch):
 
 
 def test_pedal_style_getter_unknown_text_uses_fallback():
-    """Getter falls back to hybrid when combo text is unknown."""
+    """Getter falls back to original when combo text is unknown."""
     w = DummyWidget()
     w.pedal_style_combo.setCurrentText("Garbage")
     result = cb._get_pedal_style(w)
-    assert result == "hybrid"
+    assert result == "original"
 
 
 def test_pedal_style_setter_unknown_value_uses_fallback():

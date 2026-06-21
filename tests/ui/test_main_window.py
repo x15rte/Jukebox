@@ -11,24 +11,26 @@ from tests.helpers.fakes import FakeLiveBackend, FakeSignal, FakeThread
 
 def test_gather_config_without_tracks_shows_warning(window_factory, monkeypatch, tmp_path):
     w = window_factory()
-    warnings = []
-    monkeypatch.setattr(w, "_log_error", lambda *a, **k: None)
-    monkeypatch.setattr("main_window.QMessageBox.warning", lambda *a, **k: warnings.append(True))
+    log_errors = []
+    monkeypatch.setattr(w, "_log_error", lambda *a, **k: log_errors.append((a, k)))
 
     cfg = w.gather_config()
     assert cfg is None
-    assert warnings == [True]
+    assert len(log_errors) == 1
+    msg, kwargs = log_errors[0]
+    assert "No MIDI file selected" in msg[0] if isinstance(msg, tuple) else str(msg)
+    assert kwargs.get("show_dialog") is True
 
 
 
-def test_toggle_always_on_top_no_show_when_not_visible(window_factory, monkeypatch, tmp_path):
+def test_toggle_always_on_top_minimized_skips_restore(window_factory, monkeypatch, tmp_path):
     w = window_factory()
-    shown = []
-    monkeypatch.setattr(w, "isVisible", lambda: False)
-    monkeypatch.setattr(w, "show", lambda: shown.append(True))
+    calls = []
+    monkeypatch.setattr(w, "isMinimized", lambda: True)
+    monkeypatch.setattr(w, "activateWindow", lambda: calls.append("activate"))
 
     w._toggle_always_on_top(True)
-    assert shown == []
+    assert calls == []
 
 
 def test_update_time_label_format(window_factory, monkeypatch, tmp_path):
@@ -179,21 +181,18 @@ def test_on_log_save_to_file_toggled_enables_and_disables(window_factory, monkey
 
 def test_on_status_updated_routes_levels(window_factory, monkeypatch, tmp_path):
     w = window_factory()
-    errors = []
-    warnings = []
-    infos = []
-
-    monkeypatch.setattr("main_window.jukebox_logger.error", lambda m: errors.append(m))
-    monkeypatch.setattr("main_window.jukebox_logger.warning", lambda m: warnings.append(m))
-    monkeypatch.setattr(w, "add_log_message", lambda m: infos.append(m))
+    logs = []
+    monkeypatch.setattr(w, "add_log_message", lambda m, level="INFO": logs.append(m))
 
     w._on_status_updated("Error: boom")
     w._on_status_updated("warning: heads up")
     w._on_status_updated("all good")
 
-    assert errors == ["boom"]
-    assert warnings == ["heads up"]
-    assert infos == ["all good"]
+    # Bug 47/48: add_log_message is called for all messages (with body stripped of level prefix)
+    assert len(logs) == 3
+    assert any("boom" in m for m in logs)
+    assert any("heads up" in m for m in logs)
+    assert any("all good" in m for m in logs)
 
 
 def test_append_log_error_multiline_and_trim(window_factory, monkeypatch, tmp_path):
@@ -212,13 +211,12 @@ def test_toggle_always_on_top_visible_reapplies_state(window_factory, monkeypatc
     w = window_factory()
     calls = []
 
-    monkeypatch.setattr(w, "isVisible", lambda: True)
-    monkeypatch.setattr(w, "show", lambda: calls.append("show"))
+    monkeypatch.setattr(w, "isMinimized", lambda: False)
     monkeypatch.setattr(w, "activateWindow", lambda: calls.append("activate"))
     monkeypatch.setattr(w, "raise_", lambda: calls.append("raise"))
 
     w._toggle_always_on_top(True)
-    assert calls == ["show", "activate", "raise"]
+    assert calls == ["activate", "raise"]
 
 
 def test_update_playback_tab_appearance_no_tabs_attr_returns_early(
@@ -480,7 +478,7 @@ def test_append_log_critical_color(window_factory, monkeypatch):
     w = window_factory()
     w._append_log("CRITICAL", "critical msg")
     html = w._log_entries[-1]["html"]
-    assert "#FF3333" in html
+    assert "#FF3333".lower() in html.lower()
 
 
 def test_append_log_info_multiline_gets_br(window_factory, monkeypatch):
@@ -519,11 +517,13 @@ def test_append_log_with_filter_active_triggers_full_render(window_factory, monk
     w = window_factory()
     w.log_filter_edit.setText("ERROR")
     w._append_log("INFO", "test message")
-    # Cover the filter-active branch (full _render_log)
+    assert w._log_entries[-1]["level"] == "INFO"
+    assert "test message" in w._log_entries[-1]["plain"]
 
 
 def test_build_preview_notes_no_selected_tracks_returns_early(window_factory, monkeypatch):
     w = window_factory()
     w.selected_tracks_info = None
     w._build_preview_notes(None)
-    # Cover the early return when selected_tracks_info is None
+    # No timeline widget update should occur
+    assert w.timeline_widget is not None

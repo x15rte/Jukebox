@@ -185,7 +185,7 @@ def test_generate_rhythmic_merges_overlapping_group_spans():
     assert [(e.time, e.key_char) for e in out] == [(0.0, "down"), (0.35, "up")]
 
 
-def test_generate_rhythmic_preserves_exact_touch_group_spans():
+def test_generate_rhythmic_merges_adjacent_group_spans():
     notes = [
         make_note(1, 40, 0.0, 0.2, hand="left"),
         make_note(2, 42, 0.2, 0.2, hand="left"),
@@ -196,8 +196,6 @@ def test_generate_rhythmic_preserves_exact_touch_group_spans():
 
     assert [(e.time, e.key_char) for e in out] == [
         (0.0, "down"),
-        (0.2, "up"),
-        (0.2, "down"),
         (0.4, "up"),
     ]
 

@@ -1,3 +1,5 @@
+import pytest
+
 from types import SimpleNamespace
 
 from ui.midi_input_worker import MidiInputWorker
@@ -58,20 +60,10 @@ def test_worker_reads_messages_and_finishes(monkeypatch):
     assert port.closed is True
 
 
-def test_stop_emits_warning_when_close_fails():
+def test_stop_sets_stop_event():
     worker = MidiInputWorker("ok-port")
-    warnings = []
-    worker.warning.connect(warnings.append)
-
-    class Port:
-        def close(self):
-            raise OSError("close boom")
-
-    worker._inport = Port()
     worker.stop()
-
     assert worker._stop_event.is_set() is True
-    assert warnings and "close boom" in warnings[0]
 
 
 def test_run_emits_connection_error_when_iter_pending_fails(monkeypatch):
@@ -96,7 +88,8 @@ def test_run_emits_connection_error_when_iter_pending_fails(monkeypatch):
     assert finished == [True]
 
 
-def test_run_emits_warning_when_cleanup_close_fails(monkeypatch):
+@pytest.mark.parametrize("exc_cls", [OSError, ValueError])
+def test_run_emits_warning_when_cleanup_close_fails(monkeypatch, exc_cls):
     worker = MidiInputWorker("ok-port")
     warnings = []
     worker.warning.connect(warnings.append)
@@ -112,13 +105,37 @@ def test_run_emits_warning_when_cleanup_close_fails(monkeypatch):
             return []
 
         def close(self):
-            raise OSError("cleanup boom")
+            raise exc_cls("cleanup boom")
 
     monkeypatch.setattr("ui.midi_input_worker.mido.open_input", lambda *_a, **_k: Port())
 
     worker.run()
 
     assert warnings and "cleanup boom" in warnings[0]
+
+def test_run_close_non_oserror_still_emits_warning(monkeypatch):
+    worker = MidiInputWorker("ok-port")
+    warnings = []
+    worker.warning.connect(warnings.append)
+
+    class Port:
+        def __init__(self):
+            self._once = False
+
+        def iter_pending(self):
+            if not self._once:
+                self._once = True
+                worker._stop_event.set()
+            return []
+
+        def close(self):
+            raise AttributeError("weird close failure")
+
+    monkeypatch.setattr("ui.midi_input_worker.mido.open_input", lambda *_a, **_k: Port())
+
+    worker.run()
+
+    assert warnings and "weird close failure" in warnings[0]
 
 
 def test_run_breaks_inner_loop_when_stop_event_set_during_iteration(monkeypatch):
@@ -153,5 +170,6 @@ def test_run_breaks_inner_loop_when_stop_event_set_during_iteration(monkeypatch)
 
     worker.run()
 
-    assert len(received) == 1
+    assert len(received) == 2
     assert received[0].note == 60
+    assert received[1].note == 61

@@ -1,8 +1,9 @@
 """MIDI file parsing: reads .mid files into MidiTrack objects with tempo/beat mapping."""
 
 import sys
-from collections import defaultdict
-from typing import List, Tuple, Dict
+import math
+from collections import defaultdict, deque
+from typing import List, Tuple, Dict, Deque
 
 import mido
 
@@ -21,29 +22,22 @@ def _repair_utf8_mojibake(text: str) -> str:
     """Repair common UTF-8 mojibake (latin1/cp1252 decoded)."""
     if not text:
         return text
-
-    def looks_like_cjk_or_emoji(s: str) -> bool:
-        for ch in s:
-            code = ord(ch)
-            if (
-                0x3040 <= code <= 0x30FF  # Hiragana/Katakana
-                or 0x3400 <= code <= 0x4DBF  # CJK Extension A
-                or 0x4E00 <= code <= 0x9FFF  # CJK Unified
-                or 0xAC00 <= code <= 0xD7AF  # Hangul syllables
-                or 0x0400 <= code <= 0x04FF  # Cyrillic (e.g., Russian)
-                or code >= 0x1F300  # emoji and symbols
-            ):
-                return True
-        return False
-
+    # If any char is > U+00FF, the text is already proper Unicode
+    # and was never latin1-misdecoded — return as-is.
+    if any(ord(c) > 0x00FF for c in text):
+        return text
     for enc in ("latin1", "cp1252"):
         try:
-            raw = text.encode(enc, errors="replace")
+            raw = text.encode(enc, errors="strict")
             fixed = raw.decode("utf-8")
-        except UnicodeDecodeError:
+        except (UnicodeEncodeError, UnicodeDecodeError):
             continue
-        if looks_like_cjk_or_emoji(fixed):
-            return fixed
+        # Only skip when the ENTIRE text was consumed as a single latin1 character.
+        # This catches the exact false positive (e.g., "Ã¿" → "ÿ") without blocking
+        # partial repairs (e.g., "cafÃ©" → "café") or non-latin1 results (e.g., Japanese).
+        if fixed == text:
+            continue
+        return fixed
     return text
 
 
@@ -55,13 +49,13 @@ def _decode_midi_text(msg) -> str:
         return _strip_control_chars(_repair_utf8_mojibake(base))
 
     try:
-        data_bytes = bytes(data)
+        data_bytes = data if isinstance(data, bytes) else bytes(data)
     except Exception:
         base = getattr(msg, "name", "")
         return _strip_control_chars(_repair_utf8_mojibake(base))
 
     if not data_bytes:
-        return ""
+        return _strip_control_chars(getattr(msg, "name", ""))
 
     if all((32 <= b <= 126) or b in (9, 10, 13) for b in data_bytes):
         return data_bytes.decode("ascii")
@@ -99,13 +93,17 @@ class MidiParser:
         except Exception as e:
             raise IOError(f"Could not read MIDI file: {e}")
 
+        if tempo_scale <= 0 or math.isnan(tempo_scale) or math.isinf(tempo_scale):
+            raise ValueError(f"tempo_scale must be positive and finite, got {tempo_scale}")
         gmap = GlobalTickMap(mid)
         tempo_map = TempoMap(
-            [(entry[1], entry[2]) for entry in gmap._entries],
+            [(entry[1], entry[2]) for entry in gmap.get_entries()],
             gmap.time_signatures,
+            tempo_scale,
         )
 
         tracks: List[MidiTrack] = []
+
         note_id = 0
 
         for i, track in enumerate(mid.tracks):
@@ -114,7 +112,7 @@ class MidiParser:
             is_drum = False
             notes: List[Note] = []
             pedal_events: List[Tuple[float, int]] = []
-            open_notes: Dict[int, List[Dict]] = defaultdict(list)
+            open_notes: Dict[Tuple[int, int], Deque[Dict]] = defaultdict(deque)
             abs_tick = 0
 
             for msg in track:
@@ -122,43 +120,74 @@ class MidiParser:
                 if msg.type == "track_name":
                     name = _decode_midi_text(msg)
                 if msg.type == "program_change":
-                    program = msg.program
                     if msg.channel == 9:
                         is_drum = True
+                    program = msg.program
 
                 if msg.type == "note_on" and msg.velocity > 0:
-                    open_notes[msg.note].append({"tick": abs_tick, "vel": msg.velocity})
+                    key = (msg.note, msg.channel)
+                    if open_notes.get(key):
+                        # Legato re-strike: close the prior note at this tick first
+                        prior = open_notes[key].popleft()
+                        prior_s = gmap.tick_to_time(prior["tick"])
+                        prior_e = gmap.tick_to_time(abs_tick)
+                        prior_dur = prior_e - prior_s
+                        if prior_dur > 0.01 * tempo_scale:
+                            notes.append(
+                                Note(note_id, msg.note, prior["vel"],
+                                     prior_s / tempo_scale, prior_dur / tempo_scale,
+                                     "unknown", i, msg.channel)
+                            )
+                            note_id += 1
+                    open_notes[key].append({"tick": abs_tick, "vel": msg.velocity})
                 elif msg.type == "note_off" or (
                     msg.type == "note_on" and msg.velocity == 0
                 ):
-                    if open_notes[msg.note]:
-                        nd = open_notes[msg.note].pop(0)
-                        s = gmap.tick_to_time(nd["tick"])
-                        e = gmap.tick_to_time(abs_tick)
-                        dur = e - s
-                        if dur > 0.01:
-                            notes.append(
-                                Note(
-                                    note_id,
-                                    msg.note,
-                                    nd["vel"],
-                                    s / tempo_scale,
-                                    dur / tempo_scale,
-                                    "unknown",
-                                    i,
-                                    msg.channel,
-                                )
-                            )
-                            note_id += 1
+                    key = (msg.note, msg.channel)
+                    if not open_notes.get(key):
+                        continue
+                    s = gmap.tick_to_time(open_notes[key][0]["tick"])
+                    e = gmap.tick_to_time(abs_tick)
+                    dur = e - s
+                    if dur > 0.01 * tempo_scale:
+                        nd = open_notes[key].popleft()
+                        notes.append(
+                            Note(note_id, msg.note, nd["vel"],
+                                 s / tempo_scale, dur / tempo_scale,
+                                 "unknown", i, msg.channel)
+                        )
+                        note_id += 1
+                    elif dur > 0:
+                        # Short note (trill/staccato < threshold) — still pop the entry
+                        open_notes[key].popleft()
+                    else:  # dur == 0: same tick note_off — pop the entry with no note emitted
+                        open_notes[key].popleft()
 
                 if msg.type == "control_change" and msg.control == 64:
                     t = gmap.tick_to_time(abs_tick) / tempo_scale
                     pedal_events.append((t, msg.value))
+            # Flush any unclosed notes (note_on without matching note_off)
+            for key, note_deque in list(open_notes.items()):
+                while note_deque:
+                    nd = note_deque.popleft()
+                    nd_tick = nd["tick"]
+                    nd_abs_tick = max(nd_tick, abs_tick)
+                    nd_s = gmap.tick_to_time(nd_tick)
+                    nd_e = gmap.tick_to_time(nd_abs_tick)
+                    nd_dur = nd_e - nd_s
+                    if nd_dur > 0.01 * tempo_scale:
+                        notes.append(
+                            Note(note_id, key[0], nd["vel"],
+                                 nd_s / tempo_scale, nd_dur / tempo_scale,
+                                 "unknown", i, key[1])
+                        )
+                        note_id += 1
 
             if any(n.channel == 9 for n in notes):
                 is_drum = True
-            if notes:
-                notes.sort(key=lambda n: n.start_time)
+            if notes or pedal_events:
+                if notes:
+                    notes.sort(key=lambda n: n.start_time)
                 tracks.append(MidiTrack(i, name, program, is_drum, notes, pedal_events))
 
         return tracks, tempo_map

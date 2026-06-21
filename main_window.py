@@ -6,6 +6,7 @@ import copy
 import random
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QApplication,
@@ -83,11 +84,14 @@ class MainWindow(QMainWindow):
         self.midi_input_thread = None
         self.midi_input_worker = None
         self.midi_input_active = False
+        self._midi_disconnecting: bool = False
         self.config_repo = ConfigRepository()
         self.config_dir = self.config_repo.config_dir
         self.config_path = self.config_repo.config_path
         self.config_repo.ensure_config_dir()
         self._config_dirty: bool = False
+        self._closing: bool = False
+        self._dirty_gen: int = 0
         self._config_save_timer: QTimer = QTimer()
         self._config_save_timer.setSingleShot(True)
         self._config_save_timer.timeout.connect(self._save_config)
@@ -104,10 +108,12 @@ class MainWindow(QMainWindow):
         self.autoplay_next_timer.setSingleShot(True)
         self.autoplay_next_timer.timeout.connect(self._autoplay_play_current)
         self._autoplay_stopping: bool = False
+        self._pending_autoplay_jump: Optional[int] = None
         self.playback_state = "stopped"
         self._log_entries = []
+        self._loading_config = False
 
-        self.hotkey_manager = HotkeyManager()
+        self.hotkey_manager = HotkeyManager(self)
         self.hotkey_manager.toggle_requested.connect(self.toggle_playback_state)
         self.hotkey_manager.bound_updated.connect(self._on_hotkey_bound)
 
@@ -244,6 +250,9 @@ class MainWindow(QMainWindow):
         filter_label = QLabel("Filter:")
         self.log_filter_edit = QLineEdit()
         self.log_filter_edit.setPlaceholderText("Type to filter log...")
+        self._log_filter_timer = QTimer()
+        self._log_filter_timer.setSingleShot(True)
+        self._log_filter_timer.timeout.connect(self._render_log)
         self.log_filter_edit.textChanged.connect(self._on_log_filter_text_changed)
         self.log_filter_status = QLabel("")
         self.log_auto_scroll_check = QCheckBox("Auto-scroll")
@@ -251,9 +260,6 @@ class MainWindow(QMainWindow):
         self.log_wrap_check = QCheckBox("Wrap")
         self.log_wrap_check.setChecked(False)
         self.log_wrap_check.toggled.connect(self._on_log_wrap_toggled)
-        self._log_filter_timer = QTimer()
-        self._log_filter_timer.setSingleShot(True)
-        self._log_filter_timer.timeout.connect(self._render_log)
         clear_btn.clicked.connect(self._clear_log)
         copy_btn.clicked.connect(self._copy_log_to_clipboard)
         toolbar_layout.addWidget(clear_btn)
@@ -306,16 +312,11 @@ class MainWindow(QMainWindow):
         self.reset_button.setEnabled(False)
 
     def _toggle_always_on_top(self, checked):
-        was_visible = self.isVisible()
         state = self.windowState()
-        flags = self.windowFlags()
-        if checked:
-            self.setWindowFlags(flags | Qt.WindowType.WindowStaysOnTopHint)
-        else:
-            self.setWindowFlags(flags & ~Qt.WindowType.WindowStaysOnTopHint)
-        if was_visible:
-            self.show()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
+        if not self.isMinimized():
             self.setWindowState(state)
+            self.show()
             self.activateWindow()
             self.raise_()
         self._mark_config_dirty()
@@ -325,10 +326,10 @@ class MainWindow(QMainWindow):
         self._mark_config_dirty()
 
     def _change_hotkey(self):
+        QMessageBox.information(self, "Bind Key", "Press the key you want to bind now.")
         self.hk_btn.setText("Listening...")
         self.hk_btn.setEnabled(False)
         self.hotkey_manager.start_binding()
-        QMessageBox.information(self, "Bind Key", "Press the key you want to bind now.")
 
     def _on_hotkey_bound(self, key_str):
         self.hk_label.setText(f"Start/Stop Hotkey: {key_str}")
@@ -370,7 +371,9 @@ class MainWindow(QMainWindow):
         self._update_playback_tab_appearance()
 
     def _update_play_stop_labels(self):
-        key_str = self.hotkey_manager.format_key_string(self.hotkey_manager.current_key)
+        if not hasattr(self, 'playback_controller') or self.playback_controller is None:
+            return
+        key_str = self.hotkey_manager.format_key_string(self.hotkey_manager.get_current_key())
         state = getattr(self, "playback_state", "stopped")
         if state == "stopped":
             self.play_button.setText(f"Play ({key_str})")
@@ -417,7 +420,6 @@ class MainWindow(QMainWindow):
             self.total_song_duration_sec = total_dur
         if not self.timeline_widget.is_dragging:
             self.timeline_widget.set_position(current_time)
-            self.piano_widget.update()
             self._update_time_label(current_time, self.total_song_duration_sec)
             timeline_width = self.timeline_widget.width()
             scroll_width = self.scroll_area.width()
@@ -450,7 +452,7 @@ class MainWindow(QMainWindow):
                 elif role == "Right Hand":
                     n.hand = "right"
                 else:
-                    n.hand = "left" if n.pitch < 60 else "right"
+                    n.hand = "unknown"
                 preview_notes.append(n)
         preview_notes.sort(key=lambda n: n.start_time)
         self.current_notes = preview_notes
@@ -477,7 +479,7 @@ class MainWindow(QMainWindow):
         slider.setRange(int(min_val * factor), int(max_val * factor))
         spinbox = QDoubleSpinBox()
         spinbox.setDecimals(decimals)
-        spinbox.setRange(0.0, 9999.9999)
+        spinbox.setRange(float(min_val), float(max_val))
         spinbox.setSingleStep(1.0 / factor)
         spinbox.setSuffix(text_suffix)
         slider.setValue(int(default_val * factor))
@@ -489,6 +491,7 @@ class MainWindow(QMainWindow):
 
     def _create_input_output_group(self):
         group = QGroupBox("Input & Output")
+        group.setProperty("playback_control", True)
         layout = QVBoxLayout(group)
         layout.setSpacing(theme.CONTROL_SPACING)
 
@@ -497,8 +500,8 @@ class MainWindow(QMainWindow):
         self.input_mode_file_radio = QRadioButton("File (MIDI)")
         self.input_mode_piano_radio = QRadioButton("Piano (MIDI In)")
         self.input_mode_file_radio.setChecked(True)
-        self.input_mode_file_radio.toggled.connect(self._on_input_mode_changed)
-        self.input_mode_piano_radio.toggled.connect(self._on_input_mode_changed)
+        self.input_mode_file_radio.clicked.connect(self._on_input_mode_changed)
+        self.input_mode_piano_radio.clicked.connect(self._on_input_mode_changed)
         mode_row.addWidget(mode_label)
         mode_row.addWidget(self.input_mode_file_radio)
         mode_row.addWidget(self.input_mode_piano_radio)
@@ -719,12 +722,22 @@ class MainWindow(QMainWindow):
         self._mark_config_dirty()
 
     def _autoplay_scan_folder(self):
+        if self.playback_controller.is_running:
+            return
         self.autoplay_next_timer.stop()
         folder = self.autoplay_folder
         if not folder:
             return
         folder_path = Path(folder)
-        midi_files = list(folder_path.glob("*.mid")) + list(folder_path.glob("*.midi"))
+        try:
+            midi_files = list(folder_path.glob("*.mid")) + list(folder_path.glob("*.midi"))
+        except (OSError, PermissionError) as e:
+            self.add_log_message(f"Error scanning folder: {e}")
+            self.autoplay_file_list = []
+            self.autoplay_current_index = -1
+            self.autoplay_file_listbox.clear()
+            self.autoplay_info_label.setText("Error scanning folder.")
+            return
         seen: set[str] = set()
         unique: list[str] = []
         for f in midi_files:
@@ -733,12 +746,10 @@ class MainWindow(QMainWindow):
                 seen.add(key)
                 unique.append(str(f.resolve()))
         self.autoplay_file_list = sorted(unique, key=str.casefold)
-        self.autoplay_current_index = -1
-
+        self.autoplay_current_index = 0 if unique else -1
         self.autoplay_file_listbox.clear()
         for fpath in self.autoplay_file_list:
             self.autoplay_file_listbox.addItem(os.path.basename(fpath))
-
         count = len(self.autoplay_file_list)
         if count == 0:
             self.autoplay_info_label.setText("No MIDI files found in folder.")
@@ -749,7 +760,7 @@ class MainWindow(QMainWindow):
             self.autoplay_info_label.setText(f"{count} MIDI file(s) found.")
             self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
             self.play_button.setEnabled(True)
-            # Show the first file in the playlist on the bottom label
+            self.autoplay_file_listbox.setCurrentRow(0)
             self._set_current_file_labels(self.autoplay_file_list[0])
         self.add_log_message(
             f"Autoplay: found {count} MIDI file(s) in folder."
@@ -763,12 +774,19 @@ class MainWindow(QMainWindow):
 
         # Cancel any pending auto-advance timer and stop current playback
         self.autoplay_next_timer.stop()
+        if self._autoplay_stopping:
+            self._pending_autoplay_jump = row
+            return
         self._autoplay_stopping = True
         if self.playback_controller.is_running:
-            self.playback_controller.stop_and_wait(timeout_ms=3000)
-            QApplication.processEvents()
-        self._autoplay_stopping = False
+            self.playback_controller.stop()
+            self._pending_autoplay_jump = row
+            return
+        # If not running, jump directly
+        self._do_autoplay_jump(row)
 
+    def _do_autoplay_jump(self, row: int) -> None:
+        self._autoplay_stopping = False
         self.autoplay_current_index = row
         self._update_autoplay_highlight()
         self._set_current_file_labels(self.autoplay_file_list[row])
@@ -785,6 +803,8 @@ class MainWindow(QMainWindow):
             self.add_log_message(f"Could not preview '{os.path.basename(filepath)}': {e}")
 
     def _autoplay_shuffle(self):
+        if self.playback_controller.is_running:
+            return
         self.autoplay_next_timer.stop()
         if len(self.autoplay_file_list) < 2:
             return
@@ -825,6 +845,8 @@ class MainWindow(QMainWindow):
     def _autoplay_play_current(self) -> bool:
         """Play the current song in the autoplay file list.
         Skips files that fail to parse or prepare. Returns True if playback started."""
+        if self._closing:
+            return False
         # Cancel any pending timer — this function is the handler itself, so if
         # called manually while a timer is queued, prevent the timer from
         # firing a duplicate run.
@@ -863,7 +885,11 @@ class MainWindow(QMainWindow):
 
             config = self.gather_config()
             if config is None:
-                return False
+                self.add_log_message(
+                    f"Autoplay: skipping '{filename}' — unable to gather config"
+                )
+                self.autoplay_current_index += 1
+                continue
 
             try:
                 if self.selected_tracks_info is None:  # pragma: no cover
@@ -910,21 +936,26 @@ class MainWindow(QMainWindow):
             self.set_controls_enabled(False)
             self.play_button.setEnabled(True)
             self.stop_button.setEnabled(True)
-            self._update_autoplay_highlight()
 
-            started = self.playback_controller.start(
-                compiled_events,
-                config,
-                total_dur,
-                config.get("output_mode", "key"),
-                config.get("use_88_key_layout", True),
-                log_message=self.add_log_message,
-            )
+            try:
+                started = self.playback_controller.start(
+                    compiled_events,
+                    config,
+                    total_dur,
+                    config.get("output_mode", "key"),
+                    config.get("use_88_key_layout", True),
+                    log_message=self.add_log_message,
+                )
+            except Exception as e:
+                jukebox_logger.error(f"Autoplay: failed to start playback: {e}")
+                started = False
+
             if started:
+                self._update_autoplay_highlight()
                 return True
             else:
-                self.set_controls_enabled(True)
-                return False
+                self.autoplay_current_index += 1
+                continue
 
     def _update_autoplay_highlight(self):
         """Bold the currently-playing item in the playlist listbox and scroll to it."""
@@ -943,8 +974,10 @@ class MainWindow(QMainWindow):
                     QAbstractItemView.ScrollHint.EnsureVisible,
                 )
 
-    def _on_file_submode_changed(self):
+    def _on_file_submode_changed(self, checked: bool):
         """Toggle between single-file and playlist sub-panels inside File (MIDI) mode."""
+        if not checked:
+            return
         is_playlist = self.input_mode_playlist_radio.isChecked()
         self.file_single_widget.setVisible(not is_playlist)
         self.file_playlist_widget.setVisible(is_playlist)
@@ -956,10 +989,13 @@ class MainWindow(QMainWindow):
         self._mark_config_dirty()
 
     def _on_input_mode_changed(self):
-        use_piano = self.input_mode_piano_radio.isChecked()
+        if self._loading_config:
+            return
+        use_piano = (self.sender() is self.input_mode_piano_radio) if self.sender() else self.input_mode_piano_radio.isChecked()
         self.file_input_widget.setVisible(not use_piano)
         self.piano_input_widget.setVisible(use_piano)
-        self._playback_file_only_widget.setVisible(not use_piano)
+        if hasattr(self, '_playback_file_only_widget'):
+            self._playback_file_only_widget.setVisible(not use_piano)
         self.tabs.setTabEnabled(1, not use_piano)
         self.tabs.setTabEnabled(2, not use_piano)
         if use_piano and self.tabs.currentIndex() in (1, 2):
@@ -983,8 +1019,12 @@ class MainWindow(QMainWindow):
                 exc_info=True,
             )
             return
-        self.midi_input_combo.clear()
-        self.midi_input_combo.addItems(names)
+        self.midi_input_combo.blockSignals(True)
+        try:
+            self.midi_input_combo.clear()
+            self.midi_input_combo.addItems(names)
+        finally:
+            self.midi_input_combo.blockSignals(False)
 
     def _connect_midi_input(self):
         if self.midi_input_active:
@@ -1005,7 +1045,7 @@ class MainWindow(QMainWindow):
                 self.use_88_key_check.isChecked(),
                 log_message=self.add_log_message,
             )
-        except OutputBackendUnavailableError as e:
+        except (OutputBackendUnavailableError, ValueError) as e:
             self.live_backend = None
             self.midi_input_status_label.setText("Piano input disconnected.")
             self._log_error(
@@ -1035,15 +1075,23 @@ class MainWindow(QMainWindow):
         self.midi_input_status_label.setText(f"Connecting to: {port_name}...")
 
     def _on_midi_input_connected(self, port_name):
+        if not self.midi_input_active:
+            return  # stale signal from previous connection
         self.midi_input_status_label.setText(f"Connected to: {port_name}")
         self.add_log_message(f"Connected to MIDI input: {port_name}")
 
     def _on_midi_input_error(self, error_msg):
-        self._log_error(
-            f"MIDI input connection failed: {error_msg}",
-            show_dialog=True,
-            dialog_title="Connection Failed",
-        )
+        if self.midi_input_active:
+            self._log_error(
+                f"MIDI input connection failed: {error_msg}",
+                show_dialog=True,
+                dialog_title="Connection Failed",
+            )
+        else:
+            self._log_error(
+                f"MIDI input connection failed: {error_msg}",
+                show_dialog=False,
+            )
 
     def _on_midi_input_warning(self, warning_msg: str):
         self._log_warning(f"MIDI input worker: {warning_msg}")
@@ -1055,20 +1103,61 @@ class MainWindow(QMainWindow):
     def _disconnect_midi_input(self):
         if not self.midi_input_active:
             return
-        self._release_all_live_keys()
-        if self.midi_input_worker is not None:
-            try:
-                self.midi_input_worker.stop()
-            except Exception as e:
-                self.add_log_message(f"Error stopping MIDI input worker: {e}")
-        if self.midi_input_thread is not None:
-            self.midi_input_thread.quit()
-            self.midi_input_thread.wait(2000)
-
-    def _on_midi_input_finished(self):
         self.midi_input_active = False
+        self._midi_disconnecting = True
+        try:
+            try:
+                self._release_all_live_keys()
+            except Exception as e:
+                self.add_log_message(f"Error releasing live keys: {e}")
+        finally:
+            self.live_backend = None
+            if self.midi_input_worker is not None:
+                try:
+                    self.midi_input_worker.stop()
+                except Exception as e:
+                    self.add_log_message(f"Error stopping MIDI input worker: {e}")
+                for signal_name in ("message_received", "connected", "connection_error", "warning", "finished"):
+                    try:
+                        getattr(self.midi_input_worker, signal_name).disconnect()
+                    except TypeError:
+                        pass
+            if self.midi_input_thread is not None:
+                # Worker.run() doesn't start a Qt event loop (no exec()),
+                # so quit() is a no-op. The thread stops via worker.stop()
+                # which sets a threading.Event. The quit() call is kept for
+                # defensive compatibility in case run() is refactored later.
+                self.midi_input_thread.quit()
+                if not self.midi_input_thread.wait(5000):
+                    jukebox_logger.warning(
+                        "MIDI input thread did not stop within 5s timeout — continuing with thread reference"
+                    )
+                else:
+                    self.midi_input_thread = None
+            self._midi_disconnecting = False
+            self.midi_input_worker = None
+            self.live_backend = None
+            self.midi_input_connect_btn.setEnabled(True)
+            self.midi_input_disconnect_btn.setEnabled(False)
+    def _on_midi_input_finished(self):
+        if not self.midi_input_active:
+            return  # _disconnect_midi_input already handled this
+        if self.midi_input_thread is None:
+            return  # _disconnect_midi_input already cleaned up
+        if self.sender() is not None and self.sender() is not self.midi_input_worker:
+            return
+        if self._midi_disconnecting:
+            return  # _disconnect_midi_input is handling cleanup
+        self.midi_input_active = False
+        if self.midi_input_thread is not None:
+            self.midi_input_thread.wait(1000)
         self.midi_input_thread = None
         self.midi_input_worker = None
+        # Shut down the live backend if it hasn't already been cleaned up
+        # by _disconnect_midi_input.
+        if self.live_backend:
+            self.live_backend.shutdown()
+        self.live_backend = None
         self.midi_input_connect_btn.setEnabled(True)
         self.midi_input_disconnect_btn.setEnabled(False)
         self.midi_input_status_label.setText("Piano input disconnected.")
@@ -1086,6 +1175,8 @@ class MainWindow(QMainWindow):
             self.use_88_key_check.setVisible(self._current_output_mode() == "key")
 
     def _on_output_mode_changed(self):
+        if self._loading_config:
+            return
         self._update_88_key_visibility()
         if self.live_backend and self.midi_input_active:
             self.live_backend.shutdown()
@@ -1095,7 +1186,7 @@ class MainWindow(QMainWindow):
                     self.use_88_key_check.isChecked(),
                     log_message=self.add_log_message,
                 )
-            except OutputBackendUnavailableError as e:
+            except (OutputBackendUnavailableError, ValueError) as e:
                 self.live_backend = None
                 self._log_error(
                     f"MIDI input output unavailable: {e}",
@@ -1106,6 +1197,8 @@ class MainWindow(QMainWindow):
         self._mark_config_dirty()
 
     def _on_key_layout_changed(self, _checked: bool = False):
+        if self._loading_config:
+            return
         if self.live_backend and self.midi_input_active:
             self.live_backend.shutdown()
             try:
@@ -1114,7 +1207,7 @@ class MainWindow(QMainWindow):
                     self.use_88_key_check.isChecked(),
                     log_message=self.add_log_message,
                 )
-            except OutputBackendUnavailableError as e:
+            except (OutputBackendUnavailableError, ValueError) as e:
                 self.live_backend = None
                 self._log_error(
                     f"MIDI input output unavailable: {e}",
@@ -1152,15 +1245,34 @@ class MainWindow(QMainWindow):
                 else:
                     self.live_backend.pedal_off()
         except OutputBackendError as e:
+            # Disconnect first to prevent queued messages from piling up during dialog
+            if self.midi_input_worker is not None:
+                try:
+                    self.midi_input_worker.message_received.disconnect()
+                except TypeError:
+                    pass
+            # Null live_backend BEFORE dialog so the guard at line 1221 protects
+            # against stale queued signals delivered during the modal event loop.
+            old_backend = self.live_backend
+            self.live_backend = None
+            if old_backend is not None:
+                try:
+                    old_backend.shutdown()
+                except Exception:
+                    pass
             self._log_error(
                 f"Live MIDI output failed: {e}",
                 show_dialog=True,
                 dialog_title="Output Error",
             )
-            self._disconnect_midi_input()
+            try:
+                self._disconnect_midi_input()
+            except Exception as cleanup_e:
+                self._log_error(f"Error during MIDI disconnect cleanup: {cleanup_e}")
 
     def _create_settings_group(self):
         group = QGroupBox("Settings")
+        group.setProperty("playback_control", True)
         main_layout = QVBoxLayout(group)
 
         self._playback_file_only_widget = QWidget()
@@ -1178,6 +1290,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self._playback_file_only_widget)
 
         hk_group = QGroupBox("Hotkey")
+        hk_group.setProperty("playback_control", True)
         hk_layout = QHBoxLayout(hk_group)
         self.hk_label = QLabel(
             f"Start/Stop Hotkey: {self.hotkey_manager.format_key_string(self.hotkey_manager.current_key)}"
@@ -1189,6 +1302,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(hk_group)
 
         overlay_group = QGroupBox("Overlay Mode")
+        overlay_group.setProperty("playback_control", True)
         ov_layout = QGridLayout(overlay_group)
         self.always_top_check = QCheckBox("Window Always on Top")
         self.always_top_check.toggled.connect(self._toggle_always_on_top)
@@ -1207,6 +1321,7 @@ class MainWindow(QMainWindow):
 
     def _create_humanization_group(self):
         group = QGroupBox("Humanization")
+        group.setProperty("playback_control", True)
         main_v_layout = QVBoxLayout(group)
         self.select_all_humanization_check = QCheckBox("Select/Deselect All")
         main_v_layout.addWidget(self.select_all_humanization_check)
@@ -1289,13 +1404,13 @@ class MainWindow(QMainWindow):
             "mistake_chance",
             0,
             10,
-            0,
+            0.5,
             "%",
             factor=100.0,
             decimals=1,
         )
 
-        add_detailed_row(5, "Tempo Sway", "tempo_sway", 0, 0.1, 0, " s", factor=10000.0)
+        add_detailed_row(5, "Tempo Sway", "tempo_sway", 0, 0.1, 0.015, " s", factor=10000.0)
 
 
         self.invert_sway_check = QCheckBox("Invert tempo sway")
@@ -1336,17 +1451,27 @@ class MainWindow(QMainWindow):
         self._mark_config_dirty()
 
     def _reset_humanization_group_to_default(self):
-        self.tempo_spinbox.setValue(Config().tempo)
         defaults = Config()
-        self.all_humanization_spinboxes["vary_timing"].setValue(defaults.value_timing_variance)
-        self.all_humanization_spinboxes["vary_articulation"].setValue(defaults.value_articulation)
-        self.all_humanization_spinboxes["hand_drift"].setValue(defaults.value_hand_drift_decay)
-        self.all_humanization_spinboxes["mistake_chance"].setValue(defaults.value_mistake_chance)
-        self.all_humanization_spinboxes["tempo_sway"].setValue(defaults.value_tempo_sway_intensity)
+        # Block signals to avoid redundant _mark_config_dirty calls
         for check in self.all_humanization_checks.values():
             if check.text():
-                check.setChecked(False)
-        self._update_enabled_states()
+                check.blockSignals(True)
+        try:
+            self.tempo_spinbox.setValue(defaults.tempo)
+            self.all_humanization_spinboxes["vary_timing"].setValue(defaults.value_timing_variance)
+            self.all_humanization_spinboxes["vary_articulation"].setValue(defaults.value_articulation)
+            self.all_humanization_spinboxes["hand_drift"].setValue(defaults.value_hand_drift_decay)
+            self.all_humanization_spinboxes["mistake_chance"].setValue(defaults.value_mistake_chance)
+            self.all_humanization_spinboxes["tempo_sway"].setValue(defaults.value_tempo_sway_intensity)
+            for check in self.all_humanization_checks.values():
+                if check.text():
+                    check.setChecked(False)
+            self._update_enabled_states()
+        finally:
+            for check in self.all_humanization_checks.values():
+                if check.text():
+                    check.blockSignals(False)
+        self._mark_config_dirty()  # single call after all changes
 
     def _toggle_all_humanization(self, checked):
         for check in self.all_humanization_checks.values():
@@ -1417,11 +1542,15 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, dialog_title, message)
 
     def _on_log_level_changed(self, level: str) -> None:
+        if self._loading_config:
+            return
         if level:
             jukebox_logger.set_level(level)
             self._mark_config_dirty()
 
     def _on_log_save_to_file_toggled(self, checked: bool):
+        if self._loading_config:
+            return
         path = self._get_log_file_path()
         if checked:
             self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -1433,14 +1562,15 @@ class MainWindow(QMainWindow):
         self._mark_config_dirty()
 
     def _on_status_updated(self, message: str) -> None:
-        lowered = message.lstrip().lower()
-        if lowered.startswith("error:"):
-            jukebox_logger.error(message[message.index(":") + 1:].strip())
-            return
-        if lowered.startswith("warning:"):
-            jukebox_logger.warning(message[message.index(":") + 1:].strip())
-            return
-        self.add_log_message(message)
+        stripped = message.strip()
+        lowered = stripped.lower()
+        if lowered.startswith(("error:", "warning:")):
+            prefix_end = stripped.index(":")
+            body = stripped[prefix_end + 1:].strip()
+            log_level = "error" if lowered.startswith("error:") else "warning"
+            self.add_log_message(body, log_level)
+        else:
+            self.add_log_message(stripped)
 
     def add_log_message(self, message, level="INFO"):
         jukebox_logger.log(level, message)
@@ -1458,6 +1588,7 @@ class MainWindow(QMainWindow):
             "CRITICAL": log_colors.critical,
         }
         color = color_map.get(level, log_colors.info)
+        color_hex = color.name()
 
         import html as html_module
 
@@ -1468,26 +1599,28 @@ class MainWindow(QMainWindow):
                 escaped_first = html_module.escape(first_line)
                 escaped_rest = html_module.escape(rest)
                 html = (
-                    f'<div style="color:{color}">[{timestamp}] [{level}] {escaped_first} '
+                    f'<div style="color:{color_hex}">[{timestamp}] [{level}] {escaped_first} '
                     f'<details><summary>Details</summary>'
                     f'<pre style="margin:0; white-space:pre-wrap;">{escaped_rest}</pre>'
                     f'</details></div>'
                 )
             else:
-                html = f'<div style="color:{color}">[{timestamp}] [{level}] {html_module.escape(message)}</div>'
+                html = f'<div style="color:{color_hex}">[{timestamp}] [{level}] {html_module.escape(message)}</div>'
         else:
             escaped = html_module.escape(message)
             if "\n" in message:
                 escaped = escaped.replace("\n", "<br>")
-            html = f'<div style="color:{color}">[{timestamp}] [{level}] {escaped}</div>'
+            html = f'<div style="color:{color_hex}">[{timestamp}] [{level}] {escaped}</div>'
 
         self._log_entries.append({"level": level, "plain": plain, "html": html})
-        if len(self._log_entries) > MAX_LOG_ENTRIES:
+        if len(self._log_entries) >= MAX_LOG_ENTRIES:
             self._log_entries = self._log_entries[-MAX_LOG_ENTRIES:]
 
         if self.log_filter_edit.text().strip():
-            # Filter active — full rebuild needed
-            self._render_log()
+            # Filter active — only append if this entry passes
+            filter_text = self.log_filter_edit.text().strip().lower()
+            if filter_text in level.lower() or filter_text in message.lower():
+                self._append_html(html)
         else:
             # No filter — just append single entry
             self._append_html(html)
@@ -1552,15 +1685,18 @@ class MainWindow(QMainWindow):
 
     def set_controls_enabled(self, enabled):
         for groupbox in self.findChildren(QGroupBox):
-            groupbox.setEnabled(enabled)
+            if groupbox.property("playback_control"):
+                groupbox.setEnabled(enabled)
 
     def _mark_config_dirty(self) -> None:
         """Debounce-triggered save: marks config dirty and starts a 500 ms timer.
 
         Multiple rapid UI changes (slider drags, checkbox clicks) coalesce into
-        a single disk write.  Call ``_flush_config()`` before any operation that
-        needs the saved config to be current (e.g. playback start, window close).
+        a single write after 500ms of inactivity.
         """
+        if self._loading_config or self._closing:
+            return
+        self._dirty_gen += 1
         self._config_dirty = True
         if not self._config_save_timer.isActive():
             self._config_save_timer.start(500)
@@ -1570,7 +1706,6 @@ class MainWindow(QMainWindow):
         if self._config_dirty:
             self._config_save_timer.stop()
             self._save_config()
-            self._config_dirty = False
 
     def _config_from_ui(self) -> Config:
         data = {}
@@ -1580,17 +1715,22 @@ class MainWindow(QMainWindow):
 
     def _save_config(self) -> None:
         """Immediate config persist to disk."""
-        self._config_dirty = False
+        gen = self._dirty_gen
         try:
             config = self._config_from_ui()
             self.config_repo.save(config)
-        except OSError as e:
+        except Exception as e:
             self._log_error(
                 f"Error saving config: {e}",
-                show_dialog=True,
+                show_dialog=not self._closing,
                 dialog_title="Error Saving Config",
                 exc_info=True,
             )
+            if not self._closing:
+                self._config_save_timer.start(500)
+        else:
+            if gen == self._dirty_gen:
+                self._config_dirty = False
 
     def _update_enabled_states(self):
         for key, check in self.all_humanization_checks.items():
@@ -1627,6 +1767,7 @@ class MainWindow(QMainWindow):
             self._config_save_timer.stop()
             self._config_dirty = False
             return
+        self._loading_config = True
         self._apply_config_to_ui(config)
         apply_config_effects(self, config)
         self._update_enabled_states()
@@ -1634,6 +1775,7 @@ class MainWindow(QMainWindow):
         self._update_play_stop_labels()
         self._config_save_timer.stop()
         self._config_dirty = False  # loading config doesn't count as "dirty"
+        self._loading_config = False
 
     def _set_current_file_labels(self, filepath: str | None) -> None:
         if filepath:
@@ -1647,20 +1789,23 @@ class MainWindow(QMainWindow):
             self.current_file_bottom_label.setText("No file selected.")
 
     def gather_config(self):
+        midi_file = self.file_path_label.toolTip()
+        if not midi_file:
+            self._log_error(
+                "No MIDI file selected. Please select a file first.",
+                show_dialog=True,
+                dialog_title="No File Selected",
+            )
+            return None
         if not self.selected_tracks_info:
             self._log_error(
                 "Play aborted: no MIDI file or tracks selected.",
-                show_dialog=False,
+                show_dialog=True,
                 dialog_title="No Tracks",
-            )
-            QMessageBox.warning(
-                self,
-                "No Tracks",
-                "Please select a MIDI file and choose tracks first.",
             )
             return None
         config = self._config_from_ui().to_runtime_playback_dict()
-        config["midi_file"] = self.file_path_label.toolTip()
+        config["midi_file"] = midi_file
         return config
 
     def select_file(self):
@@ -1680,6 +1825,12 @@ class MainWindow(QMainWindow):
             tempo_scale = self.tempo_spinbox.value() / 100.0
             tracks, tempo_map = MidiParser.parse_structure(filepath, tempo_scale)
         except Exception as e:
+            self.parsed_tracks = None
+            self.parsed_tempo_map = None
+            self.parsed_tempo_scale = 1.0
+            self.selected_tracks_info = None
+            self.play_button.setEnabled(False)
+            self.reset_button.setEnabled(False)
             self._log_error(
                 f"Failed to parse MIDI: {e}",
                 show_dialog=True,
@@ -1703,7 +1854,6 @@ class MainWindow(QMainWindow):
         else:
             self.add_log_message("Track selection cancelled.")
             self.selected_tracks_info = None
-            self._set_current_file_labels(None)
 
     def handle_play(self):
         if self.playback_controller.is_running:
@@ -1711,21 +1861,26 @@ class MainWindow(QMainWindow):
             return
 
         # Autoplay mode: start sequential folder playback
-        if self.input_mode_playlist_radio.isChecked() and self.autoplay_file_list:
+        if self.input_mode_playlist_radio.isChecked():
+            if not self.autoplay_file_list:
+                self.add_log_message("No MIDI files in playlist. Select a folder via the File (MIDI) tab.")
+                return
             # If a song was selected via double-click, start from there;
             # otherwise, start from the beginning.
-            if self.autoplay_current_index < 0:
+            if self.autoplay_current_index < 0 or self.autoplay_current_index >= len(self.autoplay_file_list):
                 self.autoplay_current_index = 0
             self._update_autoplay_highlight()
             self._autoplay_play_current()
             return
 
+        self.autoplay_next_timer.stop()  # cancel pending autoplay advance
         config = self.gather_config()
         if not config:
             return
         self._save_config()
         self.add_log_message("Preparing playback...")
         if self.selected_tracks_info is None:
+            self._log_error("No tracks selected.", show_dialog=True, dialog_title="Error Preparing Playback")
             return
         try:
             final_notes, sections, compiled_events, total_dur, tempo_map = (
@@ -1750,14 +1905,9 @@ class MainWindow(QMainWindow):
             return
 
         self.current_notes = final_notes
-        seek_ratio = 0.0
-        if self.timeline_widget.total_duration > 0:
-            seek_ratio = (
-                self.timeline_widget.current_time / self.timeline_widget.total_duration
-            )
-        config["start_offset"] = seek_ratio * total_dur
-
         self.timeline_widget.set_data(final_notes, total_dur, tempo_map)
+        # After set_data, timeline is reset — start from beginning.
+        config["start_offset"] = 0.0
         self.total_song_duration_sec = total_dur
 
         if config.get("output_mode") == "key":
@@ -1771,22 +1921,28 @@ class MainWindow(QMainWindow):
 
         self.tabs.setCurrentIndex(1)
 
-        started = self.playback_controller.start(
-            compiled_events,
-            config,
-            total_dur,
-            config["output_mode"],
-            config.get("use_88_key_layout", True),
-            log_message=self.add_log_message,
-        )
+        try:
+            started = self.playback_controller.start(
+                compiled_events,
+                config,
+                total_dur,
+                config["output_mode"],
+                config.get("use_88_key_layout", True),
+                log_message=self.add_log_message,
+            )
+        except Exception as e:
+            jukebox_logger.error(f"Failed to start playback: {e}")
+            started = False
         if started is False:
             self.set_controls_enabled(True)
             self.stop_button.setEnabled(False)
             self.play_button.setEnabled(True)
 
     def handle_stop(self):
-        self._autoplay_stopping = self.playback_controller.is_running
-        if self.playback_controller.is_running:
+        was_running = self.playback_controller.is_running
+        self._autoplay_stopping = was_running and self.input_mode_playlist_radio.isChecked()
+        self._pending_autoplay_jump = None
+        if was_running:
             self.playback_controller.stop()
         # Cancel any pending auto-advance timer
         self.autoplay_next_timer.stop()
@@ -1799,6 +1955,8 @@ class MainWindow(QMainWindow):
             elif count:
                 self.autoplay_info_label.setText(f"{count} MIDI file(s) found.")
                 self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
+        self.set_controls_enabled(True)
+        self.stop_button.setEnabled(False)
 
     def handle_reset(self):
         self.timeline_widget.set_position(0)
@@ -1808,22 +1966,33 @@ class MainWindow(QMainWindow):
             self.playback_controller.seek(0)
 
     def on_playback_finished(self):
+        if self._closing:
+            return
         self.add_log_message("Playback process finished.\n" + "=" * 50 + "\n")
         self.piano_widget.clear()
-        self.set_controls_enabled(True)
-        self.stop_button.setEnabled(False)
 
-        # Don't auto-advance if Stop was pressed or a song jump was triggered
+        # Handle pending autoplay jump (from _autoplay_jump_to_song)
         if self._autoplay_stopping:
-            self._autoplay_stopping = False
+            if self._pending_autoplay_jump is not None:
+                row = self._pending_autoplay_jump
+                self._pending_autoplay_jump = None
+                self._do_autoplay_jump(row)
+                self.set_controls_enabled(True)
+            else:
+                self._autoplay_stopping = False
             return
 
-        # Autoplay: advance to next song
+        # Autoplay advancement
         if (
             self.input_mode_playlist_radio.isChecked()
             and self.autoplay_file_list
             and self.autoplay_current_index >= 0
         ):
+            # Re-clamp index in case playlist was modified during playback
+            self.autoplay_current_index = min(
+                self.autoplay_current_index,
+                max(0, len(self.autoplay_file_list) - 1)
+            )
             self.autoplay_current_index += 1
             if self.autoplay_current_index < len(self.autoplay_file_list):
                 delay = self.autoplay_delay_spinbox.value()
@@ -1833,34 +2002,98 @@ class MainWindow(QMainWindow):
                     next_name = os.path.basename(
                         self.autoplay_file_list[self.autoplay_current_index]
                     )
-                    self.autoplay_info_label.setText(
-                        f"Next song in {total_delay:.1f}s: {next_name}"
+                    self.add_log_message(
+                        f"Autoplay: next song '{next_name}' in {total_delay:.1f}s"
                     )
-                    self.autoplay_info_label.setStyleSheet(
-                        f"font-style: normal; color: {theme.get_theme().text_muted};"
+                    self.autoplay_info_label.setText(
+                        f"Next: {next_name} in {total_delay:.1f}s"
                     )
                     self.autoplay_next_timer.start(int(total_delay * 1000))
+                    self._update_autoplay_highlight()
+                    return
+                if not self._autoplay_play_current():
+                    # _autoplay_play_current exhausted all songs; fall through to re-enable controls
+                    pass
                 else:
-                    self._autoplay_play_current()
-            else:
-                self.add_log_message("Autoplay: all songs played.")
-                self.autoplay_info_label.setText("All songs played.")
-                self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
-                self.autoplay_current_index = -1
-                self._update_autoplay_highlight()
+                    self._update_autoplay_highlight()
+                    return
+            self.add_log_message("Autoplay: all songs played.")
+            self.autoplay_info_label.setText("All songs played.")
+            # Fall through to re-enable controls
 
-    def closeEvent(self, a0: QCloseEvent) -> None:  # type: ignore[override]  # noqa: N802
+        # Only re-enable controls when playback fully stops
+        self.set_controls_enabled(True)
+        self.stop_button.setEnabled(False)
+
+    def closeEvent(self, a0: QCloseEvent) -> None:
+        self._closing = True
         jukebox_logger.clear_gui_callbacks()
         self.autoplay_next_timer.stop()
+        self._log_filter_timer.stop()
+
+        try:
+            self.autoplay_next_timer.timeout.disconnect()
+        except Exception:
+            pass
+        self._config_save_timer.stop()
+        try:
+            self._config_save_timer.timeout.disconnect()
+        except Exception:
+            pass
+        try:
+            self._log_filter_timer.timeout.disconnect()
+        except Exception:
+            pass
+        # Stop playback first (so UI re-enables, then save accurate state)
+        try:
+            if self.playback_controller.is_running:
+                self.playback_controller.stop_and_wait_blocking(timeout_ms=2000)
+        except Exception as e:
+            jukebox_logger.error(f"Error stopping playback: {e}", exc_info=True)
+        # Disconnect playback signals
+        try:
+            self.playback_controller.status_updated.disconnect()
+        except (TypeError, AttributeError):
+            pass
+        try:
+            self.playback_controller.progress_updated.disconnect()
+        except (TypeError, AttributeError):
+            pass
+        try:
+            self.playback_controller.visualizer_updated.disconnect()
+        except (TypeError, AttributeError):
+            pass
+        try:
+            self.playback_controller.playback_finished.disconnect()
+        except (TypeError, AttributeError):
+            pass
+        try:
+            self.playback_controller.state_changed.disconnect()
+        except (TypeError, AttributeError):
+            pass
+        # MIDI / live backend cleanup
+        try:
+            if self.midi_input_active:
+                self._disconnect_midi_input()
+        except Exception as e:
+            jukebox_logger.error(f"Error disconnecting MIDI: {e}", exc_info=True)
+        # Save config last (reflects post-playback state)
         try:
             self._flush_config()
         except Exception as e:
-            jukebox_logger.error(f"Error during closeEvent cleanup: {e}", exc_info=True)
-        if self.midi_input_active:
-            self._disconnect_midi_input()
-        if self.live_backend:
-            self.live_backend.shutdown()
-        if self.playback_controller.is_running:
-            self.playback_controller.stop_and_wait(timeout_ms=1000)
-        self.hotkey_manager.stop()
+            jukebox_logger.error(f"Error flushing config: {e}", exc_info=True)
+        finally:
+            self._config_save_timer.stop()
+        try:
+            self.hotkey_manager.toggle_requested.disconnect()
+        except (TypeError, AttributeError):
+            pass
+        try:
+            self.hotkey_manager.bound_updated.disconnect()
+        except (TypeError, AttributeError):
+            pass
+        try:
+            self.hotkey_manager.stop()
+        except Exception as e:
+            jukebox_logger.error(f"Error stopping hotkey manager: {e}", exc_info=True)
         a0.accept()

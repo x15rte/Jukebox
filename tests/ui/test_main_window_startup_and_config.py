@@ -29,21 +29,26 @@ def test_close_event_stops_everything(window_factory, monkeypatch, tmp_path):
 
     class Ctrl:
         is_running = True
-
-        def stop_and_wait(self, timeout_ms=None):
-            events.append(("stop_and_wait", timeout_ms))
-
+        def stop(self):
+            events.append(("stop", None))
+        def stop_and_wait(self, timeout_ms=2000):
+            self.stop()
+            events.append(("stop_and_wait", None))
+        def stop_and_wait_blocking(self, timeout_ms=2000):
+            self.stop()
+            events.append(("stop_and_wait_blocking", None))
     class HK:
+        class _Signal:
+            @staticmethod
+            def disconnect():
+                pass
+        toggle_requested = _Signal()
+        bound_updated = _Signal()
         def stop(self):
             events.append(("hk_stop", None))
 
-    class LB:
-        def shutdown(self):
-            events.append(("live_shutdown", None))
-
     w.playback_controller = Ctrl()
     w.hotkey_manager = HK()
-    w.live_backend = LB()
     monkeypatch.setattr(w, "_save_config", lambda: events.append(("save", None)))
     monkeypatch.setattr(w, "_disconnect_midi_input", lambda: events.append(("disconnect", None)))
     w.midi_input_active = True
@@ -61,8 +66,7 @@ def test_close_event_stops_everything(window_factory, monkeypatch, tmp_path):
 
     assert ("save", None) in events
     assert ("disconnect", None) in events
-    assert ("live_shutdown", None) in events
-    assert ("stop_and_wait", 1000) in events
+    assert ("stop", None) in events
     assert ("hk_stop", None) in events
     assert e.accepted is True
 
@@ -190,4 +194,4 @@ def test_close_event_logs_save_config_exception(window_factory, monkeypatch, tmp
     w.closeEvent(cast(Any, e))
 
     assert e.accepted is True
-    assert any("Error during closeEvent cleanup" in m for m in logs)
+    assert any("Error flushing config" in m for m in logs)

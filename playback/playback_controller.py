@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, List, Optional, Callable
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal as Signal
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal as Signal
 
 from models import KeyEvent
 from .player import Player
@@ -96,11 +96,15 @@ class PlaybackController(QObject):
         # stopping, avoid starting a second overlapping run. This keeps the
         # threading model simple and mirrors the user's expectation that
         # "Stop" fully completes before a new "Play" starts.
-        if self.is_running or self._stopping:
+        if self._stopping:
             if log_message is not None:
                 log_message(
                     "Playback is still stopping; please wait a moment before starting again."
                 )
+            return False
+        if self.is_running:
+            if log_message is not None:
+                log_message("Playback is already running.")
             return False
 
         self._total_duration = total_duration
@@ -115,7 +119,7 @@ class PlaybackController(QObject):
                 inter_message_delay=inter_message_delay,
                 log_message=log_message,
             )
-        except OutputBackendUnavailableError as e:
+        except (OutputBackendUnavailableError, ValueError) as e:
             message = f"Playback could not start: {e}"
             if log_message is not None:
                 log_message(message)
@@ -135,41 +139,141 @@ class PlaybackController(QObject):
 
         self._thread = thread
         self._player = player
-        thread.start()
-        self._set_state("playing")
+        try:
+            thread.start()
+            self._set_state("playing")
+        except Exception:
+            backend.shutdown()
+            raise
         return True
 
     def stop(self) -> None:
         """Request playback stop; returns immediately."""
-        if self._player is not None and self.is_running:
-            self._stopping = True
-            self._player.stop()
-
-    def stop_and_wait(self, timeout_ms: Optional[int] = None) -> None:
-        """Request playback stop and wait for the worker thread to finish."""
         if self._player is not None:
             self._stopping = True
             self._player.stop()
+        # _finish_cleanup transitions to "stopped" — not called here.
+        # The state remains "playing" or "paused" until the thread finishes.
+
+    def stop_and_wait(self, timeout_ms: Optional[int] = 5000) -> None:
+        """Request playback stop and wait for the worker thread to finish (non-blocking retry)."""
         thread = self._thread
-        if thread is not None:
-            if timeout_ms is not None:
-                thread.wait(timeout_ms)
-            else:
-                thread.wait()
+        if self._player is not None:
+            self._stopping = True
+            self._player.stop()
+        if thread is not None and thread.isRunning():
+            # Player doesn't run a Qt event loop, so quit() would be a no-op.
+            # The thread exits when play() returns after stop_event is set.
+            QTimer.singleShot(100, lambda: self._stop_and_wait_cleanup(thread, timeout_ms))
+        else:
+            self._stopping = False
+
+    def _stop_and_wait_cleanup(self, thread: Optional[QThread], timeout_ms: Optional[int]) -> None:
+        """Retry loop for stop_and_wait; avoids blocking the GUI thread."""
+        if timeout_ms is None:
+            timeout_ms = 30000
+        if thread is None:
+            self._stopping = False
+            return
+        if thread.isRunning():
+            if timeout_ms <= 0:
+                jukebox_logger.warning(
+                    "Playback thread did not finish within timeout — continuing"
+                )
+                self._stopping = False
+                return
+            remaining = timeout_ms - 100
+            QTimer.singleShot(100, lambda: self._stop_and_wait_cleanup(thread, remaining))
+        else:
+            self._finish_cleanup(thread)
+
+    def stop_and_wait_blocking(self, timeout_ms: int = 5000) -> bool:
+        """Request stop and block until the worker thread finishes (or timeout).
+
+        This blocks the calling thread — use in closeEvent where the app is
+        shutting down and we need the thread to actually finish before we
+        return. Returns True if the thread finished, False on timeout.
+        """
+        thread = self._thread
+        if self._player is not None:
+            self._stopping = True
+            self._player.stop()
+        if thread is not None and thread.isRunning():
+            # Despite the thread not having its own event loop during play(),
+            # after play() returns QThread.run() calls exec(), starting a real
+            # event loop. Call quit() first so the event loop exits before wait().
+            thread.quit()
+            ok = thread.wait(timeout_ms)
+            if not ok:
+                jukebox_logger.warning(
+                    f"Playback thread did not finish within {timeout_ms}ms timeout"
+                )
+                self._stopping = False
+                return ok
+        self._finish_cleanup(thread)
+        return True
+
+    def _finish_cleanup(self, thread: Optional[QThread]) -> None:
+        if thread is not None and thread.isRunning():
+            # Still running — retry in 100ms
+            QTimer.singleShot(100, lambda: self._finish_cleanup(thread))
+            return
+        # Ensure we haven't moved on to a new thread since the timer was scheduled
+        if self._thread is not thread:
+            # Thread was replaced by a new playback — still clean up the old one.
+            if thread is not None:
+                thread.quit()
+                thread.wait(1000)
+                try:
+                    thread.deleteLater()
+                except AttributeError:
+                    pass
+            return
+        old_player = self._player
+        old_thread = self._thread
+        if old_player is not None:
+            # Disconnect playback_finished specifically (PlaybackController connects via start()).
+            try:
+                old_player.playback_finished.disconnect(self._on_playback_finished_internal)
+            except (TypeError, AttributeError):
+                pass
+            # Blanket-disconnect the remaining signals. These are connected by MainWindow,
+            # which expects them to be removed when the Player object is discarded.
+            for sig_name in ("status_updated", "progress_updated", "visualizer_updated"):
+                try:
+                    getattr(old_player, sig_name).disconnect()
+                except (TypeError, AttributeError):
+                    pass
+        self._player = None
+        self._backend = None
+        self._thread = None
+        if old_thread is not None:
+            old_thread.quit()  # Safety quit — thread's event loop may or may not be running.
+            old_thread.wait(1000)
+            try:
+                old_thread.deleteLater()
+            except AttributeError:
+                pass
         self._stopping = False
+        self._set_state("stopped")
+        self.playback_finished.emit()
 
     def toggle_pause(self) -> None:
         """Toggle pause/resume if a player is active."""
         if self._player is None:
             return
-        # Optimistically update state based on current controller state;
-        # Player will follow via its internal pause_event.
-        if self._state == "playing":
-            self._player.toggle_pause()
-            self._set_state("paused")
-        elif self._state == "paused":
-            self._player.toggle_pause()
-            self._set_state("playing")
+        # Don't toggle if playback has naturally ended (all events consumed)
+        # but stop_event hasn't been set yet (race window before playback_finished).
+        if self.state != "playing" and self.state != "paused":
+            return
+        was_paused = self._player.pause_event.is_set()
+        self._player.toggle_pause()
+        now_paused = self._player.pause_event.is_set()
+        if was_paused == now_paused:
+            return  # Player ignored the toggle (e.g., already stopped)
+        # Re-check state — playback may have finished while we were toggling
+        if self._player is not None and not self._player.stop_event.is_set():
+            self._set_state("paused" if now_paused else "playing")
 
     def seek(self, target_time: float) -> None:
         """Seek to a given time in seconds if a player is active."""
@@ -181,22 +285,14 @@ class PlaybackController(QObject):
     # ------------------------------------------------------------------
     def _on_playback_finished_internal(self) -> None:
         """Handle Player completion: clean up thread/backend and emit signal."""
-        if self._player is None:
-            return  # Already cleaned up (e.g. stop() called after thread died)
+        if self._player is None or self.sender() is not self._player:
+            return  # Stale signal from a previous Player, or already cleaned up.
 
         thread = self._thread
+        if thread is not None and thread.isRunning():
+            thread.quit()  # Safety quit — thread's event loop may or may not be running.
+            # Don't block — use a timer to check completion later
+            QTimer.singleShot(100, lambda: self._finish_cleanup(thread))
+        else:
+            self._finish_cleanup(thread)
 
-        self._player = None
-        self._backend = None
-        self._thread = None
-        self._stopping = False
-        self._set_state("stopped")
-
-        if thread is not None:
-            thread.quit()
-            thread.wait()
-
-        # Player.shutdown() is called from inside Player.play()'s finally block,
-        # so there is nothing left to do here regarding backend.
-
-        self.playback_finished.emit()

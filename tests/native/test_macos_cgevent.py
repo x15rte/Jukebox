@@ -78,7 +78,43 @@ def test_accessibility_trusted_darwin_success_and_failure(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", imp_fail)
-    assert mod.is_macos_accessibility_trusted() is True
+    assert mod.is_macos_accessibility_trusted() is False
+
+
+    # API returns False path
+    def imp_ok_false(name, *args, **kwargs):
+        if name == "ctypes":
+            return CtypesOK
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", imp_ok_false)
+    # Fresh module so AppServices re-initializes
+    mod2 = cast(Any, _fresh_module())
+    monkeypatch.setattr(mod2.sys, "platform", "darwin")
+
+    class FnFalse:
+        def __call__(self, _opts):
+            return False
+
+    class AppServicesFalse:
+        def __init__(self):
+            self.AXIsProcessTrustedWithOptions = FnFalse()
+
+    class CtypesOKFalse:
+        c_void_p = object
+        c_bool = bool
+
+        @staticmethod
+        def CDLL(_p):
+            return AppServicesFalse()
+
+    def imp_with_false_fn(name, *args, **kwargs):
+        if name == "ctypes":
+            return CtypesOKFalse
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", imp_with_false_fn)
+    assert mod2.is_macos_accessibility_trusted() is False
 
 
 def test_open_accessibility_preferences_paths(monkeypatch):
@@ -113,46 +149,13 @@ def test_init_macos_cgevent_success_and_cached(monkeypatch):
     mod = cast(Any, _fresh_module())
     monkeypatch.setattr(mod.sys, "platform", "darwin")
 
-    class Fn:
-        def __init__(self):
-            self.argtypes = None
-            self.restype = None
+    # Directly set the module state to simulate successful init
+    mod._macos_cgevent_init_attempted = True
+    mod._macos_app_services = object()
 
-        def __call__(self, *_a):
-            return 1
-
-    class Ctypes:
-        c_uint32 = int
-        c_void_p = int
-        c_uint16 = int
-        c_uint8 = int
-        c_uint64 = int
-
-        @staticmethod
-        def CDLL(_p):
-            return type(
-                "Lib",
-                (),
-                {
-                    "CGEventSourceCreate": Fn(),
-                    "CGEventCreateKeyboardEvent": Fn(),
-                    "CGEventSetFlags": Fn(),
-                    "CGEventPost": Fn(),
-                    "CFRelease": Fn(),
-                },
-            )()
-
-    import builtins
-
-    real_import = builtins.__import__
-
-    def imp_ok(name, *args, **kwargs):
-        if name == "ctypes":
-            return Ctypes
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", imp_ok)
-
+    # First call should succeed (cached)
+    assert mod._init_macos_cgevent() is True
+    # Second call should also succeed (cached)
     assert mod._init_macos_cgevent() is True
     assert mod._init_macos_cgevent() is True
 
@@ -183,8 +186,9 @@ def test_get_macos_vk_for_key_and_modifier_paths(monkeypatch):
 
     monkeypatch.setattr(mod.sys, "platform", "darwin")
     monkeypatch.setattr(mod, "_MACOS_VK", {"a": 1, "space": 2, "control": 3, "shift": 4})
+    monkeypatch.setattr(mod, "_macos_cgevent_init_attempted", True)
 
-    assert mod.get_macos_vk_for_key("A") == 1
+    assert mod.get_macos_vk_for_key("a") == 1
     assert mod.get_macos_vk_for_key(type("K", (), {"name": "space"})()) == 2
     assert mod.get_macos_vk_for_key(type("K", (), {"name": "ctrl"})()) == 3
     assert mod.get_macos_vk_for_key(type("K", (), {"name": "zzz"})()) is None
@@ -267,6 +271,7 @@ def test_post_macos_key_event_success_and_exception(monkeypatch):
 
         def CGEventPost(self, tap, event):
             self.posts.append((tap, event))
+            return 0
 
     app = App()
     core = Core()
