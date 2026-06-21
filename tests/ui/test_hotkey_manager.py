@@ -1,3 +1,5 @@
+# pyright: reportOptionalMemberAccess=false
+
 """Tests for HotkeyManager using QShortcut / eventFilter (no pynput)."""
 
 from __future__ import annotations
@@ -5,8 +7,8 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt6.QtCore import Qt, QEvent
-from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QKeyEvent, QKeySequence
+from PyQt6.QtWidgets import QWidget, QApplication
 
 from ui.hotkey_manager import HotkeyManager
 
@@ -117,3 +119,26 @@ def test_hotkey_manager_stop_idempotent(qtbot: Any) -> None:
     mgr = HotkeyManager(parent)
     mgr.stop()
     mgr.stop()  # second call should be safe
+
+def test_hotkey_manager_modifier_only_key(qtbot: Any, monkeypatch: Any) -> None:
+    """Modifier-only key press keeps previous binding and emits special message."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    signals = []
+    mgr.bound_updated.connect(signals.append)
+    mgr.start_binding()
+
+    # Make QKeySequence.toString return empty to simulate modifier-only key
+    monkeypatch.setattr(QKeySequence, "toString", lambda *a, **kw: "")
+
+    event = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_F7,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.instance().sendEvent(parent, event)
+
+    # Modifier-only path: key stays at previous ("F8"), special message emitted
+    assert mgr.get_current_key() == "F8"
+    assert signals == ["(modifier only — press a key combo)"]

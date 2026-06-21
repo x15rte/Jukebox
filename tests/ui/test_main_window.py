@@ -527,3 +527,94 @@ def test_build_preview_notes_no_selected_tracks_returns_early(window_factory, mo
     w._build_preview_notes(None)
     # No timeline widget update should occur
     assert w.timeline_widget is not None
+
+
+def test_change_opacity_marks_config_dirty(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    events = []
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append(("dirty", None)))
+    w._change_opacity(75)
+    # Qt internally quantizes opacity to 8-bit, so 0.75 may round to 191/255 ≈ 0.749
+    assert w.windowOpacity() == pytest.approx(0.75, abs=0.01)
+    assert ("dirty", None) in events
+
+def test_on_log_level_changed_loading_config_guard(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._loading_config = True
+    calls = []
+    monkeypatch.setattr("main_window.jukebox_logger.set_level", lambda l: calls.append(l))
+    w._on_log_level_changed("DEBUG")
+    assert calls == []
+
+
+def test_on_log_save_to_file_toggled_loading_config_guard(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._loading_config = True
+    calls = []
+    monkeypatch.setattr("main_window.jukebox_logger.enable_file_logging", lambda p: calls.append(p))
+    monkeypatch.setattr("main_window.jukebox_logger.disable_file_logging", lambda: calls.append("disable"))
+    w._on_log_save_to_file_toggled(True)
+    assert calls == []
+
+def test_append_log_with_active_filter_matching(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.log_filter_edit.setText("test")
+    w._append_log("INFO", "test message")
+    assert "test message" in w.log_output.toPlainText()
+
+
+def test_gather_config_no_selected_tracks_error(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    log_errors = []
+    # Use direct attribute assignment (monkeypatch.setattr has a lookup issue here)
+    w._log_error = lambda *a, **k: log_errors.append((a, k))
+    w.file_path_label.setToolTip("C:/tmp/test.mid")
+    w.file_path_label.setText("test.mid")
+    w.selected_tracks_info = None
+    cfg = w.gather_config()
+    assert cfg is None
+    assert len(log_errors) == 1
+    msg = str(log_errors[0][0]).lower()
+    assert "no tracks" in msg or "no midi file or tracks selected" in msg
+    assert log_errors[0][1].get("show_dialog") is True
+
+def test_close_event_disconnect_midi_exception(window_factory, monkeypatch, tmp_path):
+    from PyQt6.QtGui import QCloseEvent
+    w = window_factory()
+    class Ctrl:
+        is_running = False
+        def stop_and_wait_blocking(self, timeout_ms=None):
+            return None
+    class HK:
+        def stop(self):
+            return None
+    logs = []
+    w.playback_controller = Ctrl()
+    w.hotkey_manager = HK()
+    w.midi_input_active = True
+    monkeypatch.setattr(w, "_disconnect_midi_input", lambda: (_ for _ in ()).throw(RuntimeError("midi fail")))
+    monkeypatch.setattr("main_window.jukebox_logger.error", lambda m, **k: logs.append(m))
+    w._config_dirty = False
+    e = QCloseEvent()
+    w.closeEvent(e)
+    assert any("Error disconnecting MIDI" in m for m in logs)
+
+
+def test_close_event_hotkey_manager_stop_exception(window_factory, monkeypatch, tmp_path):
+    from PyQt6.QtGui import QCloseEvent
+    w = window_factory()
+    class Ctrl:
+        is_running = False
+        def stop_and_wait_blocking(self, timeout_ms=None):
+            return None
+    class HK:
+        def stop(self):
+            raise RuntimeError("hk stop fail")
+    logs = []
+    w.playback_controller = Ctrl()
+    w.hotkey_manager = HK()
+    monkeypatch.setattr("main_window.jukebox_logger.error", lambda m, **k: logs.append(m))
+    w._config_dirty = False
+    e = QCloseEvent()
+    w.closeEvent(e)
+    assert any("Error stopping hotkey manager" in m for m in logs)

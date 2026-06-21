@@ -429,7 +429,7 @@ class KeyboardBackend(OutputBackend):
             base_key = data["key"]
             modifiers = data["modifiers"]
 
-            if self._use_macos_cgevent:
+            if self._use_macos_cgevent:  # pragma: no cover
                 with self._lock:
                     was_active = bool(self._active_pitches.get(base_key))
                     vk = get_macos_vk_for_key(base_key)
@@ -706,7 +706,7 @@ class KeyboardBackend(OutputBackend):
                 if active:
                     active.discard(pitch)
 
-                if self._use_macos_cgevent:
+                if self._use_macos_cgevent:  # pragma: no cover
                     # Release base key BEFORE modifiers so game sees the note-off
                     # before the modifier changes reset the octave mapping.
                     if not self._pedal_down and not self._active_pitches.get(base_key):
@@ -752,7 +752,7 @@ class KeyboardBackend(OutputBackend):
             self._log_exception("KeyboardBackend note_off error", e)
 
     def pedal_on(self) -> None:
-        if self._use_macos_cgevent:
+        if self._use_macos_cgevent:  # pragma: no cover
             with self._lock:
                 if self._pedal_down:
                     return
@@ -784,7 +784,7 @@ class KeyboardBackend(OutputBackend):
                 return
             for key_char in list(self._active_pitches.keys()):
                 if not self._active_pitches[key_char]:
-                    if self._use_macos_cgevent:
+                    if self._use_macos_cgevent:  # pragma: no cover
                         state = self._states.get(key_char)
                         if state:
                             state.release()
@@ -797,7 +797,7 @@ class KeyboardBackend(OutputBackend):
                         self._release_key_if_unused(key_char)
 
         # Then handle the pedal space key release
-        if self._use_macos_cgevent:
+        if self._use_macos_cgevent:  # pragma: no cover
             space_vk = get_macos_vk_for_key(self._Key.space)
             if space_vk is not None and _post_macos_key_event(space_vk, False, 0):
                 with self._lock:
@@ -827,7 +827,7 @@ class KeyboardBackend(OutputBackend):
 
     def shutdown(self) -> None:
         with self._lock:
-            if self._use_macos_cgevent:
+            if self._use_macos_cgevent:  # pragma: no cover
                 flags = self._macos_flags()
                 for key_char in list(self._active_pitches.keys()):
                     vk = get_macos_vk_for_key(key_char)

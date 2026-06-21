@@ -1,3 +1,5 @@
+# pyright: reportAttributeAccessIssue=false
+
 import importlib
 from typing import Any, cast
 
@@ -197,6 +199,68 @@ def test_get_macos_vk_for_key_and_modifier_paths(monkeypatch):
     assert mod.get_macos_vk_for_modifier(type("K", (), {"name": "ctrl"})()) == 3
     assert mod.get_macos_vk_for_modifier(type("K", (), {"name": "zzz"})()) is None
     assert mod.get_macos_vk_for_modifier(object()) is None
+
+
+
+def test_get_macos_vk_for_key_keycode_branches(monkeypatch):
+    """Test Key/KeyCode isinstance path, int return, and non-str/non-int None in get_macos_vk_for_key."""
+    mod = cast(Any, _fresh_module())
+    monkeypatch.setattr(mod.sys, "platform", "darwin")
+    monkeypatch.setattr(mod, "_MACOS_VK", {"a": 1})
+    monkeypatch.setattr(mod, "_macos_cgevent_init_attempted", True)
+
+    class MockKey:
+        pass
+
+    # Replace Key and KeyCode with MockKey so isinstance checks pass
+    monkeypatch.setattr(mod, "Key", MockKey)
+    monkeypatch.setattr(mod, "KeyCode", MockKey)
+
+    # Line 197: value.char set -> n = value.char (str) -> lookup in _MACOS_VK
+    k = MockKey()
+    k.value = MockKey()
+    k.value.char = "a"
+    k.value.vk = None
+    assert mod.get_macos_vk_for_key(k) == 1
+
+    # Line 197: value.char None, value.vk int -> n = value.vk (int) -> line 200-202: return int directly
+    k2 = MockKey()
+    k2.value = MockKey()
+    k2.value.char = None
+    k2.value.vk = 42
+    assert mod.get_macos_vk_for_key(k2) == 42
+
+    # Line 203-204: non-str, non-int -> None
+    assert mod.get_macos_vk_for_key(3.14) is None
+    assert mod.get_macos_vk_for_key([]) is None
+
+
+def test_get_macos_vk_for_modifier_keycode_branches(monkeypatch):
+    """Test Key/KeyCode isinstance path, int return in get_macos_vk_for_modifier."""
+    mod = cast(Any, _fresh_module())
+    monkeypatch.setattr(mod.sys, "platform", "darwin")
+    monkeypatch.setattr(mod, "_MACOS_VK", {"a": 1})
+    monkeypatch.setattr(mod, "_macos_cgevent_init_attempted", True)
+
+    class MockKey:
+        pass
+
+    monkeypatch.setattr(mod, "Key", MockKey)
+    monkeypatch.setattr(mod, "KeyCode", MockKey)
+
+    # Line 217: value.char set -> n = value.char (str) -> lookup
+    k = MockKey()
+    k.value = MockKey()
+    k.value.char = "a"
+    k.value.vk = None
+    assert mod.get_macos_vk_for_modifier(k) == 1
+
+    # Line 217: value.char None, value.vk int -> line 220-222: return int
+    k2 = MockKey()
+    k2.value = MockKey()
+    k2.value.char = None
+    k2.value.vk = 42
+    assert mod.get_macos_vk_for_modifier(k2) == 42
 
 
 def test_post_macos_key_event_non_darwin_and_init_fail(monkeypatch):

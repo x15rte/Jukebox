@@ -209,6 +209,16 @@ def test_timeline_handle_mouse_input_clamps_ratio(qtbot):
     assert tw.current_time == 10.0
 
 
+def test_timeline_handle_mouse_input_zero_width(qtbot):
+    """_handle_mouse_input early-returns when widget width <= 0."""
+    tw = TimelineWidget()
+    qtbot.addWidget(tw)
+    tw.resize(0, 60)
+    tw.total_duration = 10.0
+    tw._handle_mouse_input(50)
+    assert tw.current_time == 0.0  # unchanged
+
+
 def test_timeline_ensure_background_draws_lines_notes_and_cache_return(
     qtbot, monkeypatch
 ):

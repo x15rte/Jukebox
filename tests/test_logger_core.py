@@ -1,3 +1,5 @@
+import os
+
 import logging
 import sys
 
@@ -298,6 +300,23 @@ def test_unicode_stderr_does_not_crash(monkeypatch):
     lg2.set_level("DEBUG")
     # This should not raise even though the stream is ASCII-only.
     lg2.info("Unicode test: \u2603 \xe9 \u4e2d\u6587")
+
+
+
+def test_stderr_reconfigure_oserror_swallowed(monkeypatch):
+    """sys.stderr.reconfigure raising OSError is swallowed."""
+    monkeypatch.setattr(sys.stderr, "reconfigure", lambda **kw: (_ for _ in ()).throw(OSError("mock")))
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
+    assert lg._logger is not None
+
+
+def test_enable_file_logging_makedirs_oserror_swallowed(tmp_path, monkeypatch):
+    """os.makedirs raising OSError is swallowed during enable_file_logging."""
+    def bad_makedirs(*a: object, **kw: object) -> None:
+        raise OSError("makedirs failed")
+    monkeypatch.setattr(os, "makedirs", bad_makedirs)
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
+    lg.enable_file_logging(str(tmp_path / "test.log"))  # should not raise
 
 
 def test_global_singleton_has_expected_type():

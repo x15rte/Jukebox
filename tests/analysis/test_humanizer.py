@@ -180,3 +180,10 @@ def test_fingering_engine_hand_assignment(notes_input, expected_hands):
     eng = FingeringEngine()
     eng.assign_hands(notes)
     assert [n.hand for n in notes] == expected_hands
+
+
+def test_apply_to_hand_invalid_hand_raises():
+    """Humanizer.apply_to_hand raises ValueError for invalid hand name."""
+    hz = Humanizer({})
+    with pytest.raises(ValueError, match="Invalid hand"):
+        hz.apply_to_hand([], "invalid", set())

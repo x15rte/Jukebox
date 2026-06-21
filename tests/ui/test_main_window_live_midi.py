@@ -484,3 +484,199 @@ def test_live_midi_key_layout_recreate_failure_disconnects(
     assert w.live_backend is None
     assert any("MIDI input output unavailable" in message for message, _ in errors)
     assert disconnects == [True]
+
+
+# ---------------------------------------------------------------------------
+# _on_midi_input_connected — stale signal
+# ---------------------------------------------------------------------------
+def test_on_midi_input_connected_stale_signal(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.midi_input_active = False
+    w._on_midi_input_connected("Some Port")
+    assert w.midi_input_status_label.text() != "Connected to: Some Port"
+
+
+# ---------------------------------------------------------------------------
+# _on_midi_input_error — active path
+# ---------------------------------------------------------------------------
+def test_on_midi_input_error_when_active(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.midi_input_active = True
+    errors = []
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: errors.append((m, k)))
+    w._on_midi_input_error("connection refused")
+    assert any("MIDI input connection failed" in str(e[0]) for e in errors)
+    assert errors[0][1].get("show_dialog") is True
+
+
+# ---------------------------------------------------------------------------
+# _disconnect_midi_input — exception branches
+# ---------------------------------------------------------------------------
+def test_disconnect_midi_input_exception_release_keys(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.midi_input_active = True
+    w.midi_input_worker = None
+    w.midi_input_thread = FakeThread()
+    logs = []
+    monkeypatch.setattr(w, "add_log_message", lambda m: logs.append(m))
+    monkeypatch.setattr(w, "_release_all_live_keys", lambda: (_ for _ in ()).throw(RuntimeError("release fail")))
+    w._disconnect_midi_input()
+    assert any("Error releasing live keys" in m for m in logs)
+
+
+def test_disconnect_midi_input_typeerror_disconnect(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.midi_input_active = True
+
+    class _BadSignal:
+        @staticmethod
+        def disconnect():
+            raise TypeError()
+
+    class Worker:
+        message_received = _BadSignal()
+        connected = _BadSignal()
+        connection_error = _BadSignal()
+        warning = _BadSignal()
+        finished = _BadSignal()
+
+        @staticmethod
+        def stop():
+            pass
+
+    w.midi_input_worker = Worker()
+    w.midi_input_thread = FakeThread()
+    monkeypatch.setattr(w, "_release_all_live_keys", lambda: None)
+    w._disconnect_midi_input()
+
+
+# ---------------------------------------------------------------------------
+# _on_midi_input_finished — guard clauses
+# ---------------------------------------------------------------------------
+def test_on_midi_input_finished_not_active(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.midi_input_active = False
+    w._on_midi_input_finished()
+    assert w.midi_input_active is False
+
+
+def test_on_midi_input_finished_thread_none(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.midi_input_active = True
+    w.midi_input_thread = None
+    w._on_midi_input_finished()
+    assert w.midi_input_thread is None
+
+
+def test_on_midi_input_finished_wrong_sender(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.midi_input_active = True
+    w.midi_input_thread = FakeThread()
+    w.midi_input_worker = object()
+    monkeypatch.setattr(w, "sender", lambda: object())
+    w._on_midi_input_finished()
+    assert w.midi_input_thread is not None
+    assert w.midi_input_worker is not None
+
+
+def test_on_midi_input_finished_midi_disconnecting(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.midi_input_active = True
+    w.midi_input_thread = FakeThread()
+    w.midi_input_worker = object()
+    w._midi_disconnecting = True
+    w._on_midi_input_finished()
+    assert w.midi_input_thread is not None
+
+
+def test_on_midi_input_finished_shutdown_live_backend(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.midi_input_active = True
+    w.midi_input_thread = FakeThread()
+    w.midi_input_worker = object()
+    w._midi_disconnecting = False
+    w.live_backend = FakeLiveBackend()
+    monkeypatch.setattr(w, "add_log_message", lambda m: None)
+    w._on_midi_input_finished()
+    assert w.live_backend is None
+
+
+# ---------------------------------------------------------------------------
+# _on_output_mode_changed / _on_key_layout_changed — loading_config guard
+# ---------------------------------------------------------------------------
+def test_on_output_mode_changed_loading_config_guard(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._loading_config = True
+    events = []
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append(("dirty",)))
+    w._on_output_mode_changed()
+    assert events == []
+
+
+def test_on_key_layout_changed_loading_config_guard(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._loading_config = True
+    events = []
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append(("dirty",)))
+    w._on_key_layout_changed(True)
+    assert events == []
+
+
+# ---------------------------------------------------------------------------
+# _handle_live_midi_message — exception sub-branches
+# ---------------------------------------------------------------------------
+def test_handle_live_midi_message_typeerror_disconnect(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+
+    class BadBackend(FakeLiveBackend):
+        @staticmethod
+        def note_on(pitch, velocity):
+            raise OutputBackendSendError("send failed")
+    w.live_backend = BadBackend()
+
+    class BadSignal:
+        @staticmethod
+        def disconnect():
+            raise TypeError()
+    w.midi_input_worker = SimpleNamespace(message_received=BadSignal())
+
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: None)
+    monkeypatch.setattr(w, "_disconnect_midi_input", lambda: None)
+
+    w._handle_live_midi_message(SimpleNamespace(type="note_on", note=60, velocity=90))
+
+
+def test_handle_live_midi_message_shutdown_exception(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+
+    class BadBackend(FakeLiveBackend):
+        @staticmethod
+        def note_on(pitch, velocity):
+            raise OutputBackendSendError("send failed")
+
+        @staticmethod
+        def shutdown():
+            raise RuntimeError("shutdown fail")
+    w.live_backend = BadBackend()
+
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: None)
+    monkeypatch.setattr(w, "_disconnect_midi_input", lambda: None)
+
+    w._handle_live_midi_message(SimpleNamespace(type="note_on", note=60, velocity=90))
+
+
+def test_handle_live_midi_message_disconnect_exception(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+
+    class BadBackend(FakeLiveBackend):
+        @staticmethod
+        def note_on(pitch, velocity):
+            raise OutputBackendSendError("send failed")
+    w.live_backend = BadBackend()
+
+    logs = []
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: logs.append((m, k)))
+    monkeypatch.setattr(w, "_disconnect_midi_input", lambda: (_ for _ in ()).throw(RuntimeError("cleanup fail")))
+
+    w._handle_live_midi_message(SimpleNamespace(type="note_on", note=60, velocity=90))
+    assert any("Error during MIDI disconnect cleanup" in str(m[0]) for m in logs)

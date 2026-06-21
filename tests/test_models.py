@@ -1,6 +1,6 @@
 import pytest
 
-from models import KeyEvent, KeyState, MidiTrack, Note
+from models import KeyEvent, KeyState, MidiTrack, MusicalSection, Note
 
 
 def test_note_end_time_property():
@@ -94,3 +94,39 @@ def test_key_event_equality_uses_all_fields():
     assert base != diff_key_char
     assert base != diff_time
 
+
+
+def test_note_validation():
+    with pytest.raises(ValueError, match="pitch.*out of range"):
+        Note(1, -1, 100, 0.0, 0.1)
+    with pytest.raises(ValueError, match="velocity.*out of range"):
+        Note(1, 60, -1, 0.0, 0.1)
+    with pytest.raises(ValueError, match="start_time.*must be >= 0"):
+        Note(1, 60, 100, -0.1, 0.1)
+
+
+def test_midi_track_instrument_name_all_ranges():
+    t = MidiTrack(0, "x", 0, False, [])
+    for prog, expected in [
+        (56, "Brass"), (64, "Reed"), (72, "Pipe"),
+        (80, "Synth Lead"), (88, "Synth Pad"), (96, "Synth Effects"),
+        (104, "Ethnic"), (112, "Percussive"), (120, "Sound Effects"),
+        (200, "Instrument 200"),
+    ]:
+        t.program_change = prog
+        assert t.instrument_name == expected, f"prog={prog}"
+
+
+def test_key_event_lt_non_keyevent():
+    e = KeyEvent(time=1.0, priority=1, action="press", key_char="a")
+    result = e.__lt__("not a KeyEvent")
+    assert result is NotImplemented
+
+
+def test_musical_section_post_init_fixes_end_time():
+    s = MusicalSection(start_time=5.0, end_time=3.0, notes=[])
+    assert s.end_time == 5.0
+
+def test_musical_section_post_init_fixes_end_beat():
+    s = MusicalSection(start_time=0.0, end_time=2.0, start_beat=5.0, end_beat=3.0, notes=[])
+    assert s.end_beat == 5.0

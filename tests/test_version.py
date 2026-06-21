@@ -83,3 +83,14 @@ def test_get_version_frozen_and_source(monkeypatch):
     monkeypatch.setattr(version.sys, "frozen", False, raising=False)
     monkeypatch.setattr(version, "_get_git_version", lambda: "gitver")
     assert version.get_version() == "gitver"
+
+
+def test_get_version_cached_value(monkeypatch):
+    """Calling get_version() twice returns the cached value."""
+    version._VERSION_CACHED = None
+    monkeypatch.setattr(version, "_get_git_version", lambda: "abc123")
+    first = version.get_version()
+    second = version.get_version()
+    assert first == "abc123"
+    assert second == "abc123"
+    version._VERSION_CACHED = None

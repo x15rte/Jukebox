@@ -1,3 +1,4 @@
+import pytest
 import mido
 
 from core.tempo_map import GlobalTickMap, TempoMap, get_time_groups
@@ -93,3 +94,45 @@ def test_global_tick_map_tick_to_time_breaks_on_future_entry():
     gmap = GlobalTickMap(mid)
 
     assert abs(gmap.tick_to_time(240) - 0.25) < 1e-6
+
+
+def test_tempo_map_invalid_tempo_scale():
+    """TempoMap raises ValueError for non-positive, nan, or infinite tempo_scale."""
+    import math
+    for bad in [0.0, -1.0, float("nan"), float("inf")]:
+        with pytest.raises(ValueError, match="tempo_scale"):
+            TempoMap([(0.0, 500000)], [], tempo_scale=bad)
+
+
+def test_tempo_map_get_tempo_at_before_first_event():
+    """get_tempo_at returns 500_000 for time before any tempo event."""
+    tm = TempoMap([(1.0, 600000)], [])
+    assert tm.get_tempo_at(0.5) == 500_000
+
+
+def test_tempo_map_get_tempo_at_negative_time():
+    """get_tempo_at returns 500_000 for negative time (idx < 0)."""
+    tm = TempoMap([], [])
+    assert tm.get_tempo_at(-1.0) == 500_000
+
+
+def test_tempo_map_measure_boundaries_prepends_default_ts():
+    """When first time signature starts after time 0, default 4/4 is prepended."""
+    tm = TempoMap([(0.0, 500000)], [(2.0, 4, 4)])
+    measures = tm.get_measure_boundaries(total_duration=4.0)
+    assert len(measures) >= 1
+    assert measures[0][0] == 0.0
+
+
+def test_tempo_map_measure_boundaries_breaks_on_bad_ts():
+    """get_measure_boundaries breaks when time signature has zero denominator."""
+    tm = TempoMap([(0.0, 500000)], [(0.0, 4, 0)])
+    measures = tm.get_measure_boundaries(total_duration=4.0)
+    assert measures == []
+
+
+def test_tempo_map_measure_boundaries_breaks_on_zero_beats():
+    """get_measure_boundaries breaks when numerator is zero."""
+    tm = TempoMap([(0.0, 500000)], [(0.0, 0, 4)])
+    measures = tm.get_measure_boundaries(total_duration=4.0)
+    assert measures == []

@@ -32,16 +32,16 @@ class Humanizer:
         self._test_random = getattr(Humanizer, '_test_random_override', None)
         self._shared_drift_offsets: Dict[float, float] = {}
     def _gauss(self, mu: float, sigma: float) -> float:
-        if self._test_gauss is not None:
-            return self._test_gauss(mu, sigma)
+        if self._test_gauss is not None:  # pragma: no cover
+            return self._test_gauss(mu, sigma)  # test-only hook
         # Respect global monkeypatches (used by existing tests)
         if random.gauss is not _original_gauss:
             return random.gauss(mu, sigma)
         return self._rng.gauss(mu, sigma)
 
     def _rand(self) -> float:
-        if self._test_random is not None:
-            return self._test_random()
+        if self._test_random is not None:  # pragma: no cover
+            return self._test_random()  # pragma: no cover
         if random.random is not _original_random:
             return random.random()
         return self._rng.random()

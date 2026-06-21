@@ -118,3 +118,8 @@ def test_create_backend_linux_numpad_requires_pynput(monkeypatch):
 
     with pytest.raises(out.OutputBackendUnavailableError, match="pynput"):
         out.create_backend("midi_numpad")
+
+
+def test_create_backend_unknown_mode_raises():
+    with pytest.raises(ValueError, match="Unknown output mode"):
+        out.create_backend("invalid_mode")

@@ -1,3 +1,5 @@
+# pyright: reportAttributeAccessIssue=false
+
 """Config binding tests."""
 from __future__ import annotations
 
@@ -368,3 +370,56 @@ def test_pedal_style_setter_unknown_value_uses_fallback():
     w = DummyWidget()
     cb._set_pedal_style(w, "bogus")
     assert w.pedal_style_combo.currentText() == "Original (from MIDI)"
+
+
+
+def test_pedal_style_setter_mapped_not_in_combo_falls_back_to_first(monkeypatch):
+    """When mapped text is not in combo, falls back to first option."""
+    w = DummyWidget()
+    w.pedal_mapping_inv["unknown-key"] = "Missing Style"
+    # Make setCurrentText a no-op so combo doesn't reflect the mapped value
+    monkeypatch.setattr(w.pedal_style_combo, "setCurrentText", lambda t: None)
+    cb._set_pedal_style(w, "unknown-key")
+    assert w.pedal_style_combo.currentText() == "Original (from MIDI)"  # first option
+
+
+def test_get_window_geometry_minimized_returns_none():
+    w = DummyWidget()
+    w._window_state = cb.Qt.WindowState.WindowMinimized.value
+    result = cb._get_window_geometry(w)
+    assert result is None
+
+
+def test_set_save_log_to_file_no_config_dir_logs_warning(monkeypatch):
+    w = DummyWidget()
+    w.config_dir = None
+    events = []
+    monkeypatch.setattr(cb.jukebox_logger, "warning", lambda msg: events.append(str(msg)))
+    cb._set_save_log_to_file(w, True)
+    assert any("config_dir is not set" in e for e in events)
+
+
+def test_set_save_log_to_file_enable_failure_logs_message(monkeypatch):
+    w = DummyWidget()
+    w.config_dir = Path(".")
+    messages = []
+    monkeypatch.setattr(w, "add_log_message", lambda msg, level="INFO": messages.append(msg))
+
+    def failing_enable(*a, **kw):
+        raise RuntimeError("enable failed")
+    monkeypatch.setattr(cb.jukebox_logger, "enable_file_logging", failing_enable)
+
+    cb._set_save_log_to_file(w, True)
+    assert any("Failed to enable" in m for m in messages)
+
+
+def test_set_log_level_fallback_when_combo_differs(monkeypatch):
+    """_set_log_level warns when combo text doesn't match normalized value."""
+    w = DummyWidget()
+    events = []
+    # Make _set_log_level_combo a no-op so combo stays unchanged
+    monkeypatch.setattr(cb, "_set_log_level_combo", lambda w, v: None)
+    monkeypatch.setattr(cb.jukebox_logger, "warning", lambda msg: events.append(str(msg)))
+    monkeypatch.setattr(cb.jukebox_logger, "set_level", lambda v: None)
+    cb._set_log_level(w, "DEBUG")
+    assert any("not available" in e for e in events)

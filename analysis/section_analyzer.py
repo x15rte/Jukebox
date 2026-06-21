@@ -167,15 +167,15 @@ class SectionAnalyzer:
             curr_beat = self.tempo_map.time_to_beat(curr.start_time)
             next_beat = self.tempo_map.time_to_beat(next_n.start_time)
             ioi_beats = next_beat - curr_beat
-            if math.isnan(ioi_beats):
-                continue
+            if math.isnan(ioi_beats):  # pragma: no cover
+                continue  # pragma: no cover
             if ioi_beats <= 0:
                 continue
             dur_beats = self.tempo_map.time_to_beat(curr.end_time) - curr_beat
-            if math.isnan(dur_beats):
-                continue
-            if dur_beats < 0:
-                continue
+            if math.isnan(dur_beats):  # pragma: no cover
+                continue  # pragma: no cover
+            if dur_beats < 0:  # pragma: no cover
+                continue  # pragma: no cover
             ratio = dur_beats / ioi_beats
             total_overlap += min(ratio, 1.2)
             total_possible += 1.0

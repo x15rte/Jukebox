@@ -61,6 +61,111 @@ def test_main_wires_app_icon_window_and_exec(monkeypatch, tmp_path):
     assert ("exit", 7) in events
 
 
+def _shared_mem_test(monkeypatch, tmp_path, scenario, expected_events):
+    """Run shared-memory scenario and verify events."""
+    events = []
+
+    class FakeApp:
+        def __init__(self, _argv):
+            events.append("app_init")
+        def setWindowIcon(self, _icon):
+            events.append("app_icon")
+        def exec(self):
+            return 0
+
+    class FakeWindow:
+        def __init__(self, app_version=""):
+            events.append("window_init")
+        def setWindowIcon(self, _icon):
+            events.append("window_icon")
+        def show(self):
+            events.append("show")
+
+    class FakeSharedMem:
+        class SharedMemoryError:
+            AlreadyExists = 0
+            NoError = 1
+            PermissionDenied = 2
+        class AccessMode:
+            ReadOnly = 0
+        def __init__(self, key):
+            self._key = key
+            self._attached = False
+            self._call_count = 0
+            self._scenario = scenario
+        def create(self, size):
+            self._call_count += 1
+            if self._scenario in ("already_exists", "already_exists_kill_fails"):
+                return False
+            if self._scenario == "already_exists_reclaim_fails":
+                return self._call_count > 2
+            if self._scenario == "other_error":
+                return False
+            self._attached = True
+            return True
+        def error(self):
+            if self._scenario == "other_error":
+                return self.SharedMemoryError.PermissionDenied
+            return self.SharedMemoryError.AlreadyExists
+        def attach(self, mode):
+            if self._scenario in ("already_exists", "already_exists_kill_fails"):
+                self._attached = True
+                return True
+            return False
+        def constData(self):
+            if not hasattr(self, "_voidptr"):
+                self._voidptr = type("VoidPtr", (), {"asstring": lambda self, sz: b"\xab\x00\x00\x00"})()
+            return self._voidptr
+        def detach(self):
+            self._attached = False
+            return True
+        def isAttached(self):
+            return self._attached
+        def data(self):
+            return bytearray(4)
+
+    monkeypatch.setattr(app_main, "QSharedMemory", FakeSharedMem)
+    monkeypatch.setattr(app_main, "QApplication", FakeApp)
+    monkeypatch.setattr(app_main, "MainWindow", FakeWindow)
+    monkeypatch.setattr(app_main, "QIcon", lambda p: object())
+    monkeypatch.setattr(app_main, "_resource_dir", lambda: tmp_path)
+    monkeypatch.setattr(app_main.theme, "apply_global_palette", lambda _app: None)
+    monkeypatch.setattr(app_main, "set_app_user_model_id", lambda _id: events.append("app_id"))
+    monkeypatch.setattr(app_main.sys, "exit", lambda _code: events.append("exit"))
+    monkeypatch.setattr(app_main, "os", type("OsMock", (), {"kill": lambda *a: (_ for _ in ()).throw(ProcessLookupError()) if scenario == "already_exists_kill_fails" else None})())
+
+    app_main.main()
+
+    for ev in expected_events:
+        assert ev in events, f"Expected {ev!r} not in {events}"
+
+
+def test_main_shared_mem_already_exists_kill_fails(monkeypatch, tmp_path):
+    """Shared memory AlreadyExists, os.kill raises, reclaim succeeds."""
+    _shared_mem_test(monkeypatch, tmp_path, "already_exists_kill_fails", [
+        "app_id", "app_init", "window_init", "show",
+    ])
+
+
+def test_main_shared_mem_already_exists_process_alive(monkeypatch, tmp_path):
+    """Shared memory AlreadyExists with live process exits early."""
+    _shared_mem_test(monkeypatch, tmp_path, "already_exists", [])
+
+
+def test_main_shared_mem_already_exists_reclaim_fails(monkeypatch, tmp_path):
+    """Shared memory AlreadyExists, reclaim fails, continues anyway."""
+    _shared_mem_test(monkeypatch, tmp_path, "already_exists_reclaim_fails", [
+        "app_id", "app_init", "window_init", "show",
+    ])
+
+
+def test_main_shared_mem_other_error(monkeypatch, tmp_path):
+    """Shared memory non-AlreadyExists error continues without guard."""
+    _shared_mem_test(monkeypatch, tmp_path, "other_error", [
+        "app_id", "app_init", "window_init", "show",
+    ])
+
+
 def test_main_without_icon_path(monkeypatch, tmp_path):
     events = []
 

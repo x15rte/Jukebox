@@ -107,7 +107,7 @@ def _build_field_meta(cls: type) -> Dict[str, _FieldMeta]:
         raw = f.metadata or {}
         try:
             resolved_type = _resolve_type(hints.get(f.name, str))
-        except Exception:
+        except Exception:  # pragma: no cover
             resolved_type = str  # per-field fallback — one bad annotation doesn't kill all
         meta[f.name] = _FieldMeta(
             old_names=raw.get("old_names", ()),

@@ -294,3 +294,51 @@ def test_parse_structure_real_fixture_treats_zero_velocity_note_on_as_release():
     assert track.notes[0].pitch == 67
     assert track.notes[0].start_time == pytest.approx(0.0)
     assert track.notes[0].duration == pytest.approx(0.25)
+
+
+def test_parse_structure_invalid_tempo_scale(monkeypatch):
+    """parse_structure raises ValueError for non-positive tempo_scale."""
+    mid = mido.MidiFile(ticks_per_beat=480)
+    monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda fp, clip=True: mid)
+    with pytest.raises(ValueError, match="tempo_scale must be positive"):
+        MidiParser.parse_structure("x.mid", tempo_scale=0)
+    with pytest.raises(ValueError, match="tempo_scale must be positive"):
+        MidiParser.parse_structure("x.mid", tempo_scale=-1)
+
+
+def test_parse_structure_legato_re_strike(monkeypatch):
+    """Overlapping note_on for same note+channel closes prior note."""
+    mid = mido.MidiFile(ticks_per_beat=480)
+    track = mido.MidiTrack()
+    track.append(mido.Message("note_on", note=60, velocity=100, channel=0, time=0))
+    track.append(mido.Message("note_on", note=60, velocity=80, channel=0, time=240))  # legato re-strike
+    track.append(mido.Message("note_off", note=60, channel=0, time=480))
+    mid.tracks.append(track)
+    monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda fp, clip=True: mid)
+    tracks, _ = MidiParser.parse_structure("x.mid")
+    assert any(n.pitch == 60 for n in tracks[0].notes)
+
+
+def test_parse_structure_same_tick_note_off(monkeypatch):
+    """Note_off at same tick as note_on pops the entry without emitting note."""
+    mid = mido.MidiFile(ticks_per_beat=480)
+    track = mido.MidiTrack()
+    track.append(mido.Message("note_on", note=60, velocity=100, channel=0, time=0))
+    track.append(mido.Message("note_off", note=60, channel=0, time=0))  # same tick
+    mid.tracks.append(track)
+    monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda fp, clip=True: mid)
+    tracks, _ = MidiParser.parse_structure("x.mid")
+    assert len(tracks) == 0 or len(tracks[0].notes) == 0
+
+def test_parse_structure_unclosed_note_flush(monkeypatch):
+    """Unclosed note_on without matching note_off gets flushed at track end."""
+    mid = mido.MidiFile(ticks_per_beat=480)
+    track = mido.MidiTrack()
+    track.append(mido.Message("note_on", note=60, velocity=100, channel=0, time=0))
+    track.append(mido.MetaMessage("track_name", name="T", time=480))  # advance tick
+    # No note_off — note gets flushed at end with duration > threshold
+    mid.tracks.append(track)
+    monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda fp, clip=True: mid)
+    tracks, _ = MidiParser.parse_structure("x.mid")
+    assert len(tracks) == 1
+    assert len(tracks[0].notes) == 1

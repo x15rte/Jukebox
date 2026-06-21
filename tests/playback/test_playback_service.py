@@ -4,7 +4,7 @@ import pytest
 
 from core.midi_parser import MidiParser
 from core.tempo_map import TempoMap
-from models import MidiTrack
+from models import MidiTrack, KeyEvent
 from playback.playback_service import PlaybackService
 from tests.helpers.builders import make_note
 from tests.helpers.midi_fixtures import midi_fixture_path
@@ -146,6 +146,84 @@ def test_prepare_playback_includes_raw_pedal_events_in_config(monkeypatch):
 
     assert seen["pedals"] == [(0.5, 127), (1.0, 127), (2.0, 0)]
 
+
+
+def test_prepare_playback_dedups_consecutive_same_pedal_events(monkeypatch):
+    """Consecutive same-time same-value pedal events are deduplicated."""
+    note = make_note(1, 64, 0.0, 0.3, hand="unknown")
+    t1 = MidiTrack(0, "A", 0, False, [note], [(0.5, 127), (0.5, 127), (2.0, 0)])
+
+    seen = {}
+
+    def fake_compile(_n, _s, cfg):
+        seen["pedals"] = cfg.get("raw_pedal_events")
+        return []
+
+    monkeypatch.setattr("playback.playback_service.MidiParser.parse_structure", lambda *_a, **_k: ([t1], object()))
+    monkeypatch.setattr("playback.playback_service.EventCompiler.compile", fake_compile)
+    monkeypatch.setattr("playback.playback_service.SectionAnalyzer.analyze", lambda self: [])
+
+    PlaybackService.prepare_playback(
+        "x.mid",
+        [(t1, "Auto-Detect")],
+        {"tempo": 100, "simulate_hands": False},
+    )
+
+    # Duplicate (0.5, 127) should appear only once
+    assert seen["pedals"] == [(0.5, 127), (2.0, 0)]
+
+
+def test_prepare_playback_total_dur_from_pedals_when_no_notes(monkeypatch):
+    """total_dur derived from pedal events when no notes exist."""
+    t1 = MidiTrack(0, "A", 0, False, [], [(0.5, 127)])
+
+    monkeypatch.setattr("playback.playback_service.MidiParser.parse_structure", lambda *_a, **_k: ([t1], object()))
+    monkeypatch.setattr("playback.playback_service.EventCompiler.compile", lambda n, s, c: [])
+    monkeypatch.setattr("playback.playback_service.SectionAnalyzer.analyze", lambda self: [])
+
+    final_notes, _, _, total_dur, _ = PlaybackService.prepare_playback(
+        "x.mid",
+        [(t1, "Auto-Detect")],
+        {"tempo": 100, "simulate_hands": False},
+    )
+
+    assert len(final_notes) == 0
+    assert total_dur >= 0.5
+
+
+def test_prepare_playback_total_dur_min_1_when_no_notes_and_no_pedals(monkeypatch):
+    """total_dur defaults to 1.0 when there are no notes and no pedal events."""
+    t1 = MidiTrack(0, "A", 0, False, [], [])
+
+    monkeypatch.setattr("playback.playback_service.MidiParser.parse_structure", lambda *_a, **_k: ([t1], object()))
+    monkeypatch.setattr("playback.playback_service.EventCompiler.compile", lambda n, s, c: [])
+    monkeypatch.setattr("playback.playback_service.SectionAnalyzer.analyze", lambda self: [])
+
+    final_notes, _, _, total_dur, _ = PlaybackService.prepare_playback(
+        "x.mid",
+        [(t1, "Auto-Detect")],
+        {"tempo": 100, "simulate_hands": False},
+    )
+
+    assert total_dur == 1.0
+
+
+def test_prepare_playback_total_dur_min_01_when_compiled_events_exist(monkeypatch):
+    """total_dur defaults to 0.1 when compiled events have max time < 0.1."""
+    note = make_note(1, 64, 0.0, 0.3, hand="unknown")
+    t1 = MidiTrack(0, "A", 0, False, [note], [])
+
+    monkeypatch.setattr("playback.playback_service.MidiParser.parse_structure", lambda *_a, **_k: ([t1], object()))
+    monkeypatch.setattr("playback.playback_service.EventCompiler.compile", lambda n, s, c: [KeyEvent(time=0.05, priority=0, action="press", key_char="a")])
+    monkeypatch.setattr("playback.playback_service.SectionAnalyzer.analyze", lambda self: [])
+
+    final_notes, _, _, total_dur, _ = PlaybackService.prepare_playback(
+        "x.mid",
+        [(t1, "Auto-Detect")],
+        {"tempo": 100, "simulate_hands": False},
+    )
+
+    assert total_dur == 0.1
 
 def test_prepare_playback_real_fixture_remaps_original_pedal_with_humanizer(
     monkeypatch,

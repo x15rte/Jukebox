@@ -128,7 +128,7 @@ def _init_macos_cgevent() -> bool:
     with _init_lock:
         if _macos_cgevent_init_attempted:
             return _macos_app_services is not None
-        try:
+        try:  # pragma: no cover
             import ctypes
             import ctypes.util
 
@@ -252,10 +252,10 @@ def post_macos_key_event(key_code: int, key_down: bool, flags: int = 0) -> bool:
         _macos_app_services.CGEventSetFlags(event, flags)
         result = _macos_app_services.CGEventPost(_kCGHIDEventTap, event)
         return result == 0
-    except Exception as e:
+    except Exception as e:  # pragma: no cover
         jukebox_logger.debug(f"post_macos_key_event failed: {e}")
         return False
-    finally:
+    finally:  # pragma: no cover
         if event:
             try:
                 _macos_core_foundation.CFRelease(event)

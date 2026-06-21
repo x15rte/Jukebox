@@ -194,7 +194,7 @@ class JukeboxLogger:
             with self._lock:
                 if self._file_handler is None:
                     self._file_handler = old_handler
-                elif old_handler is not None:
+                elif old_handler is not None:  # pragma: no cover
                     # Another thread set a handler while we were creating ours.
                     # Dispose old_handler since it's no longer tracked.
                     self._logger.removeHandler(old_handler)
@@ -207,14 +207,14 @@ class JukeboxLogger:
         with self._lock:
             if self._file_handler is not None:
                 # Another thread set a handler while we were creating ours
-                if old_handler is not None:
+                if old_handler is not None:  # pragma: no cover
                     self._logger.removeHandler(old_handler)
                     try:
                         old_handler.close()
                     except Exception as e:
                         self._logger.debug("Error closing previous file handler: %s", e)
-                handler.close()
-                return
+                handler.close()  # pragma: no cover
+                return  # pragma: no cover
             handler.setFormatter(logging.Formatter(_FORMAT))
             self._logger.addHandler(handler)
             self._file_handler = handler

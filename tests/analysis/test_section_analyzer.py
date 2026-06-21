@@ -168,3 +168,12 @@ def test_analyze_by_silence_handles_empty_slice_notes(monkeypatch):
     sections = sa._analyze_by_silence()
 
     assert sections == []
+
+
+def test_analyze_by_measures_empty_boundaries_falls_back_to_silence():
+    """When get_measure_boundaries returns empty, _analyze_by_measures falls back to _analyze_by_silence."""
+    tm = TempoMap([(0.0, 500000)], [(0.0, 4, 0)])  # zero denominator → empty boundaries
+    notes = [make_note(1, 48, 0.0, 0.2, hand="left")]
+    sa = SectionAnalyzer(notes, tm)
+    sections = sa._analyze_by_measures()
+    assert len(sections) >= 1

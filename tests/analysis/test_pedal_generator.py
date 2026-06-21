@@ -294,3 +294,50 @@ def test_harmonic_pedal_noop_with_empty_bass_notes():
     PedalGenerator._generate_harmonic_pedal(events, [])
 
     assert events == []
+
+
+def test_events_to_intervals_overlapping_down():
+    """Two consecutive downs without up in between creates interval for each."""
+    events = [
+        KeyEvent(0.0, 1, "pedal", "down"),
+        KeyEvent(0.5, 1, "pedal", "down"),
+        KeyEvent(1.0, 0, "pedal", "up"),
+    ]
+    intervals = PedalGenerator._events_to_intervals(events)
+    assert (0.0, 0.5) in intervals
+    assert (0.5, 1.0) in intervals
+
+
+def test_events_to_intervals_dangling_down():
+    """Unclosed down at end creates 0.1s interval."""
+    events = [
+        KeyEvent(0.0, 1, "pedal", "down"),
+    ]
+    intervals = PedalGenerator._events_to_intervals(events)
+    assert intervals == [(0.0, 0.1)]
+
+
+def test_harmonic_pedal_same_time_different_pitch_skips_first_down():
+    """When first two bass notes start at same time with different pitch, skip initial down."""
+    events: list[KeyEvent] = []
+    bass_notes = [
+        make_note(1, 48, 0.0, 0.5),
+        make_note(2, 55, 0.0, 0.3),  # same time, different pitch
+    ]
+    PedalGenerator._generate_harmonic_pedal(events, bass_notes)
+    # No down at time 0.0 since harmony change at same time
+    downs = [e for e in events if e.key_char == "down" and abs(e.time - 0.0) < 1e-9]
+    assert not downs
+
+
+def test_adaptive_driver_trailing_silence_early_release():
+    """Trailing silence > 0.35s after last driver note triggers early release."""
+    driver_notes = [make_note(1, 48, 0.0, 1.0)]  # ends at 1.0
+    all_notes = [
+        make_note(1, 48, 0.0, 1.0),
+        make_note(2, 55, 1.5, 0.5),  # overall ends at 2.0, gap > 0.35
+    ]
+    out = PedalGenerator._generate_adaptive_pedal_driver(driver_notes, all_notes)
+    # Should have early release at last_end (1.0)
+    ups = [e for e in out if e.key_char == "up"]
+    assert any(abs(e.time - 1.0) < 1e-9 for e in ups)

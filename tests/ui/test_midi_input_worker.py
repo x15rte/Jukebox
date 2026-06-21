@@ -88,6 +88,29 @@ def test_run_emits_connection_error_when_iter_pending_fails(monkeypatch):
     assert finished == [True]
 
 
+def test_run_emits_connection_error_on_oserror(monkeypatch):
+    """OSError from iter_pending triggers connection_error."""
+    worker = MidiInputWorker("ok-port")
+    errors = []
+    finished = []
+    worker.connection_error.connect(errors.append)
+    worker.finished.connect(lambda: finished.append(True))
+
+    class Port:
+        def iter_pending(self):
+            raise OSError("port disconnected")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("ui.midi_input_worker.mido.open_input", lambda *_a, **_k: Port())
+
+    worker.run()
+
+    assert errors == ["port disconnected"]
+    assert finished == [True]
+
+
 @pytest.mark.parametrize("exc_cls", [OSError, ValueError])
 def test_run_emits_warning_when_cleanup_close_fails(monkeypatch, exc_cls):
     worker = MidiInputWorker("ok-port")

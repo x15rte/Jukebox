@@ -1,3 +1,5 @@
+# pyright: reportAttributeAccessIssue=false
+
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -446,3 +448,313 @@ def test_runtime_playback_dict_keys_cover_pipeline_consumers():
             assert key in runtime, (
                 f"Pipeline consumer key '{key}' missing from to_runtime_playback_dict()"
             )
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: _coerce_float inf/nan (lines 151, 157)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "default", "expected"),
+    [
+        (float("inf"), 5.0, 5.0),
+        (float("-inf"), 5.0, 5.0),
+        (float("nan"), 5.0, 5.0),
+        ("inf", 5.0, 5.0),
+        ("-inf", 5.0, 5.0),
+        ("nan", 5.0, 5.0),
+        ("  inf  ", 5.0, 5.0),
+    ],
+)
+def test_coerce_float_inf_nan(value, default, expected):
+    """_coerce_float returns default for inf/nan values (lines 151, 157)."""
+    import math
+    result = _coerce_float(value, default)
+    assert result == expected
+    assert not (isinstance(result, float) and (math.isinf(result) or math.isnan(result)))
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: _coerce_int inf/nan (lines 171, 177)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "default", "expected"),
+    [
+        (float("inf"), 7, 7),
+        (float("-inf"), 7, 7),
+        (float("nan"), 7, 7),
+        ("inf", 7, 7),
+        ("-inf", 7, 7),
+        ("nan", 7, 7),
+    ],
+)
+def test_coerce_int_inf_nan(value, default, expected):
+    """_coerce_int returns default for inf/nan values (lines 171, 177)."""
+    result = _coerce_int(value, default)
+    assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: _coerce_field warning for invalid float (line 215)
+# ---------------------------------------------------------------------------
+
+
+def test_coerce_field_float_invalid_emits_warning():
+    """_coerce_field warns and returns default for inf float (line 215)."""
+    cfg = Config.from_dict({"tempo": float("inf")})
+    assert cfg.tempo == 100.0
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: _coerce_field warning for invalid int (line 226)
+# ---------------------------------------------------------------------------
+
+
+def test_coerce_field_int_invalid_emits_warning():
+    """_coerce_field warns and returns default for inf int (line 226)."""
+    cfg = Config.from_dict({"opacity": float("inf")})
+    assert cfg.opacity == 100
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: _coerce_field optional choice returns None (line 252)
+# ---------------------------------------------------------------------------
+
+
+def test_coerce_field_optional_choice_returns_none():
+    """_coerce_field returns None for invalid choice on optional str field (line 252)."""
+    from config_repository import _coerce_field, _FieldMeta
+
+    meta = _FieldMeta(cls_type=str, choices={"a", "b"}, is_optional=True)
+    result = _coerce_field("invalid", meta, "default", field_name="test")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: to_runtime_playback_dict skips None runtime alias (line 446)
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_playback_dict_skips_none_runtime_alias():
+    """to_runtime_playback_dict skips runtime-alias fields with None value (line 446)."""
+    cfg = Config()
+    cfg.enable_vary_timing = None
+    runtime = cfg.to_runtime_playback_dict()
+    # vary_timing is an annotated field, so 'in' returns True via class defaults.
+    # Instead, check __dict__ to verify it was NOT explicitly set (line 446 skip).
+    assert "vary_timing" not in runtime.__dict__
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: from_dict format_version conversion (lines 491-494)
+# ---------------------------------------------------------------------------
+
+
+def test_from_dict_version_string_conversion():
+    """from_dict converts non-int _config_version via int(float(str(...))) (lines 491-492)."""
+    cfg = Config.from_dict({"tempo": 120.0, "_config_version": "2.0"})
+    assert cfg.tempo == 120.0
+
+
+def test_from_dict_version_conversion_fails():
+    """from_dict falls back to version 1 when version string is invalid (lines 493-494)."""
+    cfg = Config.from_dict({"tempo": 120.0, "_config_version": "abc"})
+    assert cfg.tempo == 120.0
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: drift_decay_factor migration with version >= 2 (line 504)
+# ---------------------------------------------------------------------------
+
+
+
+def test_from_dict_drift_decay_factor_scaled_when_version_lt2():
+    """from_dict scales drift_decay_factor by 100 when format_version < 2 (line 504)."""
+    cfg = Config.from_dict({
+        "drift_decay_factor": 0.5,
+        "_config_version": 1,
+    })
+    assert cfg.value_hand_drift_decay == 50.0
+
+def test_from_dict_drift_decay_factor_version_ge2():
+    """from_dict does not scale drift_decay_factor when version >= 2 (line 506)."""
+    cfg = Config.from_dict({
+        "drift_decay_factor": 0.5,
+        "_config_version": 2,
+    })
+    assert cfg.value_hand_drift_decay == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: PlaybackConfig.__repr__ with extras (line 657)
+# ---------------------------------------------------------------------------
+
+
+def test_playback_config_repr_with_extra():
+    """PlaybackConfig.__repr__ includes extra keys (line 657)."""
+    pc = PlaybackConfig(tempo=120.0, extra_key="hello")
+    r = repr(pc)
+    assert "extra_key" in r
+    assert "hello" in r
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: load handles FileNotFoundError inside OSError (line 690)
+# ---------------------------------------------------------------------------
+
+
+def test_repository_load_file_disappeared(monkeypatch, tmp_path: Path):
+    """load returns Config() when file disappears between exists() and open() (line 690)."""
+    import builtins
+    repo = ConfigRepository(config_dir=tmp_path)
+    repo.ensure_config_dir()
+    repo.config_path.write_text('{"tempo": 120.0}', encoding="utf-8")
+
+    original_open = builtins.open
+    def mock_open(path, *args, **kwargs):
+        if "config.json" in str(path):
+            raise FileNotFoundError("File disappeared between exists and open")
+        return original_open(path, *args, **kwargs)
+    monkeypatch.setattr(builtins, "open", mock_open)
+
+    cfg = repo.load()
+    assert cfg.tempo == 100.0  # defaults returned
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: load raises ConfigLoadError on valid-json non-dict (lines 694-696)
+# ---------------------------------------------------------------------------
+
+
+def test_repository_load_raises_on_non_dict_json(tmp_path: Path):
+    """load raises ConfigLoadError when JSON parses to non-dict (lines 694-696)."""
+    repo = ConfigRepository(config_dir=tmp_path)
+    repo.ensure_config_dir()
+    repo.config_path.write_text("[]", encoding="utf-8")  # valid JSON array
+    with pytest.raises(ConfigLoadError) as exc_info:
+        repo.load()
+    assert exc_info.value.backup_path is not None
+    backups = list(tmp_path.glob("config.corrupt.*.json"))
+    assert len(backups) == 1
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: save handles tmp_path unlink OSError (lines 716-717)
+# ---------------------------------------------------------------------------
+
+
+def test_save_handles_tmp_unlink_oserror(monkeypatch, tmp_path: Path):
+    """save warns when tmp_path unlink raises OSError (lines 716-717)."""
+    import os
+    repo = ConfigRepository(config_dir=tmp_path)
+
+    original_unlink = os.unlink
+    def mock_unlink(path, *args, **kwargs):
+        path_str = str(path)
+        if path_str.endswith(".json.tmp"):
+            raise OSError("Permission denied")
+        return original_unlink(path, *args, **kwargs)
+    monkeypatch.setattr(os, "unlink", mock_unlink)
+
+    repo.save(Config(tempo=120.0))
+    assert repo.config_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: save falls back to shutil.copy2 when os.replace fails (lines 723-734)
+# ---------------------------------------------------------------------------
+
+
+def test_save_falls_back_to_copy2(monkeypatch, tmp_path: Path):
+    """save uses copy2 fallback when os.replace fails (lines 723-734)."""
+    import os
+    import shutil
+    repo = ConfigRepository(config_dir=tmp_path)
+
+    monkeypatch.setattr(
+        os, "replace",
+        lambda src, dst: (_ for _ in ()).throw(OSError("Cross-device link")),
+    )
+
+    repo.save(Config(tempo=120.0))
+    assert repo.config_path.exists()
+    data = json.loads(repo.config_path.read_text(encoding="utf-8"))
+    assert data["tempo"] == 120.0
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: save raises when both os.replace and shutil.copy2 fail (lines 727-729)
+# ---------------------------------------------------------------------------
+
+
+def test_save_raises_when_copy2_also_fails(monkeypatch, tmp_path: Path):
+    """save raises OSError when both os.replace and shutil.copy2 fail (lines 727-729)."""
+    import os
+    import shutil
+    repo = ConfigRepository(config_dir=tmp_path)
+
+    monkeypatch.setattr(
+        os, "replace",
+        lambda src, dst: (_ for _ in ()).throw(OSError("Replace failed")),
+    )
+    monkeypatch.setattr(
+        shutil, "copy2",
+        lambda src, dst: (_ for _ in ()).throw(OSError("Copy2 failed")),
+    )
+
+    with pytest.raises(OSError):
+        repo.save(Config(tempo=120.0))
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: save silently ignores cleanup unlink failure (lines 737-740)
+# ---------------------------------------------------------------------------
+
+
+def test_save_handles_cleanup_unlink_oserror(monkeypatch, tmp_path: Path):
+    """save silently ignores os.unlink error in finally block (lines 737-740)."""
+    import os
+    repo = ConfigRepository(config_dir=tmp_path)
+
+    # Force os.replace to fail so the tmp file remains un-renamed
+    monkeypatch.setattr(
+        os, "replace",
+        lambda src, dst: (_ for _ in ()).throw(OSError("Replace failed")),
+    )
+
+    original_unlink = os.unlink
+    def mock_unlink(path, *args, **kwargs):
+        path_str = str(path)
+        if path_str.endswith(".json.tmp"):
+            raise OSError("Cleanup failed")
+        return original_unlink(path, *args, **kwargs)
+    monkeypatch.setattr(os, "unlink", mock_unlink)
+
+    repo.save(Config(tempo=120.0))
+    assert repo.config_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: optional str field with non-string value cleared to None (lines 237-240)
+# ---------------------------------------------------------------------------
+
+
+def test_coerce_field_optional_str_clears_on_non_string():
+    """_coerce_field clears optional str to None when value is not a string (lines 237-240)."""
+    cfg = Config.from_dict({"midi_input_device": 123})
+    assert cfg.midi_input_device is None
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage: PlaybackConfig.__iter__ yields extra __dict__ keys (line 625)
+# ---------------------------------------------------------------------------
+
+
+def test_playback_config_iter_yields_extra_keys():
+    """PlaybackConfig.__iter__ yields extra keys from __dict__ (line 625)."""
+    pc = PlaybackConfig(tempo=120.0, extra_key="hello")
+    keys = list(pc)
+    assert "extra_key" in keys

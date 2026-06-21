@@ -1,3 +1,5 @@
+# pyright: reportAttributeAccessIssue=false
+
 import builtins
 import ctypes
 import importlib
@@ -634,3 +636,178 @@ def test_send_frame_batched_partial_success_odd_result(monkeypatch):
     # then send_key_down(5) + send_key_up(5)
     assert key_down_calls == [5]
     assert key_up_calls == [4, 5]
+
+def test_import_darwin_path_sets_pmke(monkeypatch):
+    """Cover Darwin import: _pmke set from native module (line 67)."""
+    import types as _types
+    import sys as _sys
+
+    native_mod = _types.ModuleType("native")
+    native_mod.post_macos_key_event = lambda vk, is_down, flags: True
+    monkeypatch.setitem(_sys.modules, "native", native_mod)
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+
+    ns = runpy.run_path(str(_RMC_PATH), run_name="__rmc_darwin_test__")
+    assert ns.get("_pmke") is not None
+    assert ns.get("_platform") == "Darwin"
+
+
+def test_ensure_numlock_double_checked_locking(monkeypatch):
+    """Cover double-checked locking return inside the lock (line 232)."""
+    monkeypatch.setattr(rmc, "_numlock_ensured", False)
+
+    class _MockLock:
+        def __enter__(self):
+            rmc._numlock_ensured = True
+            return self
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(rmc, "_numlock_lock", _MockLock())
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    rmc.ensure_numlock_on()
+
+
+def test_ensure_numlock_windows_pydirectinput_exception(monkeypatch):
+    """Cover exception handler in pydirectinput numlock toggling (lines 245-246)."""
+    monkeypatch.setattr(rmc, "_numlock_ensured", False)
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(
+        rmc, "_get_windll",
+        lambda: SimpleNamespace(user32=SimpleNamespace(GetKeyState=lambda _: 0))
+    )
+    monkeypatch.setattr(rmc.pydirectinput, "keyDown", lambda *a, **k: (_ for _ in ()).throw(Exception("pdi fail")))
+    monkeypatch.setattr(rmc.pydirectinput, "keyUp", lambda *a, **k: None)
+
+    rmc.ensure_numlock_on()
+    assert rmc._numlock_ensured is False
+
+
+def test_tap_key_windows_pydirectinput_keyup_exception(monkeypatch):
+    """Cover pydirectinput keyUp exception in _tap_key (lines 265-266)."""
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    calls = []
+    monkeypatch.setattr(rmc.pydirectinput, "keyDown", lambda *a, **k: calls.append(("down", a[0])))
+
+    def _failing_keyup(*a, **k):
+        calls.append(("up_fail", a[0]))
+        raise Exception("keyUp error")
+    monkeypatch.setattr(rmc.pydirectinput, "keyUp", _failing_keyup)
+
+    rmc._tap_key("numpad5")
+    assert calls == [("down", "numpad5"), ("up_fail", "numpad5")]
+
+
+def test_tap_key_linux_key_not_in_precomputed(monkeypatch):
+    """Cover missing key in precomputed mappings (lines 286-287)."""
+    monkeypatch.setattr(rmc, "_platform", "Linux")
+    monkeypatch.setattr(rmc, "_precomputed_keys", {"otherkey": "KC1"})
+    monkeypatch.setattr(rmc, "_keyboard", SimpleNamespace(press=lambda k: None, release=lambda k: None))
+
+    rmc._tap_key("numpad5")
+
+
+def test_tap_key_linux_keyboard_none(monkeypatch):
+    """Cover pynput keyboard controller None branch (lines 290-291)."""
+    monkeypatch.setattr(rmc, "_platform", "Linux")
+    monkeypatch.setattr(rmc, "_precomputed_keys", {"numpad5": "KC5"})
+    monkeypatch.setattr(rmc, "_keyboard", None)
+
+    rmc._tap_key("numpad5")
+
+
+def test_send_key_up_early_return_non_windows(monkeypatch):
+    """Cover _send_key_up early return on non-Windows (line 304-305)."""
+    monkeypatch.setattr(rmc, "_platform", "Linux")
+    rmc._send_key_up(42)
+
+
+def test_send_key_up_early_return_not_pydirectinput(monkeypatch):
+    """Cover _send_key_up early return when not using pydirectinput (lines 304-305)."""
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", False)
+    rmc._send_key_up(42)
+
+
+def test_send_key_up_early_return_no_windll(monkeypatch):
+    """Cover _send_key_up early return when windll is None (lines 306-308)."""
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(rmc, "_get_windll", lambda: None)
+    rmc._send_key_up(42)
+
+
+def test_send_key_up_sendinput_failure_warning(monkeypatch):
+    """Cover _send_key_up SendInput failure warning (lines 315-317)."""
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+
+    class _User32:
+        @staticmethod
+        def SendInput(n, inputs, sz):
+            return 0  # failure
+
+    monkeypatch.setattr(rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False)
+    rmc._send_key_up(42)
+
+
+def test_send_key_down_early_return_non_windows(monkeypatch):
+    """Cover _send_key_down early return on non-Windows (lines 321-322)."""
+    monkeypatch.setattr(rmc, "_platform", "Linux")
+    rmc._send_key_down(42)
+
+
+def test_send_key_down_early_return_not_pydirectinput(monkeypatch):
+    """Cover _send_key_down early return when not using pydirectinput (lines 321-322)."""
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", False)
+    rmc._send_key_down(42)
+
+
+def test_send_key_down_early_return_no_windll(monkeypatch):
+    """Cover _send_key_down early return when windll is None (lines 323-325)."""
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(rmc, "_get_windll", lambda: None)
+    rmc._send_key_down(42)
+
+
+def test_send_key_down_sendinput_failure_warning(monkeypatch):
+    """Cover _send_key_down SendInput failure warning (lines 332-334)."""
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+
+    class _User32:
+        @staticmethod
+        def SendInput(n, inputs, sz):
+            return 0  # failure
+
+    monkeypatch.setattr(rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False)
+    rmc._send_key_down(42)
+
+
+def test_send_frame_batched_returns_false_when_batched_disabled(monkeypatch):
+    """Cover _use_batched_sendinput check in _send_frame_batched (line 340)."""
+    monkeypatch.setattr(rmc, "_use_batched_sendinput", False)
+    assert rmc._send_frame_batched(1, 2, 3, 4, 5) is False
+
+
+def test_send_frame_batched_returns_false_when_sendinput_fails(monkeypatch):
+    """Cover SendInput returning 0 in _send_frame_batched (line 377)."""
+    frame = [SimpleNamespace(ii=SimpleNamespace(ki=SimpleNamespace(wScan=0)))
+             for _ in range(10)]
+    monkeypatch.setattr(rmc, "_frame_inputs", frame, raising=False)
+    monkeypatch.setattr(rmc, "_frame_sizeof", 1, raising=False)
+    monkeypatch.setattr(rmc, "_use_batched_sendinput", True)
+
+    class _User32:
+        @staticmethod
+        def SendInput(n, _inputs, _sz):
+            return 0  # complete failure
+
+    monkeypatch.setattr(rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False)
+
+    ok = rmc._send_frame_batched(1, 2, 3, 4, 5)
+    assert ok is False

@@ -910,3 +910,136 @@ def test_autoplay_scan_folder_shows_first_file(
     w._autoplay_scan_folder()
 
     assert "first.mid" in w.current_file_bottom_label.text()
+
+
+# ---------------------------------------------------------------------------
+# _autoplay_scan_folder — edge branches
+# ---------------------------------------------------------------------------
+def test_autoplay_scan_folder_when_running(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    class Ctrl:
+        is_running = True
+    w.playback_controller = Ctrl()
+    calls = []
+    monkeypatch.setattr(w, "add_log_message", lambda m: calls.append(m))
+    w._autoplay_scan_folder()
+    assert calls == []
+
+
+def test_autoplay_scan_folder_error(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.autoplay_folder = "/fake/path"
+    w.autoplay_file_list = ["existing.mid"]
+    w.autoplay_current_index = 0
+    class BadPath:
+        @staticmethod
+        def glob(pattern):
+            raise OSError("Permission denied")
+    monkeypatch.setattr("main_window.Path", lambda *a, **k: BadPath())
+    logs = []
+    monkeypatch.setattr(w, "add_log_message", lambda m: logs.append(m))
+    w._autoplay_scan_folder()
+    assert w.autoplay_file_list == []
+    assert w.autoplay_current_index == -1
+    assert any("Error scanning folder" in m for m in logs)
+
+def test_autoplay_jump_to_song_stopping_flag(window_factory, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QListWidgetItem
+    w = window_factory()
+    w.autoplay_file_list = ["file.mid"]
+    w.autoplay_file_listbox.addItem("file.mid")
+    item = w.autoplay_file_listbox.item(0)
+    w._autoplay_stopping = True
+    w._pending_autoplay_jump = -1
+    w._autoplay_jump_to_song(item)
+    assert w._pending_autoplay_jump == 0
+
+# ---------------------------------------------------------------------------
+# _autoplay_shuffle — running guard
+# ---------------------------------------------------------------------------
+def test_autoplay_shuffle_when_running(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    class Ctrl:
+        is_running = True
+    w.playback_controller = Ctrl()
+    calls = []
+    monkeypatch.setattr(w, "add_log_message", lambda m: calls.append(m))
+    w._autoplay_shuffle()
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# _autoplay_play_current — edge branches
+# ---------------------------------------------------------------------------
+def test_autoplay_play_current_when_closing(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._closing = True
+    result = w._autoplay_play_current()
+    assert result is False
+
+
+def test_autoplay_play_current_start_exception(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.autoplay_file_list = ["song.mid"]
+    w.autoplay_current_index = 0
+    monkeypatch.setattr(w, "add_log_message", lambda m: None)
+    monkeypatch.setattr(w, "_set_current_file_labels", lambda *a, **k: None)
+    monkeypatch.setattr(w, "_autoplay_select_tracks", lambda *a, **k: True)
+    monkeypatch.setattr(w, "gather_config", lambda: {"output_mode": "key", "use_88_key_layout": False, "tempo": 100})
+    monkeypatch.setattr("main_window.PlaybackService.prepare_playback", lambda *a, **k: ([], [], [], 1.0, None))
+    w.selected_tracks_info = [
+        (MidiTrack(index=0, name="", program_change=0, is_drum=False, notes=[], pedal_events=[]), "Auto-Detect")
+    ]
+    logs = []
+    monkeypatch.setattr("main_window.jukebox_logger.error", lambda m, **k: logs.append(m))
+
+    from types import SimpleNamespace
+    def _raise_start(*args, **kwargs):
+        raise RuntimeError("start failed")
+
+    w.playback_controller = SimpleNamespace(
+        is_running=False,
+        start=_raise_start,
+    )
+
+    result = w._autoplay_play_current()
+    assert result is False
+    assert any("Autoplay: failed to start playback" in m for m in logs)
+# ---------------------------------------------------------------------------
+# on_playback_finished — edge branches
+# ---------------------------------------------------------------------------
+def test_on_playback_finished_when_closing(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._closing = True
+    events = []
+    monkeypatch.setattr(w, "add_log_message", lambda m: events.append(m))
+    w.on_playback_finished()
+    assert "Playback process finished" not in str(events)
+
+
+def test_on_playback_finished_pending_autoplay_jump(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._autoplay_stopping = True
+    w._pending_autoplay_jump = 0
+    events = []
+    monkeypatch.setattr(w, "_do_autoplay_jump", lambda row: events.append(("jump", row)))
+    monkeypatch.setattr(w, "set_controls_enabled", lambda e: events.append(("controls", e)))
+    monkeypatch.setattr(w, "add_log_message", lambda m: None)
+    w.on_playback_finished()
+    assert ("jump", 0) in events
+    assert ("controls", True) in events
+
+
+def test_on_playback_finished_advance_highlight(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.input_mode_playlist_radio.setChecked(True)
+    w.autoplay_file_list = ["song1.mid", "song2.mid"]
+    w.autoplay_current_index = 0
+    w.autoplay_delay_spinbox.setValue(0)
+    w.autoplay_random_delay_spinbox.setValue(0)
+    events = []
+    monkeypatch.setattr(w, "add_log_message", lambda m: events.append(("log", m)))
+    monkeypatch.setattr(w, "_autoplay_play_current", lambda: True)
+    monkeypatch.setattr(w, "_update_autoplay_highlight", lambda: events.append(("highlight",)))
+    w.on_playback_finished()
+    assert ("highlight",) in events

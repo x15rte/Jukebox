@@ -563,3 +563,57 @@ def test_parse_select_then_handle_play_workflow_uses_selected_tracks_and_seek_ra
     assert w.current_notes == prepared_notes
     assert w.total_song_duration_sec == 10.0
     assert any("Preparing playback..." in m for m in logs)
+
+
+def test_on_input_mode_changed_loading_config_guard(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._loading_config = True
+    events = []
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append(("dirty",)))
+    w._on_input_mode_changed()
+    assert events == []
+
+
+def test_handle_play_start_exception(window_factory, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    w = window_factory()
+    events = []
+
+    class Ctrl:
+        is_running = False
+
+        @staticmethod
+        def start(*args, **kwargs):
+            raise RuntimeError("start failed")
+
+        @staticmethod
+        def stop_and_wait(timeout_ms=None):
+            return None
+
+    w.playback_controller = Ctrl()
+    w.selected_tracks_info = [(SimpleNamespace(notes=[]), "Left Hand")]
+    w.parsed_tracks = []
+    w.parsed_tempo_map = object()
+    cfg = {
+        "midi_file": "x.mid",
+        "output_mode": "key",
+        "use_88_key_layout": False,
+    }
+    monkeypatch.setattr(w, "gather_config", lambda: dict(cfg))
+    monkeypatch.setattr(w, "_save_config", lambda: None)
+    monkeypatch.setattr(
+        w, "set_controls_enabled", lambda enabled: events.append(("controls", enabled))
+    )
+    monkeypatch.setattr(
+        "main_window.PlaybackService.prepare_playback",
+        lambda *_a, **_k: ([make_note(1, 60, 0.0, 1.0)], [], [], 1.0, object()),
+    )
+    logs = []
+    monkeypatch.setattr("main_window.jukebox_logger.error", lambda m, **k: logs.append(m))
+
+    w.handle_play()
+
+    assert any("Failed to start playback" in m for m in logs)
+    assert ("controls", True) in events
+    assert w.stop_button.isEnabled() is False
+    assert w.play_button.isEnabled() is True
