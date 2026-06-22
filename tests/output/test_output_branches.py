@@ -48,7 +48,6 @@ def test_keyboard_backend_uses_pydirectinput_on_windows(monkeypatch):
 def test_keyboard_backend_macos_cgevent_path(monkeypatch):
     events = []
     monkeypatch.setattr(out.sys, "platform", "darwin")
-    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
     monkeypatch.setattr(out, "get_macos_vk_for_key", lambda k: 42)
     monkeypatch.setattr(
         out,
@@ -69,7 +68,6 @@ def test_keyboard_backend_macos_cgevent_path(monkeypatch):
 
 def test_keyboard_backend_macos_does_not_create_pynput_controller(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
-    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
 
     def fail_controller():
         raise AssertionError("pynput Controller must not be created on macOS KEY mode")
@@ -80,7 +78,6 @@ def test_keyboard_backend_macos_does_not_create_pynput_controller(monkeypatch):
 
     assert kb._use_macos_cgevent is True
     assert kb._kb is None
-
 
 def test_numpad_backend_delay_and_idempotent_pedal(monkeypatch):
     calls = []
@@ -120,6 +117,7 @@ def test_create_backend_linux_numpad_requires_pynput(monkeypatch):
         out.create_backend("midi_numpad")
 
 
-def test_create_backend_unknown_mode_raises():
-    with pytest.raises(ValueError, match="Unknown output mode"):
-        out.create_backend("invalid_mode")
+def test_create_backend_unknown_mode_returns_keyboard():
+    # Old code falls back to KeyboardBackend for unknown modes
+    backend = out.create_backend("invalid_mode")
+    assert isinstance(backend, out.KeyboardBackend)

@@ -3,14 +3,13 @@ from pynput.keyboard import Key
 from core.key_mapper import KeyMapper
 
 
-def test_get_key_data_returns_none_out_of_range():
+def test_get_key_data_clamps_out_of_range():
     km = KeyMapper(use_88_key_layout=False)
-    assert km.get_key_data(0) is None
-    assert km.get_key_data(35) is None
-    assert km.get_key_data(97) is None
-    assert km.get_key_data(127) is None
-    assert km.get_key_data(36) is not None
-    assert km.get_key_data(96) is not None
+    # Old mapper clamps to [min, max] range instead of returning None
+    assert km.get_key_data(0) == km.get_key_data(36)  # clamps to min
+    assert km.get_key_data(35) == km.get_key_data(36)  # clamps up
+    assert km.get_key_data(97) == km.get_key_data(96)  # clamps down
+    assert km.get_key_data(127) == km.get_key_data(96)
 
 
 def test_88_layout_has_ctrl_bands():
@@ -33,16 +32,14 @@ def test_is_black_key_detection():
     assert KeyMapper.is_black_key(60) is False
 
 
-def test_get_key_data_out_of_range_returns_none():
+def test_get_key_data_clamps_out_of_range_below():
     km = KeyMapper(use_88_key_layout=False)
-    assert km.get_key_data(20) is None
-    assert km.get_key_data(36) is not None
+    assert km.get_key_data(20) == km.get_key_data(36)  # clamps to min
 
 
-def test_get_key_data_above_max_returns_none():
+def test_get_key_data_clamps_above_max():
     km = KeyMapper(use_88_key_layout=False)
-    assert km.get_key_data(110) is None
-    assert km.get_key_data(96) is not None
+    assert km.get_key_data(110) == km.get_key_data(96)  # clamps to max
 
 
 def test_88_key_layout_has_left_and_right_ctrl_regions():

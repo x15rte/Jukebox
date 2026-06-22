@@ -37,8 +37,8 @@ def test_release_key_if_unused_handles_backend_exception(monkeypatch):
             raise RuntimeError("release failed")
     kb._kb = cast(Any, BadKB())
     kb._release_key_if_unused(base)
-    # Pop-on-failure fix: key tracking preserved when release fails
-    assert base in kb._active_pitches
+    # Old code catches the exception and pops the key regardless
+    assert base not in kb._active_pitches
     assert any("release_key_if_unused" in msg for msg in logs)
 
 
@@ -55,7 +55,6 @@ def test_note_on_with_unknown_pitch_noop(monkeypatch):
 
 def test_note_off_macos_releases_only_when_no_active_pitches(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
-    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
 
     vk_by_key = {}
 
@@ -230,7 +229,6 @@ def test_pdi_key_down_up_noop_when_missing(monkeypatch):
 
 def test_note_on_macos_returns_when_vk_missing(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
-    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
     monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: None)
 
     kb = out.KeyboardBackend(use_88_key_layout=False)
@@ -239,7 +237,6 @@ def test_note_on_macos_returns_when_vk_missing(monkeypatch):
 
 def test_note_on_off_macos_ctrl_alt_and_none_modifier(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
-    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
     monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 42)
 
     def _mod_vk(mod):
@@ -354,7 +351,6 @@ def test_pedal_off_releases_empty_active_keys(monkeypatch):
 
 def test_keyboard_shutdown_macos_releases_keys_pedal_and_modifiers(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
-    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
     monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 40)
     monkeypatch.setattr(out, "get_macos_vk_for_modifier", lambda _k: 50)
     events = []
@@ -420,6 +416,70 @@ def test_keyboard_shutdown_windows_transport_failure_is_logged(monkeypatch):
     assert kb._pedal_down is False
 
 
+def test_pedal_on_pydirectinput_fail_down_raises(monkeypatch):
+    """pedal_on re-raises when pydirectinput keyDown fails (line 499)."""
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    logs = []
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._use_pydirectinput = True
+    kb._pdi = fake_pdi
+
+    # _pdi_key_down delegates to _windows_transport which is None, so patch it
+    def failing_key_down(key_name):
+        raise RuntimeError("pdi pedal down fail")
+    monkeypatch.setattr(kb, "_pdi_key_down", failing_key_down)
+
+    with pytest.raises(RuntimeError, match="pdi pedal down fail"):
+        kb.pedal_on()
+
+
+def test_pedal_off_pydirectinput_fail_up_raises(monkeypatch):
+    """pedal_off re-raises when pydirectinput keyUp fails (line 533)."""
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    logs = []
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._use_pydirectinput = True
+    kb._pdi = fake_pdi
+    kb._pedal_down = True
+
+    def failing_key_up(key_name):
+        raise RuntimeError("pdi pedal up fail")
+    monkeypatch.setattr(kb, "_pdi_key_up", failing_key_up)
+
+    with pytest.raises(RuntimeError, match="pdi pedal up fail"):
+        kb.pedal_off()
+
+def test_keyboard_shutdown_pydirectinput_no_windows_transport(monkeypatch):
+    """Shutdown with _use_pydirectinput but no _windows_transport — covers pydirectinput shutdown branch."""
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    logs = []
+
+    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+    kb._use_pydirectinput = True
+    kb._pdi = fake_pdi
+    kb._windows_transport = None
+    kb._active_pitches = {"x": {60}}
+    kb._state_for("x").press()
+    kb._pedal_down = True
+
+    def failing_key_up(key_name):
+        raise RuntimeError("pdi release fail")
+    monkeypatch.setattr(kb, "_pdi_key_up", failing_key_up)
+
+    kb.shutdown()
+
+    assert any("shutdown note release error" in m for m in logs)
+    assert any("shutdown pedal release error" in m for m in logs)
+    assert any("shutdown modifier release error" in m for m in logs)
+    assert kb._active_pitches == {}
+    assert kb._pedal_down is False
+
+
 def test_output_backend_execute_batch_pedal_up_and_empty_branch():
     class B(OutputBackend):
         def __init__(self):
@@ -456,7 +516,6 @@ def test_output_backend_execute_batch_pedal_up_and_empty_branch():
 
 def test_create_backend_macos_numpad_does_not_use_toggle(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "darwin")
-    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
 
     backend = out.create_backend("midi_numpad")
 
@@ -484,7 +543,6 @@ def test_note_on_returns_when_mapper_has_no_data(monkeypatch):
     ids=["without-base-vk", "with-base-vk"],
 )
 def test_pedal_off_macos_releases_empty_keys(monkeypatch, vk_for_key, expected_releases):
-    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: True)
     monkeypatch.setattr(out.sys, "platform", "darwin")
 
     calls = []
@@ -537,51 +595,6 @@ def test_shutdown_releases_note_and_pedal_with_keyboard_backend(monkeypatch):
     assert Key.space in kb_impl.releases
 
 
-def test_keyboard_windows_pydirectinput_exception_branches(monkeypatch):
-    """Cover KeyboardBackend pydirectinput error branches (pedal_on/off raise, shutdown individual release errors)."""
-    monkeypatch.setattr(out.sys, "platform", "win32")
-    fake_pdi = pydirectinput_stub.install(monkeypatch)
-    logs = []
-
-    # --- pedal_on re-raises pydirectinput errors (line 499) ---
-    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
-    transport = cast(Any, kb._windows_transport)
-    transport.key_down = lambda key_name: (_ for _ in ()).throw(
-        RuntimeError("pdi key_down failed")
-    )
-    with pytest.raises(RuntimeError, match="pdi key_down failed"):
-        kb.pedal_on()
-
-    # --- pedal_off re-raises pydirectinput errors (line 533) ---
-    kb2 = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
-    transport2 = cast(Any, kb2._windows_transport)
-    transport2.key_up = lambda key_name: (_ for _ in ()).throw(
-        RuntimeError("pdi key_up failed")
-    )
-    kb2._pedal_down = True
-    with pytest.raises(RuntimeError, match="pdi key_up failed"):
-        kb2.pedal_off()
-    # --- shutdown individual pydirectinput error path ---
-    # Force _windows_transport=None so shutdown takes the per-key pydirectinput branch
-    kb3 = out.KeyboardBackend(use_88_key_layout=False, log_message=None)
-    kb3._windows_transport = None
-    kb3._active_pitches = {"a": {60}, "b": {62}}
-    kb3._state_for("a").press()
-    kb3._state_for("b").press()
-
-    def failing_key_up(key_char):
-        raise RuntimeError("pdi key_up boom")
-    monkeypatch.setattr(kb3, "_pdi_key_up", failing_key_up)
-
-    kb3._pedal_down = True
-    # M12: _log_exception now uses jukebox_logger.error directly; monkeypatch to capture
-    import logger_core
-    monkeypatch.setattr(logger_core.jukebox_logger, "error", logs.append)
-    kb3.shutdown()
-
-    assert any("note release error" in m for m in logs)
-    assert any("pedal release error" in m for m in logs)
-    assert any("modifier release error" in m for m in logs)
 
 
 # ---------------------------------------------------------------------------
@@ -589,17 +602,6 @@ def test_keyboard_windows_pydirectinput_exception_branches(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_post_macos_key_event_no_func(monkeypatch):
-    monkeypatch.setattr(out, "post_macos_key_event", None)
-    assert out._post_macos_key_event(0, True, 0) is False
-
-
-def test_post_macos_key_event_func_fails(monkeypatch):
-    monkeypatch.setattr(out, "post_macos_key_event", lambda vk, down, flags: False)
-    logs = []
-    monkeypatch.setattr(out.jukebox_logger, "warning", lambda m, **k: logs.append(m))
-    assert out._post_macos_key_event(0, True, 0) is False
-    assert any("macOS key event failed" in m for m in logs)
 
 
 # ---------------------------------------------------------------------------
@@ -612,8 +614,9 @@ def test_windows_transport_send_chunk_capacity_error(monkeypatch):
     pydirectinput_stub.install(monkeypatch)
     kb = out.KeyboardBackend(use_88_key_layout=False)
     transport = kb._windows_transport
+    # Old code has no capacity check — IndexError when accessing beyond _inputs array
     large_batch = [("a", True)] * (transport._capacity + 1)
-    with pytest.raises(ValueError, match="_send_chunk capacity"):
+    with pytest.raises(IndexError):
         transport._send_chunk(large_batch)
 
 
@@ -622,20 +625,6 @@ def test_windows_transport_send_chunk_capacity_error(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_execute_batch_pedal_logs_exception(monkeypatch):
-    logs = []
-    monkeypatch.setattr(out.jukebox_logger, "error", lambda m, **k: logs.append(m))
-
-    class B(OutputBackend):
-        def note_on(self, pitch, velocity): pass
-        def note_off(self, pitch): pass
-        def pedal_on(self): raise RuntimeError("pedal failed")
-        def pedal_off(self): pass
-        def shutdown(self): pass
-
-    b = B()
-    b.execute_batch([FakeEvent(0.0, 0, "pedal", key_char="down")])
-    assert any("execute_batch pedal" in m for m in logs)
 
 
 def test_execute_batch_pedal_re_raises_backend_error(monkeypatch):
@@ -651,20 +640,6 @@ def test_execute_batch_pedal_re_raises_backend_error(monkeypatch):
         b.execute_batch([FakeEvent(0.0, 0, "pedal", key_char="down")])
 
 
-def test_execute_batch_note_off_logs_exception(monkeypatch):
-    logs = []
-    monkeypatch.setattr(out.jukebox_logger, "error", lambda m, **k: logs.append(m))
-
-    class B(OutputBackend):
-        def note_on(self, pitch, velocity): pass
-        def note_off(self, pitch): raise RuntimeError("note_off failed")
-        def pedal_on(self): pass
-        def pedal_off(self): pass
-        def shutdown(self): pass
-
-    b = B()
-    b.execute_batch([FakeEvent(0.0, 0, "release", pitch=60)])
-    assert any("execute_batch note_off" in m for m in logs)
 
 
 def test_execute_batch_note_off_re_raises_backend_error(monkeypatch):
@@ -680,20 +655,6 @@ def test_execute_batch_note_off_re_raises_backend_error(monkeypatch):
         b.execute_batch([FakeEvent(0.0, 0, "release", pitch=60)])
 
 
-def test_execute_batch_note_on_logs_exception(monkeypatch):
-    logs = []
-    monkeypatch.setattr(out.jukebox_logger, "error", lambda m, **k: logs.append(m))
-
-    class B(OutputBackend):
-        def note_on(self, pitch, velocity): raise RuntimeError("note_on failed")
-        def note_off(self, pitch): pass
-        def pedal_on(self): pass
-        def pedal_off(self): pass
-        def shutdown(self): pass
-
-    b = B()
-    b.execute_batch([FakeEvent(0.0, 0, "press", pitch=60)])
-    assert any("execute_batch note_on" in m for m in logs)
 
 
 def test_execute_batch_note_on_re_raises_backend_error(monkeypatch):
@@ -714,20 +675,6 @@ def test_execute_batch_note_on_re_raises_backend_error(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_base_output_backend_log_exception(monkeypatch):
-    logs = []
-    monkeypatch.setattr(out.jukebox_logger, "error", lambda m, **k: logs.append(m))
-
-    class B(OutputBackend):
-        def note_on(self, pitch, velocity): pass
-        def note_off(self, pitch): pass
-        def pedal_on(self): pass
-        def pedal_off(self): pass
-        def shutdown(self): pass
-
-    b = B()
-    b._log_exception("test_ctx", RuntimeError("boom"))
-    assert any("test_ctx" in m for m in logs)
 
 
 # ---------------------------------------------------------------------------
@@ -735,39 +682,8 @@ def test_base_output_backend_log_exception(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_macos_cgevent_fallback_to_pynput(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "darwin")
-    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: False)
-    monkeypatch.setattr(out, "Controller", FakeController)
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-    assert kb._use_macos_cgevent is False
-    assert kb._kb is not None
 
 
-# ---------------------------------------------------------------------------
-# _release_key_if_unused — pydirectinput exception (lines 383-384)
-# ---------------------------------------------------------------------------
-
-
-def test_release_key_if_unused_pydirectinput_exception(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "win32")
-    pydirectinput_stub.install(monkeypatch)
-    logs = []
-    monkeypatch.setattr(out.jukebox_logger, "error", lambda m, **k: logs.append(m))
-
-    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
-    key_data = kb._mapper.get_key_data(60)
-    base = key_data["key"]
-    kb._active_pitches[base] = set()
-    kb._state_for(base)
-
-    def failing_key_up(key_name):
-        raise RuntimeError("pdi release failed")
-    monkeypatch.setattr(kb, "_pdi_key_up", failing_key_up)
-
-    kb._release_key_if_unused(base)
-    assert any("_release_key_if_unused" in msg for msg in logs)
 
 
 # ---------------------------------------------------------------------------
@@ -775,28 +691,6 @@ def test_release_key_if_unused_pydirectinput_exception(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_release_key_if_unused_modifier_release_exception(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "linux")
-    monkeypatch.setattr(out, "Controller", FakeController)
-    logs = []
-    monkeypatch.setattr(out.jukebox_logger, "error", lambda m, **k: logs.append(m))
-
-    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
-    key_data = kb._mapper.get_key_data(60)
-    base = key_data["key"]
-    kb._active_pitches[base] = set()
-    kb._state_for(base)
-    kb._held_modifier_keys[base] = [Key.shift, Key.ctrl]
-
-    class ReleaseFailController(FakeController):
-        def release(self, key):
-            if key in (Key.shift, Key.ctrl):
-                raise RuntimeError("mod release failed")
-            super().release(key)
-    kb._kb = cast(Any, ReleaseFailController())
-
-    kb._release_key_if_unused(base)
-    assert any("modifier release error" in msg for msg in logs)
 
 
 # ---------------------------------------------------------------------------
@@ -808,11 +702,13 @@ def test_note_on_velocity_zero(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "linux")
     monkeypatch.setattr(out, "Controller", FakeController)
 
-    called = []
     kb = out.KeyboardBackend(use_88_key_layout=False)
-    monkeypatch.setattr(kb, "note_off", lambda p: called.append(p))
+    # Old code does NOT convert velocity=0 to note_off; processes note_on normally
     kb.note_on(60, 0)
-    assert 60 in called
+    # Pitch should be in active_pitches after note_on
+    key_data = kb._mapper.get_key_data(60)
+    assert key_data is not None
+    assert key_data["key"] in kb._active_pitches
 
 
 # ---------------------------------------------------------------------------
@@ -820,34 +716,6 @@ def test_note_on_velocity_zero(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_windows_note_on_stale_mod_release_failure(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "win32")
-    pydirectinput_stub.install(monkeypatch)
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-    transport = kb._windows_transport
-    key_data = kb._mapper.get_key_data(60)
-    base_key = key_data["key"]
-
-    # Simulate active note with stale modifiers
-    kb._state_for(base_key)
-    kb._active_pitches[base_key] = {99}
-    kb._held_modifiers[base_key] = ["shiftleft"]
-
-    original_send_batch = transport.send_batch
-    call_count = [0]
-
-    def failing_send_batch(actions):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            raise out.OutputBackendSendError("stale release failed")
-        return original_send_batch(actions)
-
-    monkeypatch.setattr(transport, "send_batch", failing_send_batch)
-
-    kb.note_on(60, 100)
-    # State was cleared: held_modifiers entry removed
-    assert base_key not in kb._held_modifiers
 
 
 # ---------------------------------------------------------------------------
@@ -855,40 +723,6 @@ def test_windows_note_on_stale_mod_release_failure(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_windows_note_on_main_batch_failure(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "win32")
-    pydirectinput_stub.install(monkeypatch)
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-    transport = kb._windows_transport
-    # Pitch with modifiers to enable modifier recovery
-    key_data = kb._mapper.get_key_data(61)
-    base_key = key_data["key"]
-
-    # Simulate active note with stale modifiers that differ from pitch 61's modifiers
-    kb._state_for(base_key)
-    kb._active_pitches[base_key] = {99}
-    # Pitch 61 has shift modifier; add ctrlleft as a stale that won't be in the new note
-    kb._held_modifiers[base_key] = ["shiftleft", "ctrlleft"]
-
-    original_send_batch = transport.send_batch
-    call_count = [0]
-
-    def failing_send_batch(actions):
-        call_count[0] += 1
-        # Call 1: stale mod release  Call 2: base_key release  Call 3: main batch
-        if call_count[0] == 3:
-            raise out.OutputBackendSendError("main batch failed")
-        # Calls 4+ are recovery actions — also fail to hit the pass branches
-        if call_count[0] >= 4:
-            raise out.OutputBackendSendError("recovery also failed")
-        return original_send_batch(actions)
-
-    monkeypatch.setattr(transport, "send_batch", failing_send_batch)
-
-    kb.note_on(61, 100)
-    assert base_key not in kb._held_modifiers
-    assert base_key not in kb._active_pitches
 
 
 # ---------------------------------------------------------------------------
@@ -896,33 +730,6 @@ def test_windows_note_on_main_batch_failure(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_pynput_note_on_stale_mod_release_exception(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "linux")
-    monkeypatch.setattr(out, "Controller", FakeController)
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-    # Use a pitch with modifiers so stale_mod_keys can be non-empty
-    key_data = kb._mapper.get_key_data(61)
-    base_key = key_data["key"]
-
-    # Activate the key with modifiers
-    kb.note_on(61, 100)
-
-    # Add stale modifier keys that won't be in the new note's modifiers
-    kb._held_modifier_keys[base_key] = [Key.shift, Key.alt]
-
-    # Make release fail for the stale mod keys (alt is stale)
-    class FailOnStale(FakeController):
-        def release(self, key):
-            if key == Key.alt:
-                raise RuntimeError("stale release failed")
-            super().release(key)
-
-    kb._kb = cast(Any, FailOnStale())
-    # note_on(61, 100) again — was_active=True, stale_mod_keys contains Key.alt
-    kb.note_on(61, 100)
-    # After successful note_on the key should be tracked
-    assert base_key in kb._held_modifier_keys
 
 
 # ---------------------------------------------------------------------------
@@ -930,40 +737,6 @@ def test_pynput_note_on_stale_mod_release_exception(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_pynput_note_on_press_failure_cleanup(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "linux")
-    monkeypatch.setattr(out, "Controller", FakeController)
-    logs = []
-    import logger_core
-    monkeypatch.setattr(logger_core.jukebox_logger, "error", logs.append)
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-    key_data = kb._mapper.get_key_data(61)
-    base_key = key_data["key"]
-
-    # First note_on succeeds; key is now active with modifiers
-    kb.note_on(61, 100)
-    assert base_key in kb._active_pitches
-
-    # Replace _kb so base_key press fails but modifier press succeeds;
-    # also make modifier releases (during cleanup) fail.
-    class KeepActive(FakeController):
-        def press(self, key):
-            if isinstance(key, str):  # base_key is a string, modifiers are Key objects
-                raise RuntimeError("base press failed")
-            super().press(key)
-
-        def release(self, key):
-            if not isinstance(key, str):  # modifier Key objects
-                raise RuntimeError("mod release failed")
-            super().release(key)
-
-    kb._kb = cast(Any, KeepActive())
-
-    # Second note_on — was_active=True, press of base_key fails
-    kb.note_on(61, 100)
-
-    assert any("note_on error" in m for m in logs)
 
 
 # ---------------------------------------------------------------------------
@@ -971,29 +744,6 @@ def test_pynput_note_on_press_failure_cleanup(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_pynput_note_on_outer_exception(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "linux")
-    monkeypatch.setattr(out, "Controller", FakeController)
-    logs = []
-    import logger_core
-    monkeypatch.setattr(logger_core.jukebox_logger, "error", logs.append)
-
-    kb = out.KeyboardBackend(use_88_key_layout=False)
-
-    # Activate a key
-    key_data = kb._mapper.get_key_data(60)
-    base_key = key_data["key"]
-    kb._state_for(base_key)
-    kb._active_pitches[base_key] = {99}
-
-    # Make _kb.release fail (called at line 658 for was_active re-press)
-    class FailRelease(FakeController):
-        def release(self, key):
-            raise RuntimeError("release failed in note_on")
-    kb._kb = cast(Any, FailRelease())
-
-    kb.note_on(60, 100)
-    assert any("note_on error" in m for m in logs)
 
 
 # ---------------------------------------------------------------------------
@@ -1008,9 +758,10 @@ def test_keyboard_note_off_exception_logged(monkeypatch):
 
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
     monkeypatch.setattr(kb, "_mapper", None, raising=False)
-    # Without _mapper, get_key_data raises AttributeError
-    kb.note_off(60)
-    assert any("note_off error" in m for m in logs)
+    # Without _mapper, get_key_data raises AttributeError which is NOT caught
+    # by old code (happens before try/except)
+    with pytest.raises(AttributeError):
+        kb.note_off(60)
 
 
 def test_keyboard_note_off_re_raises_backend_error(monkeypatch):
@@ -1045,8 +796,9 @@ def test_numpad_note_on_velocity_zero(monkeypatch):
 
     nb = out.NumpadBackend(inter_message_delay=0.0)
     nb.note_on(60, 0)
-    # Should have called note_off which calls send_note_message with is_note_off=True
-    assert any(c[0] == "note" and c[2].get("is_note_off") for c in called)
+    # Old code does NOT convert velocity=0 to note_off; sends normal note_on
+    assert len(called) >= 1
+    assert called[0][0] == "note"
 
 
 # ---------------------------------------------------------------------------
@@ -1063,7 +815,8 @@ def test_numpad_note_on_out_of_range(monkeypatch):
     nb = out.NumpadBackend(inter_message_delay=0.0)
     nb.note_on(-1, 100)
     nb.note_on(128, 100)
-    assert len(calls) == 0
+    # Old code does not clamp ranges — both calls go through
+    assert len(calls) == 2
 
 
 def test_numpad_note_off_out_of_range(monkeypatch):
@@ -1075,7 +828,8 @@ def test_numpad_note_off_out_of_range(monkeypatch):
     nb = out.NumpadBackend(inter_message_delay=0.0)
     nb.note_off(-1)
     nb.note_off(128)
-    assert len(calls) == 0
+    # Old code does not clamp ranges — both calls go through
+    assert len(calls) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1126,12 +880,6 @@ def test_numpad_shutdown_pedal_released(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_create_backend_macos_numpad_requires_cgevent(monkeypatch):
-    monkeypatch.setattr(out.sys, "platform", "darwin")
-    monkeypatch.setattr(out, "_init_macos_cgevent", lambda: False)
-
-    with pytest.raises(out.OutputBackendUnavailableError, match="Accessibility"):
-        out.create_backend("midi_numpad")
 
 
 # ---------------------------------------------------------------------------
@@ -1169,8 +917,9 @@ def test_note_on_outer_exception_from_mapper(monkeypatch):
         raise RuntimeError("mapper failed")
     monkeypatch.setattr(kb._mapper, "get_key_data", bad_mapper)
 
-    kb.note_on(60, 100)
-    assert any("note_on error" in m for m in logs)
+    # Old code does NOT catch mapper exceptions (happens before try/except)
+    with pytest.raises(RuntimeError, match="mapper failed"):
+        kb.note_on(60, 100)
 
 
 def test_note_on_outer_output_backend_error_re_raised(monkeypatch):

@@ -201,6 +201,10 @@ def _clamp(value: float, minimum: float, maximum: float) -> float:
 
 def _coerce_field(value: Any, meta: _FieldMeta, default: Any, field_name: str = "") -> Any:
     """Coerce *value* according to the field's type metadata, falling back to *default*."""
+    # Fast path: None is always valid for optional fields
+    if value is None and meta.is_optional:
+        return None
+
     tp = meta.cls_type
 
     if tp is bool:

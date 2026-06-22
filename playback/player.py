@@ -167,7 +167,12 @@ class EventCompiler:
         if style is None:
             return "none"
         if style == "original" and not config.get("raw_pedal_events"):
-            jukebox_logger.info(f"No raw pedal events in MIDI; falling back from '{style}' to 'hybrid'")
+            jukebox_logger.warning(
+                "Pedal style is 'original' but no sustain pedal (CC64) events were found "
+                "in the selected tracks. Falling back to 'hybrid'. "
+                "If your MIDI file has sustain pedal data, check that the correct "
+                "track is selected and the pedal events are CC64."
+            )
             return "hybrid"
         return style
 
@@ -585,8 +590,10 @@ class Player(QObject):
         # Track currently active MIDI pitches for the visualizer; updated in
         # batches and emitted as a list via visualizer_updated.
         self._active_pitches: Set[int] = set()
+        self._pedal_down: bool = False
         self._paused_pitches: Optional[Set[int]] = None
         self._pitch_velocities: Dict[int, int] = {}
+        self._paused_pedal: bool = False
 
     # -- public API (called from main thread) --
 
@@ -728,6 +735,11 @@ class Player(QObject):
                     self.backend.note_on(pitch, vel)
                 self._active_pitches = self._paused_pitches
                 self._paused_pitches = None
+                # Restore pedal if it was down when paused
+                if self._paused_pedal:
+                    self.backend.pedal_on()
+                    self._pedal_down = True
+                    self._paused_pedal = False
                 self.visualizer_updated.emit(list(self._active_pitches))
             else:
                 for pitch in self._active_pitches:
@@ -775,6 +787,10 @@ class Player(QObject):
                             for pitch in self._paused_pitches:
                                 self.backend.note_off(pitch)
                             self._active_pitches.clear()
+                            self._paused_pedal = self._pedal_down
+                            if self._pedal_down:
+                                self.backend.pedal_off()
+                                self._pedal_down = False
                             self.visualizer_updated.emit([])
                         paused_this_iter = True
                 if paused_this_iter:
@@ -873,6 +889,10 @@ class Player(QObject):
                     self._active_pitches.add(e.pitch)
                     state_changed = True
                 self._pitch_velocities[e.pitch] = e.velocity
+            # Track pedal state from events
+            for e in events:
+                if e.action == "pedal":
+                    self._pedal_down = (e.key_char == "down")
 
             if state_changed:
                 self.visualizer_updated.emit(list(self._active_pitches))

@@ -206,6 +206,21 @@ def test_restore_backend_state_from_active_pitches():
     assert ("note_on", (64, 90)) in backend.calls
 
 
+def test_restore_backend_state_restores_pedal():
+    """_restore_backend_state calls pedal_on when _paused_pedal is True (lines 739-742)."""
+    backend = FakeBackend()
+    p = Player([], backend, {}, total_duration=1.0)
+    p._paused_pitches = {60}
+    p._paused_pedal = True
+    p._pitch_velocities[60] = 95
+
+    p._restore_backend_state()
+
+    assert ("pedal_on", None) in backend.calls
+    assert p._pedal_down is True
+    assert p._paused_pedal is False
+
+
 def test_restore_backend_state_default_velocity():
     """_restore_backend_state uses velocity 100 when pitch not in _pitch_velocities (lines 727/734)."""
     backend = FakeBackend()

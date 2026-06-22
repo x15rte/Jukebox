@@ -46,6 +46,9 @@ class PlaybackController(QObject):
         # yet fully finished. Used to avoid starting a new run in the brief
         # window where the previous one is still shutting down.
         self._stopping: bool = False
+        # Seek offset stored when user seeks while player is not running;
+        # applied as start_offset on the next start() call.
+        self._seek_offset: float = 0.0
 
     # ------------------------------------------------------------------
     # Properties
@@ -108,6 +111,11 @@ class PlaybackController(QObject):
             return False
 
         self._total_duration = total_duration
+
+        # Apply any pending seek offset as start_offset.
+        if self._seek_offset > 0:
+            config = {**config, "start_offset": self._seek_offset}
+            self._seek_offset = 0.0
 
         # Small inter-message delay for midi_numpad spreads RMC bursts so the game
         # can process input smoothly (avoids stutter from back-to-back frames).
@@ -276,10 +284,16 @@ class PlaybackController(QObject):
             self._set_state("paused" if now_paused else "playing")
 
     def seek(self, target_time: float) -> None:
-        """Seek to a given time in seconds if a player is active."""
-        if self._player is not None:
-            self._player.seek(target_time)
+        """Seek to a given time in seconds.
 
+        If the player is actively running or paused, forwards the seek
+        directly.  Otherwise stores the offset so it is applied as
+        *start_offset* on the next *start()* call.
+        """
+        if self._player is not None and self.is_running:
+            self._player.seek(target_time)
+        elif not self.is_running:
+            self._seek_offset = max(0.0, target_time)
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------

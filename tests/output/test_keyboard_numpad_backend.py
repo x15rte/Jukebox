@@ -51,16 +51,16 @@ def test_keyboard_backend_overlapping_same_base_key(monkeypatch):
 
     kb.note_on(60, 100)
     kb.note_on(61, 100)
-    # note_on(61) releases 't' for polyphony (was_active=True) then re-presses it
-    assert ctrl.releases.count(base_key) == 1
+    # Old code for pynput does NOT release/re-press on overlap (was_active ignored)
+    assert ctrl.releases.count(base_key) == 0
 
     kb.note_off(60)
     # note_off(60) should NOT add another release — pitch 61 is still active
-    assert ctrl.releases.count(base_key) == 1
+    assert ctrl.releases.count(base_key) == 0
 
     kb.note_off(61)
     # now release should happen
-    assert ctrl.releases.count(base_key) == 2
+    assert ctrl.releases.count(base_key) == 1
 
 
 def test_keyboard_backend_pedal_and_shutdown(monkeypatch):
@@ -111,11 +111,12 @@ def test_keyboard_backend_note_on_off_exact_key_and_modifier_sequence(monkeypatc
     assert key_data is not None
     base_key = key_data["key"]
 
-    # Modifiers are now pressed individually (not via context manager) and
-    # released in note_off via _release_key_if_unused.
-    assert ctrl.pressed_modifiers == []  # no longer uses context manager
-    assert ctrl.presses == [out.Key.shift, base_key]  # modifier pressed first
-    assert ctrl.releases == [base_key, out.Key.shift]  # base key then modifier
+    # Old code uses `with self._kb.pressed(*modifiers): context manager for pynput.
+    # Modifier is pressed by context manager enter (logged in pressed_modifiers),
+    # base key pressed inside, modifier released on context manager exit (not tracked by FakeController).
+    assert ctrl.pressed_modifiers == [(out.Key.shift,)]
+    assert ctrl.presses == [base_key]  # only base key explicitly pressed
+    assert ctrl.releases == [base_key]  # only base key released in note_off
 
 
 def test_output_backend_execute_batch_matches_in_game_event_order(monkeypatch):
@@ -196,15 +197,15 @@ def test_windows_key_backend_note_sequences(monkeypatch):
     kb.note_on(21, 100)
     kb.note_off(21)
 
+    # Single batch per note_on: mod(s) down + base down + mod(s) up
+    # (matches pre-2af9230 working behavior — one SendInput call)
     assert fake_pdi.sent_batches == [
-        [(normal_base, True)],            # note_on(60)
-        [(normal_base, False)],           # note_off(60) - key_up
-        [("shiftleft", True), (shift_base, True)],  # note_on(61) - mods stay held
-        [(shift_base, False)],            # note_off(61) - key_up base
-        [("shiftleft", False)],           # note_off(61) - key_up modifier
-        [("ctrlleft", True), (ctrl_base, True)],    # note_on(21) - mods stay held
-        [(ctrl_base, False)],             # note_off(21) - key_up base
-        [("ctrlleft", False)],            # note_off(21) - key_up modifier
+        [(normal_base, True)],                                    # note_on(60)
+        [(normal_base, False)],                                   # note_off(60)
+        [("shiftleft", True), (shift_base, True), ("shiftleft", False)],  # note_on(61)
+        [(shift_base, False)],                                    # note_off(61)
+        [("ctrlleft", True), (ctrl_base, True), ("ctrlleft", False)],     # note_on(21)
+        [(ctrl_base, False)],                                     # note_off(21)
     ]
     assert fake_pdi.down == [
         normal_base,
@@ -215,10 +216,10 @@ def test_windows_key_backend_note_sequences(monkeypatch):
     ]
     assert fake_pdi.up == [
         normal_base,
-        shift_base,
-        "shiftleft",
-        ctrl_base,
-        "ctrlleft",
+        "shiftleft",      # released during note_on(61)
+        shift_base,        # released during note_off(61)
+        "ctrlleft",        # released during note_on(21)
+        ctrl_base,         # released during note_off(21)
     ]
 
 
@@ -240,9 +241,66 @@ def test_windows_key_backend_overlapping_same_base_release(monkeypatch):
     assert fake_pdi.up.count(base) == 1
     assert sleeps == [out._WINDOWS_KEY_REPRESS_DELAY]
 
-    kb.note_off(37)
+def test_windows_key_backend_release_stale_modifier_on_overlap(monkeypatch):
+    """When a shifted note overlapped with an unshifted note on the same base key,
+    press-and-release ensures modifiers are not held across notes — the game
+    captures the pitch at key-down time."""
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
 
-    assert fake_pdi.up.count(base) == 2
+    # Pitch 60 (C4) maps to base key 't', no modifiers.
+    # Pitch 61 (C#4) maps to base key 't', modifier [Key.shift] → "shiftleft".
+    base = "t"
+    mod = "shiftleft"
+
+    # 1. Press unshifted note — just base key down
+    kb.note_on(60, 100)
+    assert fake_pdi.sent_batches[-1] == [(base, True)]
+    assert fake_pdi.down.count(base) == 1
+
+    # 2. Press shifted note (overlapping — same base key)
+    #    Press-and-release: base released, shift down, base down, shift up
+    kb.note_on(61, 100)
+    # Verify the release + press-and-release sequence happened
+    assert fake_pdi.down.count(mod) == 1  # shift was pressed
+    assert fake_pdi.down.count(base) == 2  # base pressed twice (first + re-press)
+    assert fake_pdi.up.count(mod) >= 1, "Shift should have been released"
+    # 3. Release shifted note — unshifted note (60) is still active so base stays
+    up_before = len(fake_pdi.up)
+    kb.note_off(61)
+    # No new release events should have been added
+    assert len(fake_pdi.up) == up_before, "note_off(61) should not release anything"
+
+    # 4. Release the final note — base key released
+    fake_pdi.up.clear()
+    kb.note_off(60)
+    assert fake_pdi.up.count(base) == 1
+
+
+def test_windows_key_backend_pedal_press_and_release_holds_key(monkeypatch):
+    """With press-and-release, modifiers are never held. Pedal holds the base
+    key but the modifier is already released during note_on."""
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    base = "t"
+    mod = "shiftleft"
+
+    kb.pedal_on()
+    kb.note_on(61, 100)  # C#4 — shift + base (press-and-release)
+
+    # Shift was already released during note_on — not held by pedal
+    assert fake_pdi.up.count(mod) >= 1, \
+        "Shift should have been released during note_on"
+
+    # Release shifted note while pedal is down — key stays held by pedal
+    kb.note_off(61)
+
+    # Key is still physically held by the pedal
+    kb.pedal_off()
+    assert fake_pdi.up.count(base) == 1
 
 
 def test_windows_key_backend_execute_batch_inserts_release_press_gap(monkeypatch):
@@ -290,8 +348,8 @@ def test_windows_key_backend_execute_batch_routes_pedals(monkeypatch):
         [("space", False)],
     ]
 
-
 def test_windows_key_backend_pedal_idempotency_and_shutdown(monkeypatch):
+
     monkeypatch.setattr(out.sys, "platform", "win32")
     fake_pdi = pydirectinput_stub.install(monkeypatch)
 
@@ -312,6 +370,7 @@ def test_windows_key_backend_pedal_idempotency_and_shutdown(monkeypatch):
     kb.pedal_on()
     kb.shutdown()
 
+    # Old code shutdown releases active pitches, pedal, and ALL three modifiers
     assert fake_pdi.sent_batches[-1] == [
         (base, False),
         ("space", False),
@@ -321,9 +380,6 @@ def test_windows_key_backend_pedal_idempotency_and_shutdown(monkeypatch):
     ]
     assert base in fake_pdi.up
     assert fake_pdi.up.count("space") == 2
-    assert "shiftleft" in fake_pdi.up
-    assert "ctrlleft" in fake_pdi.up
-    assert "altleft" in fake_pdi.up
 
 
 def test_windows_key_backend_missing_pydirectinput_is_unavailable(monkeypatch):
@@ -335,29 +391,30 @@ def test_windows_key_backend_missing_pydirectinput_is_unavailable(monkeypatch):
 
 
 def test_windows_key_backend_send_failure_handled(monkeypatch):
-    """Send failure is caught internally; modifiers cleaned up, no leak."""
+    """Send failure — old code leaves pitch in active_pitches (added before send)."""
     monkeypatch.setattr(out.sys, "platform", "win32")
     fake_pdi = pydirectinput_stub.install(monkeypatch)
     kb = out.KeyboardBackend(use_88_key_layout=False)
 
     fake_pdi.send_exception = RuntimeError("send failed")
 
-    # Error is caught internally; no exception propagates
-    kb.note_on(60, 100)
-    # State should be clean — no leaked press or modifier tracking
-    assert kb._active_pitches == {}
-    assert kb._held_modifiers == {}
+    # Error propagates as OutputBackendSendError; state is NOT rolled back
+    # because active_pitches is updated before send_batch
+    with pytest.raises(out.OutputBackendSendError):
+        kb.note_on(60, 100)
+    # Pitch remains in active_pitches after send failure
+    assert kb._active_pitches != {}
 
 
 def test_windows_key_backend_partial_send_handled(monkeypatch):
-    """Partial send (result=0) is caught internally; no leak."""
+    """Partial send (result=0) — old code raises and leaves pitch in active_pitches."""
     monkeypatch.setattr(out.sys, "platform", "win32")
     fake_pdi = pydirectinput_stub.install(monkeypatch)
     kb = out.KeyboardBackend(use_88_key_layout=False)
 
     fake_pdi.send_result = 0
 
-    # Error is caught internally; no exception propagates
-    kb.note_on(60, 100)
-    assert kb._active_pitches == {}
-    assert kb._held_modifiers == {}
+    # Error propagates; state is NOT rolled back
+    with pytest.raises(out.OutputBackendSendError):
+        kb.note_on(60, 100)
+    assert kb._active_pitches != {}

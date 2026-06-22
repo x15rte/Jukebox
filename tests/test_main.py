@@ -3,6 +3,7 @@ from types import ModuleType
 from typing import Any, cast
 import runpy
 import sys
+import os
 
 import main as app_main
 
@@ -122,7 +123,7 @@ def _shared_mem_test(monkeypatch, tmp_path, scenario, expected_events):
         def isAttached(self):
             return self._attached
         def data(self):
-            return bytearray(4)
+            return None if self._scenario == "attached_data_none" else bytearray(4)
 
     monkeypatch.setattr(app_main, "QSharedMemory", FakeSharedMem)
     monkeypatch.setattr(app_main, "QApplication", FakeApp)
@@ -132,7 +133,7 @@ def _shared_mem_test(monkeypatch, tmp_path, scenario, expected_events):
     monkeypatch.setattr(app_main.theme, "apply_global_palette", lambda _app: None)
     monkeypatch.setattr(app_main, "set_app_user_model_id", lambda _id: events.append("app_id"))
     monkeypatch.setattr(app_main.sys, "exit", lambda _code: events.append("exit"))
-    monkeypatch.setattr(app_main, "os", type("OsMock", (), {"kill": lambda *a: (_ for _ in ()).throw(ProcessLookupError()) if scenario == "already_exists_kill_fails" else None})())
+    monkeypatch.setattr(app_main, "os", type("OsMock", (), {"getpid": os.getpid, "kill": lambda *a: (_ for _ in ()).throw(ProcessLookupError()) if scenario == "already_exists_kill_fails" else None})())
 
     app_main.main()
 
@@ -163,6 +164,20 @@ def test_main_shared_mem_other_error(monkeypatch, tmp_path):
     """Shared memory non-AlreadyExists error continues without guard."""
     _shared_mem_test(monkeypatch, tmp_path, "other_error", [
         "app_id", "app_init", "window_init", "show",
+    ])
+
+
+def test_main_shared_mem_first_try_success(monkeypatch, tmp_path):
+    """Shared memory created on first try; writes PID."""
+    _shared_mem_test(monkeypatch, tmp_path, "first_try_success", [
+        "app_id", "app_init", "window_init", "show", "exit",
+    ])
+
+
+def test_main_shared_mem_attached_data_none(monkeypatch, tmp_path):
+    """Shared memory attached but data() returns None; skips PID write."""
+    _shared_mem_test(monkeypatch, tmp_path, "attached_data_none", [
+        "app_id", "app_init", "window_init", "show", "exit",
     ])
 
 

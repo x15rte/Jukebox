@@ -46,6 +46,29 @@ def test_loop_body_pause_branch_releases_held_notes(monkeypatch):
     assert note_off_calls == [("note_off", 60)]
     assert vis.emitted[-1] == ([],)
 
+def test_loop_body_pause_releases_pedal(monkeypatch):
+    backend = FakeBackend()
+    p = pmod.Player([], backend, {}, total_duration=10.0)
+    p.pause_event.set()
+    p._pending_pause = True
+    p._active_pitches = {60}
+    p._pedal_down = True
+    vis = FakeSignal()
+    p.visualizer_updated = cast(Any, vis)
+
+    original_wait = p.stop_event.wait
+    def _mock_wait(timeout=None):
+        p.stop_event.set()
+        return True
+    p.stop_event.wait = _mock_wait
+
+    p._loop_body()
+
+    pedal_off_calls = [c for c in backend.calls if c[0] == "pedal_off"]
+    assert pedal_off_calls == [("pedal_off", None)]
+    assert vis.emitted[-1] == ([],)
+    assert p._pedal_down is False
+
 
 def test_loop_body_waits_with_precise_sleep_and_batches(monkeypatch):
     backend = FakeBackend()

@@ -103,7 +103,7 @@ class PianoWidget(QWidget):
         painter.setFont(self._ref_font)
         for p, rect in white_key_rects.items():
             # MIDI note names: C n
-            if p % 12 == 0 and 36 <= p <= 72:  # C2–C5
+            if p % 12 == 0 and 24 <= p <= 96:  # C1–C7
                 octave = (p // 12) - 1
                 painter.drawText(
                     rect.adjusted(0, rect.height() - 16, 0, -2),
@@ -204,21 +204,21 @@ class TimelineWidget(QWidget):
 
     def _ensure_background(self):
         """Rebuild the cached background pixmap if needed."""
-        dpr = self.devicePixelRatioF()
-        expected_size = self.size() * dpr
-        if self._cached_background is not None and self._cached_background.size() == expected_size:
+        if (
+            self._cached_background is not None
+            and self._cached_background.size() == self.size()
+        ):
             return
 
         if self.width() <= 0 or self.height() <= 0:
             self._cached_background = None
             return
 
-        background = QPixmap(self.size() * dpr)
-        background.setDevicePixelRatio(dpr)
+        background = QPixmap(self.size())
         background.fill(self.bg_color)
+        self._cached_background = background
 
         painter = QPainter(background)
-        painter.scale(dpr, dpr)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         w = self.width()
@@ -244,9 +244,9 @@ class TimelineWidget(QWidget):
                 nw = (note.duration / self.total_duration) * w
                 nw = max(2.0, nw)
 
-                ny_ratio = max(0.0, min(1.0, 1.0 - ((note.pitch - min_p) / range_p)))
+                ny_ratio = 1.0 - ((note.pitch - min_p) / range_p)
                 ny = ny_ratio * (h - 10) + 5
-                nh = max(2, min(8, (h - 10) // 52))
+                nh = max(3, (h - 10) // 87)
 
                 if note.hand == "left":
                     painter.setBrush(self._left_brush)
@@ -258,7 +258,6 @@ class TimelineWidget(QWidget):
                 painter.drawRect(QRectF(nx, ny, nw, nh))
 
         painter.end()
-        self._cached_background = background
 
     def paintEvent(self, a0):  # type: ignore[override]  # noqa: N802
         self._ensure_background()

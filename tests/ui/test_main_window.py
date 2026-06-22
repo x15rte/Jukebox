@@ -618,3 +618,43 @@ def test_close_event_hotkey_manager_stop_exception(window_factory, monkeypatch, 
     e = QCloseEvent()
     w.closeEvent(e)
     assert any("Error stopping hotkey manager" in m for m in logs)
+
+
+def test_show_log_context_menu_without_selection(window_factory, monkeypatch):
+    """_show_log_context_menu creates menu with Select All and Clear (no selection)."""
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtWidgets import QMenu
+
+    w = window_factory()
+    menu_actions = []
+    monkeypatch.setattr(QMenu, "exec", lambda self, _p: menu_actions.append(self.actions()) or True)
+
+    w._show_log_context_menu(QPoint(0, 0))
+
+    assert len(menu_actions) >= 1
+    action_texts = [a.text() for a in menu_actions[0]]
+    assert "Select All" in action_texts
+    assert "Clear" in action_texts
+    assert "Copy" not in action_texts  # no selection
+
+def test_show_log_context_menu_with_selection(window_factory, monkeypatch, qtbot):
+    """_show_log_context_menu includes Copy when text is selected."""
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtGui import QTextCursor
+    from PyQt6.QtWidgets import QMenu
+
+    w = window_factory()
+    w.log_output.setPlainText("some log text")
+    cursor = w.log_output.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+    w.log_output.setTextCursor(cursor)
+
+    menu_actions = []
+    monkeypatch.setattr(QMenu, "exec", lambda self, _p: menu_actions.append(self.actions()) or True)
+
+    w._show_log_context_menu(QPoint(0, 0))
+
+    action_texts = [a.text() for a in menu_actions[0]]
+    assert "Copy" in action_texts
+    assert "Select All" in action_texts
+    assert "Clear" in action_texts

@@ -628,3 +628,6 @@ pyright.out
 bin/
 pyvenv.cfg
 cov_output.txt
+
+# Bandit security scanner SARIF output
+*.sarif

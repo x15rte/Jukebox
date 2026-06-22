@@ -142,3 +142,201 @@ def test_hotkey_manager_modifier_only_key(qtbot: Any, monkeypatch: Any) -> None:
     # Modifier-only path: key stays at previous ("F8"), special message emitted
     assert mgr.get_current_key() == "F8"
     assert signals == ["(modifier only — press a key combo)"]
+
+
+def test_hotkey_manager_stop_non_windows(monkeypatch: Any, qtbot: Any) -> None:
+    """stop() on non-Windows without native filter does not raise."""
+    monkeypatch.setattr("ui.hotkey_manager.sys.platform", "linux")
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._native_filter = None
+    mgr.stop()  # should not raise
+    assert mgr._stopped
+
+
+def test_hotkey_manager_poll_focus_no_app(monkeypatch: Any, qtbot: Any) -> None:
+    """_poll_focus_state returns early when QApplication.instance() is None."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    monkeypatch.setattr("ui.hotkey_manager.QApplication.instance", lambda: None)
+    mgr._poll_focus_state()  # should not raise
+
+
+def test_hotkey_manager_poll_focus_inactive(monkeypatch: Any, qtbot: Any) -> None:
+    """_poll_focus_state transitions from active to inactive."""
+    from PyQt6.QtCore import Qt
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._app_focused = True
+    monkeypatch.setattr(
+        "ui.hotkey_manager.QApplication.applicationState",
+        lambda self: Qt.ApplicationState.ApplicationInactive,
+    )
+    mgr._poll_focus_state()
+    assert mgr._app_focused is False
+
+
+def test_hotkey_manager_poll_focus_exception(monkeypatch: Any, qtbot: Any) -> None:
+    """_poll_focus_state swallows exceptions."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    def raise_boom():
+        raise RuntimeError("boom")
+    monkeypatch.setattr("ui.hotkey_manager.QApplication.applicationState", lambda self: raise_boom())
+    mgr._poll_focus_state()  # should not raise
+
+
+def test_hotkey_manager_on_app_state_changed_stopped(qtbot: Any) -> None:
+    """_on_app_state_changed returns early when stopped."""
+    from PyQt6.QtCore import Qt
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._stopped = True
+    mgr._on_app_state_changed(Qt.ApplicationState.ApplicationActive)  # should not raise
+
+
+def test_hotkey_manager_stop_disconnect_exception(monkeypatch: Any, qtbot: Any) -> None:
+    """stop() handles disconnect exceptions."""
+    from types import SimpleNamespace
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    app = QApplication.instance()
+    assert app is not None
+    def bad_disconnect(fn=None):
+        raise TypeError("signal not connected")
+    monkeypatch.setattr(app, "applicationStateChanged", SimpleNamespace(disconnect=bad_disconnect))
+    mgr.stop()  # should not raise
+
+
+def test_hotkey_manager_parse_vk_unknown() -> None:
+    """_parse_vk returns None for unknown key names."""
+    from ui.hotkey_manager import _parse_vk
+    assert _parse_vk("ZZZ") is None
+
+
+def test_hotkey_manager_split_hotkey_no_modifier() -> None:
+    """_split_hotkey returns empty mods for bare key."""
+    from ui.hotkey_manager import _split_hotkey
+    mods, key = _split_hotkey("F8")
+    assert mods == []
+    assert key == "F8"
+
+
+def test_hotkey_manager_split_hotkey_multiple_modifiers() -> None:
+    """_split_hotkey handles multiple modifiers."""
+    from ui.hotkey_manager import _split_hotkey
+    mods, key = _split_hotkey("Ctrl+Shift+A")
+    assert mods == ["ctrl", "shift"]
+    assert key == "A"
+
+
+def test_hotkey_manager_poll_focus_active_already_focused(monkeypatch: Any, qtbot: Any) -> None:
+    """_poll_focus_state skips _unregister_global_hotkey when already focused."""
+    from PyQt6.QtCore import Qt
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._app_focused = True
+    monkeypatch.setattr("ui.hotkey_manager.QApplication.applicationState", lambda self: Qt.ApplicationState.ApplicationActive)
+    mgr._poll_focus_state()
+
+
+def test_hotkey_manager_poll_focus_inactive_already_unfocused(monkeypatch: Any, qtbot: Any) -> None:
+    """_poll_focus_state skips _sync_global_hotkey when already unfocused."""
+    from PyQt6.QtCore import Qt
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._app_focused = False
+    monkeypatch.setattr("ui.hotkey_manager.QApplication.applicationState", lambda self: Qt.ApplicationState.ApplicationInactive)
+    mgr._poll_focus_state()
+
+
+def test_hotkey_manager_on_app_state_changed_active(qtbot: Any) -> None:
+    """_on_app_state_changed handles active transition."""
+    from PyQt6.QtCore import Qt
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._app_focused = False
+    mgr._on_app_state_changed(Qt.ApplicationState.ApplicationActive)
+    assert mgr._app_focused is True
+
+
+def test_hotkey_manager_on_app_state_changed_inactive(qtbot: Any) -> None:
+    """_on_app_state_changed handles inactive transition."""
+    from PyQt6.QtCore import Qt
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._app_focused = True
+    mgr._on_app_state_changed(Qt.ApplicationState.ApplicationInactive)
+    assert mgr._app_focused is False
+
+
+def test_hotkey_manager_on_app_state_changed_already_active(qtbot: Any) -> None:
+    """_on_app_state_changed no-op when already active."""
+    from PyQt6.QtCore import Qt
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._app_focused = True
+    mgr._on_app_state_changed(Qt.ApplicationState.ApplicationActive)
+    assert mgr._app_focused is True
+
+
+def test_hotkey_manager_on_app_state_changed_already_inactive(qtbot: Any) -> None:
+    """_on_app_state_changed no-op when already inactive."""
+    from PyQt6.QtCore import Qt
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._app_focused = False
+    mgr._on_app_state_changed(Qt.ApplicationState.ApplicationInactive)
+    assert mgr._app_focused is False
+
+
+def test_hotkey_manager_on_app_state_changed_exception(monkeypatch: Any, qtbot: Any) -> None:
+    """_on_app_state_changed swallows exceptions."""
+    from PyQt6.QtCore import Qt
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    monkeypatch.setattr(mgr, "_sync_global_hotkey", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    mgr._on_app_state_changed(Qt.ApplicationState.ApplicationInactive)
+
+
+def test_hotkey_manager_start_binding(qtbot: Any) -> None:
+    """start_binding sets _listening_for_bind."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr.start_binding()
+    assert mgr._listening_for_bind is True
+
+
+def test_hotkey_manager_update_shortcut_replaces_existing(qtbot: Any) -> None:
+    """_update_shortcut replaces an existing shortcut."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    assert mgr._shortcut is not None
+    mgr._update_shortcut()
+    assert mgr._shortcut is not None
+
+
+def test_hotkey_manager_stop_remove_event_filter_exception(monkeypatch: Any, qtbot: Any) -> None:
+    """stop() handles removeEventFilter exception."""
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    app = QApplication.instance()
+    assert app is not None
+    monkeypatch.setattr(app, "removeEventFilter", lambda obj: (_ for _ in ()).throw(RuntimeError("boom")))
+    mgr.stop()

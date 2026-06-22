@@ -25,6 +25,22 @@ def _setup(monkeypatch):
     return ctrl
 
 
+def test_start_applies_seek_offset(monkeypatch):
+    ctrl = _setup(monkeypatch)
+    ctrl._seek_offset = 5.0
+    ctrl.start([], {}, 10.0, "key", False)
+    assert ctrl.player is not None
+    assert ctrl.player.config.get("start_offset") == 5.0
+    assert ctrl._seek_offset == 0.0
+
+
+def test_seek_stores_offset_when_not_running(monkeypatch):
+    ctrl = PlaybackController()
+    ctrl.seek(3.0)
+    assert ctrl._seek_offset == 3.0
+    assert ctrl._player is None
+
+
 def test_start_ignored_while_stopping(monkeypatch):
     ctrl = _setup(monkeypatch)
     logs = []

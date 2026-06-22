@@ -30,12 +30,13 @@ from PyQt6.QtWidgets import (
     QRadioButton,
     QLineEdit,
     QTextBrowser,
+    QMenu,
     QDialog,
     QListWidget,
     QAbstractItemView,
 )
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal as Signal, Qt
-from PyQt6.QtGui import QFont, QColor, QCloseEvent, QTextCursor
+from PyQt6.QtGui import QFont, QColor, QCloseEvent, QKeySequence, QTextCursor
 import mido
 
 from core import MidiParser
@@ -205,6 +206,14 @@ class MainWindow(QMainWindow):
         self.piano_widget = PianoWidget()
         vis_layout.addWidget(self.piano_widget)
 
+        self.playlist_status_label = QLabel("")
+        self.playlist_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.playlist_status_label.setStyleSheet(
+            f"font-style: italic; color: {theme.get_theme().text_muted};"
+        )
+        self.playlist_status_label.hide()
+        vis_layout.addWidget(self.playlist_status_label)
+
         controls_main_layout = QVBoxLayout(controls_tab)
         controls_main_layout.setContentsMargins(5, 5, 5, 5)
         controls_main_layout.setSpacing(theme.SECTION_SPACING)
@@ -228,6 +237,8 @@ class MainWindow(QMainWindow):
         self.log_output = QTextBrowser()
         self.log_output.setObjectName("LogOutput")
         self.log_output.setOpenExternalLinks(True)
+        self.log_output.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.log_output.customContextMenuRequested.connect(self._show_log_context_menu)
         self.log_output.setFont(QFont("Courier", 9))
         log_layout = QVBoxLayout(log_tab)
         log_layout.setContentsMargins(8, 8, 8, 8)
@@ -403,8 +414,7 @@ class MainWindow(QMainWindow):
 
     def _on_timeline_seek(self, time):
         self.add_log_message(f"Seeking to {time:.2f}s...")
-        if self.playback_controller.is_running:
-            self.playback_controller.seek(time)
+        self.playback_controller.seek(time)
 
     def _on_visual_scrub(self, time):
         active_pitches = set()
@@ -736,7 +746,7 @@ class MainWindow(QMainWindow):
             self.autoplay_file_list = []
             self.autoplay_current_index = -1
             self.autoplay_file_listbox.clear()
-            self.autoplay_info_label.setText("Error scanning folder.")
+            self._set_autoplay_status("Error scanning folder.")
             return
         seen: set[str] = set()
         unique: list[str] = []
@@ -752,13 +762,11 @@ class MainWindow(QMainWindow):
             self.autoplay_file_listbox.addItem(os.path.basename(fpath))
         count = len(self.autoplay_file_list)
         if count == 0:
-            self.autoplay_info_label.setText("No MIDI files found in folder.")
-            self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
+            self._set_autoplay_status("No MIDI files found in folder.")
             self.play_button.setEnabled(bool(self.selected_tracks_info))
             self._set_current_file_labels(None)
         else:
-            self.autoplay_info_label.setText(f"{count} MIDI file(s) found.")
-            self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
+            self._set_autoplay_status(f"{count} MIDI file(s) found.")
             self.play_button.setEnabled(True)
             self.autoplay_file_listbox.setCurrentRow(0)
             self._set_current_file_labels(self.autoplay_file_list[0])
@@ -921,11 +929,11 @@ class MainWindow(QMainWindow):
                 f"Autoplay: playing ({self.autoplay_current_index + 1}"
                 f"/{len(self.autoplay_file_list)}) '{filename}'"
             )
-            self.autoplay_info_label.setText(
+            self._set_autoplay_status(
                 f"▶ Playing {self.autoplay_current_index + 1}"
-                f"/{len(self.autoplay_file_list)}: {filename}"
+                f"/{len(self.autoplay_file_list)}: {filename}",
+                style_sheet=f"font-style: normal; color: {theme.get_theme().accent_primary};",
             )
-            self.autoplay_info_label.setStyleSheet(f"font-style: normal; color: {theme.get_theme().accent_primary};")
 
             self.current_notes = final_notes
             self.timeline_widget.set_data(final_notes, total_dur, tempo_map)
@@ -957,6 +965,21 @@ class MainWindow(QMainWindow):
                 self.autoplay_current_index += 1
                 continue
 
+
+    def _set_autoplay_status(self, text: str, style_sheet: Optional[str] = None) -> None:
+        """Update both the playlist info label in the input panel and the visualizer status."""
+        if style_sheet is None:
+            style_sheet = f"font-style: italic; color: {theme.get_theme().text_muted};"
+        self.autoplay_info_label.setText(text)
+        self.autoplay_info_label.setStyleSheet(style_sheet)
+        self.playlist_status_label.setText(text)
+        self.playlist_status_label.setStyleSheet(style_sheet)
+        is_playlist = (
+            hasattr(self, "input_mode_playlist_radio")
+            and self.input_mode_playlist_radio.isChecked()
+        )
+        self.playlist_status_label.setVisible(bool(text) and is_playlist)
+
     def _update_autoplay_highlight(self):
         """Bold the currently-playing item in the playlist listbox and scroll to it."""
         for i in range(self.autoplay_file_listbox.count()):
@@ -982,6 +1005,9 @@ class MainWindow(QMainWindow):
         self.file_single_widget.setVisible(not is_playlist)
         self.file_playlist_widget.setVisible(is_playlist)
         self.autoplay_next_timer.stop()
+        self.playlist_status_label.setVisible(
+            is_playlist and bool(self.playlist_status_label.text())
+        )
         # Reset autoplay state when switching away
         if not is_playlist:
             self.autoplay_current_index = -1
@@ -1683,6 +1709,25 @@ class MainWindow(QMainWindow):
     def _on_log_record(self, level: str, message: str) -> None:
         self._append_log(level, message)
 
+    def _show_log_context_menu(self, pos):
+        """Custom context menu for the log output — no useless 'Copy Link Location'."""
+        menu = QMenu(self)
+        cursor = self.log_output.textCursor()
+        if cursor.hasSelection():
+            copy_action = menu.addAction("Copy")
+            assert copy_action is not None  # nosec
+            copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+            copy_action.triggered.connect(self.log_output.copy)
+        select_all_action = menu.addAction("Select All")
+        assert select_all_action is not None  # nosec
+        select_all_action.setShortcut(QKeySequence.StandardKey.SelectAll)
+        select_all_action.triggered.connect(self.log_output.selectAll)
+        menu.addSeparator()
+        clear_action = menu.addAction("Clear")
+        assert clear_action is not None  # nosec
+        clear_action.triggered.connect(self.log_output.clear)
+        menu.exec(self.log_output.mapToGlobal(pos))
+
     def set_controls_enabled(self, enabled):
         for groupbox in self.findChildren(QGroupBox):
             if groupbox.property("playback_control"):
@@ -1950,13 +1995,15 @@ class MainWindow(QMainWindow):
             count = len(self.autoplay_file_list)
             if count and self.autoplay_current_index >= 0:
                 name = os.path.basename(self.autoplay_file_list[self.autoplay_current_index])
-                self.autoplay_info_label.setText(f"Stopped: {name}")
-                self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
+                self._set_autoplay_status(f"Stopped: {name}")
             elif count:
-                self.autoplay_info_label.setText(f"{count} MIDI file(s) found.")
-                self.autoplay_info_label.setStyleSheet(f"font-style: italic; color: {theme.get_theme().text_muted};")
+                self._set_autoplay_status(f"{count} MIDI file(s) found.")
         self.set_controls_enabled(True)
         self.stop_button.setEnabled(False)
+        # Reset visual position to match actual stopped state.
+        self.timeline_widget.set_position(0)
+        self._update_time_label(0, self.total_song_duration_sec)
+        self._on_visual_scrub(0)
 
     def handle_reset(self):
         self.timeline_widget.set_position(0)
@@ -2005,7 +2052,7 @@ class MainWindow(QMainWindow):
                     self.add_log_message(
                         f"Autoplay: next song '{next_name}' in {total_delay:.1f}s"
                     )
-                    self.autoplay_info_label.setText(
+                    self._set_autoplay_status(
                         f"Next: {next_name} in {total_delay:.1f}s"
                     )
                     self.autoplay_next_timer.start(int(total_delay * 1000))
@@ -2018,7 +2065,7 @@ class MainWindow(QMainWindow):
                     self._update_autoplay_highlight()
                     return
             self.add_log_message("Autoplay: all songs played.")
-            self.autoplay_info_label.setText("All songs played.")
+            self._set_autoplay_status("All songs played.")
             # Fall through to re-enable controls
 
         # Only re-enable controls when playback fully stops

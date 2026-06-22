@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Mapping
+from logger_core import jukebox_logger
 from typing import Any, List, Tuple, Optional
 
 from models import Note, KeyEvent, MusicalSection
@@ -57,6 +58,10 @@ class PlaybackService:
                     elif role == "Right Hand":
                         new_note.hand = "right"
                     final_notes.append(new_note)
+                if track.pedal_events:
+                    jukebox_logger.debug(
+                        f"Track {track.index} ('{track.name}'): {len(track.pedal_events)} sustain pedal events"
+                    )
         # Deduplicate consecutive same-value pedal events at the same timestamp
         raw_pedal_events.sort(key=lambda pe: pe[0])
         deduped = []

@@ -150,12 +150,16 @@ def test_toggle_playback_state_returns_when_controller_missing(
     w.playback_controller = ctrl
 
 
-def test_on_timeline_seek_logs_even_when_not_running(window_factory, monkeypatch, tmp_path):
+def test_on_timeline_seek_logs_and_stores_offset_when_not_running(window_factory, monkeypatch, tmp_path):
     w = window_factory()
     logs = []
+    seeks = []
 
     class Ctrl:
         is_running = False
+
+        def seek(self, t):
+            seeks.append(t)
 
         def stop_and_wait(self, timeout_ms=None):
             return None
@@ -165,6 +169,7 @@ def test_on_timeline_seek_logs_even_when_not_running(window_factory, monkeypatch
 
     w._on_timeline_seek(2.5)
 
+    assert seeks == [2.5]
     assert logs and "Seeking to 2.50s" in logs[0]
 
 
