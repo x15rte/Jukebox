@@ -325,9 +325,9 @@ elif sys.platform.startswith("linux"):  # pragma: no cover
         _fields_ = [("xkey", _XKeyEvent)]
 
     # Stubs — used when libX11 is not available
-    _xlib = None
+    _xlib: Any = None
     _X11_MOD_MAP: dict[str, int] = {}
-    _XStringToKeysym = None
+    _XStringToKeysym: Any = None
 
     def _register_linux(key_str: str) -> tuple[bool, dict | None]:
         return False, None
@@ -508,7 +508,7 @@ class HotkeyManager(QObject):
             app.applicationStateChanged.connect(self._on_app_state_changed)
 
         # Install native event filter (Windows WM_HOTKEY catch)
-        if sys.platform == "win32" and app is not None:
+        if sys.platform == "win32" and app is not None:  # pragma: no cover
             self._native_filter = _GlobalHotkeyFilter(self._on_global_hotkey)
             app.installNativeEventFilter(self._native_filter)
         elif sys.platform == "darwin":  # pragma: no cover
