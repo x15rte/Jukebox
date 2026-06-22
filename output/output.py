@@ -256,7 +256,7 @@ class KeyboardBackend(OutputBackend):
         self._log = log_message or jukebox_logger.info
 
         self._kb: Optional[Controller] = None
-        self._pdi = None
+        self._pdi: Any = None
         self._windows_transport: Optional[_WindowsPydirectInputTransport] = None
 
         self._use_macos_cgevent = sys.platform == "darwin"

@@ -178,102 +178,123 @@ if sys.platform == "win32":  # pragma: no cover
 # ---------------------------------------------------------------------------
 
 elif sys.platform == "darwin":  # pragma: no cover
-    import Carbon
-    import Carbon.CarbonEvt
-    import Carbon.Events
 
     _macos_handler_cb: Any = None
     _macos_callback: Callable[[], None] | None = None
     _macos_hotkey_ref: Any = None
-
-    _MACOS_MOD_MAP: dict[str, int] = {
-        "ctrl": Carbon.CarbonEvt.cmdKey,
-        "shift": Carbon.CarbonEvt.shiftKey,
-        "alt": Carbon.CarbonEvt.optionKey,
-        "meta": Carbon.CarbonEvt.cmdKey,
-    }
-    _MACOS_EXTRA_VK: dict[str, int] = {
-        "F1": 122, "F2": 120, "F3": 99, "F4": 118,
-        "F5": 96, "F6": 97, "F7": 98, "F8": 100,
-        "F9": 101, "F10": 109, "F11": 103, "F12": 111,
-        "Left": 123, "Right": 124, "Down": 125, "Up": 126,
-        "PageUp": 116, "PageDown": 121,
-        "Home": 115, "End": 119,
-        "Delete": 117, "Escape": 53, "Tab": 48,
-        "Space": 49, "Return": 36, "Enter": 76,
-        "Backspace": 51,
-    }
+    _MACOS_MOD_MAP: dict[str, int] = {}
+    _MACOS_EXTRA_VK: dict[str, int] = {}
 
     def _register_macos(key_str: str) -> bool:
-        """Register a global hotkey on macOS via Carbon."""
-        global _macos_hotkey_ref, _macos_handler_cb
-
-        _unregister_macos()
-
-        mods, key_name = _split_hotkey(key_str)
-        if key_name is None:
-            return False
-
-        vk = _parse_vk(key_name)
-        if vk is None:
-            from PyQt6.QtGui import QKeySequence
-
-            ks = QKeySequence(key_name)
-            if not ks.isEmpty():
-                vk = int(ks[0].key) & 0xFF
-        if vk is None:
-            vk = _MACOS_EXTRA_VK.get(key_name, 0)
-
-        mod_bits = 0
-        for m in mods:
-            mod_bits |= _MACOS_MOD_MAP.get(m, 0)
-
-        import Carbon.App
-
-        event_class = Carbon.CarbonEvt.kEventClassKeyboard
-        event_kind = Carbon.CarbonEvt.kEventHotKeyPressed
-
-        _macos_handler_cb = Carbon.App.EventHandlerUPP(
-            _macos_hotkey_handler
-        )
-
-        Carbon.App.InstallEventHandler(
-            Carbon.App.GetApplicationEventTarget(),
-            _macos_handler_cb,
-            1,
-            Carbon.CarbonEvt.EventTypeSpec(event_class, event_kind),
-            None,
-        )
-
-        err, _macos_hotkey_ref = Carbon.CarbonEvt.RegisterEventHotKey(
-            vk, mod_bits, (0, 0),
-            Carbon.App.GetApplicationEventTarget(), 0,
-        )
-        return err == 0
+        return False
 
     def _macos_hotkey_handler(
         next_handler: Callable, event: Any, user_data: Any,
     ) -> int | None:
-        """Carbon event handler — forward hotkey press to the Python callback."""
-        if _macos_callback is not None:
-            _macos_callback()
-        return 0  # noErr
+        return 0
 
     def _unregister_macos() -> None:
-        """Unregister the macOS global hotkey."""
-        global _macos_hotkey_ref, _macos_handler_cb
-        if _macos_hotkey_ref is not None:
-            try:
-                Carbon.CarbonEvt.UnregisterEventHotKey(_macos_hotkey_ref)
-            except Exception:  # nosec
-                pass
-            _macos_hotkey_ref = None
-        if _macos_handler_cb is not None:
-            try:
-                Carbon.App.RemoveEventHandler(_macos_handler_cb)
-            except Exception:  # nosec
-                pass
-            _macos_handler_cb = None
+        pass
+
+    try:
+        import Carbon
+        import Carbon.CarbonEvt
+        import Carbon.Events
+    except ImportError:
+        pass
+    else:
+        _macos_handler_cb: Any = None
+        _macos_callback: Callable[[], None] | None = None
+        _macos_hotkey_ref: Any = None
+
+        _MACOS_MOD_MAP: dict[str, int] = {
+            "ctrl": Carbon.CarbonEvt.cmdKey,
+            "shift": Carbon.CarbonEvt.shiftKey,
+            "alt": Carbon.CarbonEvt.optionKey,
+            "meta": Carbon.CarbonEvt.cmdKey,
+        }
+        _MACOS_EXTRA_VK: dict[str, int] = {
+            "F1": 122, "F2": 120, "F3": 99, "F4": 118,
+            "F5": 96, "F6": 97, "F7": 98, "F8": 100,
+            "F9": 101, "F10": 109, "F11": 103, "F12": 111,
+            "Left": 123, "Right": 124, "Down": 125, "Up": 126,
+            "PageUp": 116, "PageDown": 121,
+            "Home": 115, "End": 119,
+            "Delete": 117, "Escape": 53, "Tab": 48,
+            "Space": 49, "Return": 36, "Enter": 76,
+            "Backspace": 51,
+        }
+
+        def _register_macos(key_str: str) -> bool:
+            """Register a global hotkey on macOS via Carbon."""
+            global _macos_hotkey_ref, _macos_handler_cb
+
+            _unregister_macos()
+
+            mods, key_name = _split_hotkey(key_str)
+            if key_name is None:
+                return False
+
+            vk = _parse_vk(key_name)
+            if vk is None:
+                from PyQt6.QtGui import QKeySequence
+
+                ks = QKeySequence(key_name)
+                if not ks.isEmpty():
+                    vk = int(ks[0].key()) & 0xFF
+            if vk is None:
+                vk = _MACOS_EXTRA_VK.get(key_name, 0)
+
+            mod_bits = 0
+            for m in mods:
+                mod_bits |= _MACOS_MOD_MAP.get(m, 0)
+
+            import Carbon.App
+
+            event_class = Carbon.CarbonEvt.kEventClassKeyboard
+            event_kind = Carbon.CarbonEvt.kEventHotKeyPressed
+
+            _macos_handler_cb = Carbon.App.EventHandlerUPP(
+                _macos_hotkey_handler
+            )
+
+            Carbon.App.InstallEventHandler(
+                Carbon.App.GetApplicationEventTarget(),
+                _macos_handler_cb,
+                1,
+                Carbon.CarbonEvt.EventTypeSpec(event_class, event_kind),
+                None,
+            )
+
+            err, _macos_hotkey_ref = Carbon.CarbonEvt.RegisterEventHotKey(
+                vk, mod_bits, (0, 0),
+                Carbon.App.GetApplicationEventTarget(), 0,
+            )
+            return err == 0
+
+        def _macos_hotkey_handler(
+            next_handler: Callable, event: Any, user_data: Any,
+        ) -> int | None:
+            """Carbon event handler — forward hotkey press to the Python callback."""
+            if _macos_callback is not None:
+                _macos_callback()
+            return 0  # noErr
+
+        def _unregister_macos() -> None:
+            """Unregister the macOS global hotkey."""
+            global _macos_hotkey_ref, _macos_handler_cb
+            if _macos_hotkey_ref is not None:
+                try:
+                    Carbon.CarbonEvt.UnregisterEventHotKey(_macos_hotkey_ref)
+                except Exception:  # nosec
+                    pass
+                _macos_hotkey_ref = None
+            if _macos_handler_cb is not None:
+                try:
+                    Carbon.App.RemoveEventHandler(_macos_handler_cb)
+                except Exception:  # nosec
+                    pass
+                _macos_handler_cb = None
 
 # Linux X11 backend  (XGrabKey + QSocketNotifier)  # pragma: no cover
 # ---------------------------------------------------------------------------
@@ -303,121 +324,141 @@ elif sys.platform.startswith("linux"):  # pragma: no cover
     class _XEvent(ctypes.Union):
         _fields_ = [("xkey", _XKeyEvent)]
 
-    _xlib = ctypes.cdll.LoadLibrary("libX11.so")
-    _xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
-    _xlib.XOpenDisplay.restype = ctypes.c_void_p
-    _xlib.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
-    _xlib.XDefaultRootWindow.restype = ctypes.c_ulong
-    _xlib.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-    _xlib.XKeysymToKeycode.restype = ctypes.c_uint
-    _xlib.XGrabKey.argtypes = [
-        ctypes.c_void_p, ctypes.c_int, ctypes.c_uint,
-        ctypes.c_ulong, ctypes.c_int,
-    ]
-    _xlib.XGrabKey.restype = ctypes.c_int
-    _xlib.XUngrabKey.argtypes = [
-        ctypes.c_void_p, ctypes.c_int, ctypes.c_uint, ctypes.c_ulong,
-    ]
-    _xlib.XUngrabKey.restype = ctypes.c_int
-    _xlib.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.POINTER(_XEvent)]
-    _xlib.XNextEvent.restype = ctypes.c_int
-    _xlib.XFlush.argtypes = [ctypes.c_void_p]
-    _xlib.XFlush.restype = ctypes.c_int
-
-    _X11_MOD_MAP: dict[str, int] = {
-        "ctrl": 4,    # ControlMask
-        "shift": 1,   # ShiftMask
-        "alt": 8,     # Mod1Mask
-        "meta": 64,   # Mod4Mask (Super key)
-    }
-
-    _XStringToKeysym = _xlib.XStringToKeysym
-    _XStringToKeysym.argtypes = [ctypes.c_char_p]
-    _XStringToKeysym.restype = ctypes.c_ulong
+    # Stubs — used when libX11 is not available
+    _xlib = None
+    _X11_MOD_MAP: dict[str, int] = {}
+    _XStringToKeysym = None
 
     def _register_linux(key_str: str) -> tuple[bool, dict | None]:
-        """Register a global hotkey on Linux X11 via ``XGrabKey``."""
-        mods, key_name = _split_hotkey(key_str)
-        if key_name is None:
-            return False, None
-
-        display = _xlib.XOpenDisplay(None)
-        if not display:
-            return False, None
-
-        root = _xlib.XDefaultRootWindow(display)
-
-        mod_mask = 0
-        for m in mods:
-            mod_mask |= _X11_MOD_MAP.get(m, 0)
-
-        keysym = _XStringToKeysym(key_name.encode("ascii"))
-        keycode = _xlib.XKeysymToKeycode(display, keysym)
-        if not keycode:
-            from PyQt6.QtGui import QKeySequence
-
-            ks = QKeySequence(key_name)
-            if not ks.isEmpty():
-                vk = int(ks[0].key) & 0xFF
-                keysym = _XStringToKeysym(f"0x{vk:02X}".encode("ascii"))
-                keycode = _xlib.XKeysymToKeycode(display, keysym)
-        if not keycode:
-            return False, None
-
-        _xlib.XGrabKey(display, keycode, mod_mask, root, 1, 1, 1)
-        _xlib.XFlush(display)
-
-        _xlib.XConnectionNumber.argtypes = [ctypes.c_void_p]
-        _xlib.XConnectionNumber.restype = ctypes.c_int
-        conn_fd = _xlib.XConnectionNumber(display)
-
-        notifier = QSocketNotifier(conn_fd, QSocketNotifier.Type.Exception)
-
-        state: dict[str, Any] = {
-            "display": display,
-            "notifier": notifier,
-            "root": root,
-            "keycode": keycode,
-            "mod_mask": mod_mask,
-        }
-
-        return True, state
+        return False, None
 
     def _unregister_linux(state: dict) -> None:
-        """Ungrab the X11 hotkey and clean up."""
-        display = state.get("display")
-        keycode = state.get("keycode", 0)
-        mod_mask = state.get("mod_mask", 0)
-        root = state.get("root", 0)
-
-        if display:
-            _xlib.XUngrabKey(display, keycode, mod_mask, root)
-            _xlib.XFlush(display)
-
-        notifier = state.get("notifier")
-        if notifier is not None:
-            notifier.setEnabled(False)
+        pass
 
     def _make_linux_handler(
         state: dict, callback: Callable[[], None],
     ) -> Callable[[], None]:
-        """Return a callable that reads the X11 event queue and fires
-        *callback* for pending key events."""
-        display = state["display"]
+        return lambda: None
 
-        def _handler() -> None:
-            event = _XEvent()
-            _xlib.XPending.argtypes = [ctypes.c_void_p]
-            _xlib.XPending.restype = ctypes.c_int
-            while _xlib.XPending(display):
-                _xlib.XNextEvent(display, ctypes.byref(event))
-                if event.xkey.type == 2:  # KeyPress
-                    callback()
+    try:
+        _xlib = ctypes.cdll.LoadLibrary("libX11.so")
+    except OSError:
+        pass
+    else:
+        _xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        _xlib.XOpenDisplay.restype = ctypes.c_void_p
+        _xlib.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        _xlib.XDefaultRootWindow.restype = ctypes.c_ulong
+        _xlib.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        _xlib.XKeysymToKeycode.restype = ctypes.c_uint
+        _xlib.XGrabKey.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, ctypes.c_uint,
+            ctypes.c_ulong, ctypes.c_int,
+        ]
+        _xlib.XGrabKey.restype = ctypes.c_int
+        _xlib.XUngrabKey.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, ctypes.c_uint, ctypes.c_ulong,
+        ]
+        _xlib.XUngrabKey.restype = ctypes.c_int
+        _xlib.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.POINTER(_XEvent)]
+        _xlib.XNextEvent.restype = ctypes.c_int
+        _xlib.XFlush.argtypes = [ctypes.c_void_p]
+        _xlib.XFlush.restype = ctypes.c_int
 
-        return _handler
+        _X11_MOD_MAP: dict[str, int] = {
+            "ctrl": 4,    # ControlMask
+            "shift": 1,   # ShiftMask
+            "alt": 8,     # Mod1Mask
+            "meta": 64,   # Mod4Mask (Super key)
+        }
 
-    _xlib.XPending.argtypes = [ctypes.c_void_p]
-    _xlib.XPending.restype = ctypes.c_int
+        _XStringToKeysym = _xlib.XStringToKeysym
+        _XStringToKeysym.argtypes = [ctypes.c_char_p]
+        _XStringToKeysym.restype = ctypes.c_ulong
+
+        def _register_linux(key_str: str) -> tuple[bool, dict | None]:
+            """Register a global hotkey on Linux X11 via ``XGrabKey``."""
+            mods, key_name = _split_hotkey(key_str)
+            if key_name is None:
+                return False, None
+
+            display = _xlib.XOpenDisplay(None)
+            if not display:
+                return False, None
+
+            root = _xlib.XDefaultRootWindow(display)
+
+            mod_mask = 0
+            for m in mods:
+                mod_mask |= _X11_MOD_MAP.get(m, 0)
+
+            keysym = _XStringToKeysym(key_name.encode("ascii"))
+            keycode = _xlib.XKeysymToKeycode(display, keysym)
+            if not keycode:
+                from PyQt6.QtGui import QKeySequence
+
+                ks = QKeySequence(key_name)
+                if not ks.isEmpty():
+                    vk = int(ks[0].key()) & 0xFF
+                    keysym = _XStringToKeysym(f"0x{vk:02X}".encode("ascii"))
+                    keycode = _xlib.XKeysymToKeycode(display, keysym)
+            if not keycode:
+                return False, None
+
+            _xlib.XGrabKey(display, keycode, mod_mask, root, 1, 1, 1)
+            _xlib.XFlush(display)
+
+            _xlib.XConnectionNumber.argtypes = [ctypes.c_void_p]
+            _xlib.XConnectionNumber.restype = ctypes.c_int
+            conn_fd = _xlib.XConnectionNumber(display)
+
+            notifier = QSocketNotifier(conn_fd, QSocketNotifier.Type.Exception)
+
+            state: dict[str, Any] = {
+                "display": display,
+                "notifier": notifier,
+                "root": root,
+                "keycode": keycode,
+                "mod_mask": mod_mask,
+            }
+
+            return True, state
+
+        def _unregister_linux(state: dict) -> None:
+            """Ungrab the X11 hotkey and clean up."""
+            display = state.get("display")
+            keycode = state.get("keycode", 0)
+            mod_mask = state.get("mod_mask", 0)
+            root = state.get("root", 0)
+
+            if display:
+                _xlib.XUngrabKey(display, keycode, mod_mask, root)
+                _xlib.XFlush(display)
+
+            notifier = state.get("notifier")
+            if notifier is not None:
+                notifier.setEnabled(False)
+
+        def _make_linux_handler(
+            state: dict, callback: Callable[[], None],
+        ) -> Callable[[], None]:
+            """Return a callable that reads the X11 event queue and fires
+            *callback* for pending key events."""
+            display = state["display"]
+
+            def _handler() -> None:
+                event = _XEvent()
+                _xlib.XPending.argtypes = [ctypes.c_void_p]
+                _xlib.XPending.restype = ctypes.c_int
+                while _xlib.XPending(display):
+                    _xlib.XNextEvent(display, ctypes.byref(event))
+                    if event.xkey.type == 2:  # KeyPress
+                        callback()
+
+            return _handler
+
+        _xlib.XPending.argtypes = [ctypes.c_void_p]
+        _xlib.XPending.restype = ctypes.c_int
 
 
 # ===========================================================================
