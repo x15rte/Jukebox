@@ -333,6 +333,9 @@ class KeyboardBackend(OutputBackend):
         time.sleep(_WINDOWS_KEY_REPRESS_DELAY)
 
     def note_on(self, pitch: int, velocity: int) -> None:
+        if velocity == 0:
+            self.note_off(pitch)
+            return
         data = self._mapper.get_key_data(pitch)
         if not data:
             return
@@ -681,6 +684,9 @@ class NumpadBackend(OutputBackend):
     # -- notes --
 
     def note_on(self, pitch: int, velocity: int) -> None:
+        if velocity == 0:
+            self.note_off(pitch)
+            return
         try:
             rmc.send_note_message(pitch, velocity, is_note_off=False)
             self._active_notes.add(pitch)

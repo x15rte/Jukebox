@@ -33,11 +33,17 @@ class KeyMapper:
         if self.use_88_key_layout:
             p = self.PITCH_START_LEFT
             for ch in self.LEFT_CTRL_KEYS:
-                self.key_map[p] = {"key": ch, "modifiers": [Key.ctrl]}
+                mods = [Key.ctrl]
+                if self.is_black_key(p):
+                    mods.append(Key.shift)
+                self.key_map[p] = {"key": ch, "modifiers": mods}
                 p += 1
             p = self.PITCH_START_RIGHT
             for ch in self.RIGHT_CTRL_KEYS:
-                self.key_map[p] = {"key": ch, "modifiers": [Key.ctrl]}
+                mods = [Key.ctrl]
+                if self.is_black_key(p):
+                    mods.append(Key.shift)
+                self.key_map[p] = {"key": ch, "modifiers": mods}
                 p += 1
 
         wi = 0

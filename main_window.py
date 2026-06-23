@@ -1069,6 +1069,7 @@ class MainWindow(QMainWindow):
             self.live_backend = create_backend(
                 self._current_output_mode(),
                 self.use_88_key_check.isChecked(),
+                inter_message_delay=self._live_inter_message_delay(),
                 log_message=self.add_log_message,
             )
         except (OutputBackendUnavailableError, ValueError) as e:
@@ -1196,6 +1197,12 @@ class MainWindow(QMainWindow):
                 return data
         return "key"
 
+    def _live_inter_message_delay(self) -> float:
+        """Return a small delay between RMC frame keys for live MIDI input
+        to avoid overwhelming the game with back-to-back keystrokes."""
+        return 0.001 if self._current_output_mode() == "midi_numpad" else 0.0
+
+
     def _update_88_key_visibility(self):
         if hasattr(self, "use_88_key_check"):
             self.use_88_key_check.setVisible(self._current_output_mode() == "key")
@@ -1210,6 +1217,7 @@ class MainWindow(QMainWindow):
                 self.live_backend = create_backend(
                     self._current_output_mode(),
                     self.use_88_key_check.isChecked(),
+                    inter_message_delay=self._live_inter_message_delay(),
                     log_message=self.add_log_message,
                 )
             except (OutputBackendUnavailableError, ValueError) as e:

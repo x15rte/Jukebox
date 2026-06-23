@@ -703,9 +703,13 @@ def test_note_on_velocity_zero(monkeypatch):
     monkeypatch.setattr(out, "Controller", FakeController)
 
     kb = out.KeyboardBackend(use_88_key_layout=False)
-    # Old code does NOT convert velocity=0 to note_off; processes note_on normally
+    # Velocity 0 should redirect to note_off, not press the key
     kb.note_on(60, 0)
-    # Pitch should be in active_pitches after note_on
+    # Pitch should NOT be in active_pitches after note_on with velocity 0
+    assert 60 not in kb._active_pitches
+
+    # Also verify that note_on with non-zero velocity still works
+    kb.note_on(60, 100)
     key_data = kb._mapper.get_key_data(60)
     assert key_data is not None
     assert key_data["key"] in kb._active_pitches
