@@ -45,7 +45,6 @@ class OutputBackendSendError(OutputBackendError):
 _KEYEVENTF_SCANCODE = 0x0008
 _KEYEVENTF_KEYUP = 0x0002
 _INPUT_KEYBOARD = 1
-_WINDOWS_KEY_REPRESS_DELAY = 0.001
 
 _WINDOWS_KEY_SCAN_CODES: Dict[str, int] = {
     "1": 0x02,
@@ -329,9 +328,6 @@ class KeyboardBackend(OutputBackend):
     def _log_exception(self, context: str, exc: Exception) -> None:
         self._log(f"{context}: {exc}\n{traceback.format_exc()}")
 
-    def _windows_key_repress_delay(self) -> None:
-        time.sleep(_WINDOWS_KEY_REPRESS_DELAY)
-
     def note_on(self, pitch: int, velocity: int) -> None:
         if velocity == 0:
             self.note_off(pitch)
@@ -348,6 +344,10 @@ class KeyboardBackend(OutputBackend):
             vk = get_macos_vk_for_key(base_key)
             if vk is None:
                 return
+            if was_active:
+                # Release key first so CGEvent registers a new key-down event
+                post_macos_key_event(vk, False, self._macos_flags())
+                time.sleep(0.001)
             state = self._state_for(base_key)
             state.press()
             self._active_pitches.setdefault(base_key, set()).add(pitch)
@@ -396,24 +396,30 @@ class KeyboardBackend(OutputBackend):
 
         if self._windows_transport is not None:
             if was_active:
+                # Release key first so the new key-down event registers.
+                # No delay needed — individual SendInput calls are queued in order.
                 self._windows_transport.key_up(base_key)
-                self._windows_key_repress_delay()
             modifier_names = [
                 mod_name
                 for mod in modifiers
                 if (mod_name := self._modifier_name(mod)) is not None
             ]
-            batch: List[Tuple[str, bool]] = [
-                (mod_name, True) for mod_name in modifier_names
-            ]
-            batch.append((base_key, True))
-            batch.extend((mod_name, False) for mod_name in reversed(modifier_names))
-            self._windows_transport.send_batch(batch)
+            # Send each event separately (press modifiers, press key, release modifiers)
+            # so the game's input polling can observe the intermediate modifier-held state.
+            for mod_name in modifier_names:
+                self._windows_transport.send_batch([(mod_name, True)])
+            self._windows_transport.send_batch([(base_key, True)])
+            for mod_name in reversed(modifier_names):
+                self._windows_transport.send_batch([(mod_name, False)])
             return
 
 
         try:
             if self._kb is not None:
+                if was_active:
+                    # Release key first so OS/pynput registers a new key-down event
+                    self._kb.release(KeyCode.from_vk(ord(base_key)))
+                    time.sleep(0.001)
                 with self._kb.pressed(*modifiers):
                     self._kb.press(KeyCode.from_vk(ord(base_key)))
         except Exception as e:
@@ -555,8 +561,8 @@ class KeyboardBackend(OutputBackend):
                 if e.pitch is not None:
                     self.note_off(e.pitch)
 
-            if releases and presses:
-                self._windows_key_repress_delay()
+            # No batch-level delay needed — each note_on/note_off sends individual
+            # SendInput calls, so the OS input queue guarantees correct ordering.
 
             for e in presses:
                 if e.pitch is not None:

@@ -50,17 +50,22 @@ def test_keyboard_backend_overlapping_same_base_key(monkeypatch):
     base_key = key_data["key"]
 
     kb.note_on(60, 100)
-    kb.note_on(61, 100)
-    # Old code for pynput does NOT release/re-press on overlap (was_active ignored)
+    # First press: no overlap, just presses the key
+    assert ctrl.presses.count(out.KeyCode.from_vk(ord(base_key))) == 1
     assert ctrl.releases.count(out.KeyCode.from_vk(ord(base_key))) == 0
+
+    kb.note_on(61, 100)
+    # Second press: same key already active — release-then-repress to let OS register it
+    assert ctrl.releases.count(out.KeyCode.from_vk(ord(base_key))) == 1
+    assert ctrl.presses.count(out.KeyCode.from_vk(ord(base_key))) == 2
 
     kb.note_off(60)
     # note_off(60) should NOT add another release — pitch 61 is still active
-    assert ctrl.releases.count(out.KeyCode.from_vk(ord(base_key))) == 0
+    assert ctrl.releases.count(out.KeyCode.from_vk(ord(base_key))) == 1
 
     kb.note_off(61)
-    # now release should happen
-    assert ctrl.releases.count(out.KeyCode.from_vk(ord(base_key))) == 1
+    # now the final release should happen
+    assert ctrl.releases.count(out.KeyCode.from_vk(ord(base_key))) == 2
 
 
 def test_keyboard_backend_pedal_and_shutdown(monkeypatch):
@@ -198,14 +203,19 @@ def test_windows_key_backend_note_sequences(monkeypatch):
     kb.note_on(21, 100)
     kb.note_off(21)
 
-    # Single batch per note_on: mod(s) down + base down + mod(s) up
-    # (matches pre-2af9230 working behavior — one SendInput call)
+    # One SendInput call per key event (mods sent separately so the game's input
+    # polling can observe the intermediate modifier-held state, matching
+    # miditoqwerty-rs behavior).
     assert fake_pdi.sent_batches == [
         [(normal_base, True)],                                    # note_on(60)
         [(normal_base, False)],                                   # note_off(60)
-        [("shiftleft", True), (shift_base, True), ("shiftleft", False)],  # note_on(61)
+        [("shiftleft", True)],                                    # note_on(61): shift down
+        [(shift_base, True)],                                     # note_on(61): key down
+        [("shiftleft", False)],                                   # note_on(61): shift up
         [(shift_base, False)],                                    # note_off(61)
-        [("ctrlleft", True), (ctrl_base, True), ("ctrlleft", False)],     # note_on(21)
+        [("ctrlleft", True)],                                     # note_on(21): ctrl down
+        [(ctrl_base, True)],                                      # note_on(21): key down
+        [("ctrlleft", False)],                                    # note_on(21): ctrl up
         [(ctrl_base, False)],                                     # note_off(21)
     ]
     assert fake_pdi.down == [
@@ -239,8 +249,10 @@ def test_windows_key_backend_overlapping_same_base_release(monkeypatch):
     kb.note_on(37, 100)
     kb.note_off(36)
 
+    # Note_off(36) should NOT add another release — pitch 37 is still active.
+    # No repress delay needed since individual SendInput calls guarantee ordering.
     assert fake_pdi.up.count(base) == 1
-    assert sleeps == [out._WINDOWS_KEY_REPRESS_DELAY]
+    assert sleeps == []
 
 def test_windows_key_backend_release_stale_modifier_on_overlap(monkeypatch):
     """When a shifted note overlapped with an unshifted note on the same base key,
