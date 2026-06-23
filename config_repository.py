@@ -284,6 +284,7 @@ class Config:
 
     # Playback / file
     tempo: float = field(default=100.0, metadata={"range": (10.0, 200.0)})
+    enable_tempo: bool = field(default=False)
     pedal_style: str = field(
         default="original",
         metadata={"choices": {"original", "hybrid", "legato", "rhythmic", "none"}},

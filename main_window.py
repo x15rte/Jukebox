@@ -667,6 +667,10 @@ class MainWindow(QMainWindow):
 
         self.use_88_key_check = QCheckBox("Use 88-key extended layout")
         layout.addWidget(self.use_88_key_check)
+
+        self.pedal_widget = QWidget()
+        pedal_layout = QVBoxLayout(self.pedal_widget)
+        pedal_layout.setContentsMargins(0, 0, 0, 0)
         pedal_row = QHBoxLayout()
         pedal_label = QLabel("Pedal Style")
         self.pedal_style_combo = QComboBox()
@@ -698,7 +702,18 @@ class MainWindow(QMainWindow):
         pedal_row.addWidget(self.pedal_style_combo)
         self.pedal_style_combo.currentIndexChanged.connect(lambda: self._mark_config_dirty())
         pedal_row.addStretch(1)
-        layout.addLayout(pedal_row)
+        pedal_layout.addLayout(pedal_row)
+        layout.addWidget(self.pedal_widget)
+
+        self.countdown_file_widget = QWidget()
+        countdown_layout = QHBoxLayout(self.countdown_file_widget)
+        countdown_layout.setContentsMargins(0, 0, 0, 0)
+        self.countdown_check = QCheckBox("3 second countdown")
+        self.countdown_check.toggled.connect(lambda: self._mark_config_dirty())
+        countdown_layout.addWidget(self.countdown_check)
+        countdown_layout.addStretch()
+        layout.addWidget(self.countdown_file_widget)
+
 
 
         return group
@@ -831,7 +846,7 @@ class MainWindow(QMainWindow):
     def _autoplay_select_tracks(self, filepath: str) -> bool:
         """Parse a MIDI file and auto-select all non-drum tracks with Auto-Detect hand.
         Returns True if at least one track was selected."""
-        tempo_scale = self.tempo_spinbox.value() / 100.0
+        tempo_scale = (self.tempo_spinbox.value() / 100.0) if self.all_humanization_checks["tempo"].isChecked() else 1.0
         tracks, tempo_map = MidiParser.parse_structure(filepath, tempo_scale)
         self.parsed_tracks = tracks
         self.parsed_tempo_map = tempo_map
@@ -1024,6 +1039,8 @@ class MainWindow(QMainWindow):
             self._playback_file_only_widget.setVisible(not use_piano)
         self.tabs.setTabEnabled(1, not use_piano)
         self.tabs.setTabEnabled(2, not use_piano)
+        self.countdown_file_widget.setVisible(not use_piano)
+        self.pedal_widget.setVisible(not use_piano)
         if use_piano and self.tabs.currentIndex() in (1, 2):
             self.tabs.setCurrentIndex(0)
 
@@ -1310,17 +1327,6 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(group)
 
         self._playback_file_only_widget = QWidget()
-        file_layout = QVBoxLayout(self._playback_file_only_widget)
-        file_layout.setContentsMargins(0, 0, 0, 0)
-        countdown_row = QHBoxLayout()
-        self.countdown_check = QCheckBox("3 second countdown")
-        countdown_row.addWidget(self.countdown_check)
-        self.countdown_check.toggled.connect(lambda: self._mark_config_dirty())
-        countdown_row.addStretch()
-        self.reset_defaults_btn = QPushButton("Reset Defaults")
-        self.reset_defaults_btn.clicked.connect(self._reset_controls_to_default)
-        countdown_row.addWidget(self.reset_defaults_btn)
-        file_layout.addLayout(countdown_row)
         main_layout.addWidget(self._playback_file_only_widget)
 
         hk_group = QGroupBox("Hotkey")
@@ -1350,6 +1356,13 @@ class MainWindow(QMainWindow):
         ov_layout.addWidget(self.opacity_slider, 1, 1)
         main_layout.addWidget(overlay_group)
 
+        reset_row = QHBoxLayout()
+        self.reset_defaults_btn = QPushButton("Reset Defaults")
+        self.reset_defaults_btn.clicked.connect(self._reset_controls_to_default)
+        reset_row.addStretch()
+        reset_row.addWidget(self.reset_defaults_btn)
+        main_layout.addLayout(reset_row)
+
         self._reset_playback_group_to_default()
         return group
 
@@ -1378,13 +1391,19 @@ class MainWindow(QMainWindow):
         detailed_layout = QGridLayout()
         detailed_layout.setColumnStretch(2, 1)
 
-        tempo_label = QLabel("Tempo")
+        tempo_check = QCheckBox("Tempo")
         self.tempo_slider, self.tempo_spinbox = self._create_slider_and_spinbox(
             10.0, 200.0, 100.0, "%", factor=10.0, decimals=1
         )
-        detailed_layout.addWidget(tempo_label, 0, 0)
+        tempo_check.toggled.connect(self.tempo_slider.setEnabled)
+        tempo_check.toggled.connect(self.tempo_spinbox.setEnabled)
+        tempo_check.toggled.connect(lambda: self._mark_config_dirty())
+        detailed_layout.addWidget(tempo_check, 0, 0)
         detailed_layout.addWidget(self.tempo_slider, 0, 2)
         detailed_layout.addWidget(self.tempo_spinbox, 0, 3)
+        self.all_humanization_checks["tempo"] = tempo_check
+        self.all_humanization_sliders["tempo"] = self.tempo_slider
+        self.all_humanization_spinboxes["tempo"] = self.tempo_spinbox
 
 
         def add_detailed_row(
@@ -1875,7 +1894,7 @@ class MainWindow(QMainWindow):
     def _parse_and_select_tracks(self, filepath):
         self.add_log_message("Parsing MIDI structure...")
         try:
-            tempo_scale = self.tempo_spinbox.value() / 100.0
+            tempo_scale = (self.tempo_spinbox.value() / 100.0) if self.all_humanization_checks["tempo"].isChecked() else 1.0
             tracks, tempo_map = MidiParser.parse_structure(filepath, tempo_scale)
         except Exception as e:
             self.parsed_tracks = None
@@ -2023,7 +2042,7 @@ class MainWindow(QMainWindow):
     def on_playback_finished(self):
         if self._closing:
             return
-        self.add_log_message("Playback process finished.\n" + "=" * 50 + "\n")
+        self.add_log_message("Playback process finished.")
         self.piano_widget.clear()
 
         # Handle pending autoplay jump (from _autoplay_jump_to_song)

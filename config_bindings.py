@@ -56,6 +56,11 @@ def _set_pedal_style(w: Any, v: str) -> None:
 
 CONFIG_UI_BINDINGS: list[ConfigBinding] = [
     ConfigBinding(
+        "enable_tempo",
+        lambda w: w.all_humanization_checks["tempo"].isChecked(),
+        lambda w, v: w.all_humanization_checks["tempo"].setChecked(v),
+    ),
+    ConfigBinding(
         "tempo",
         lambda w: w.tempo_spinbox.value(),
         lambda w, v: w.tempo_spinbox.setValue(v),
