@@ -52,15 +52,15 @@ def test_keyboard_backend_overlapping_same_base_key(monkeypatch):
     kb.note_on(60, 100)
     kb.note_on(61, 100)
     # Old code for pynput does NOT release/re-press on overlap (was_active ignored)
-    assert ctrl.releases.count(base_key) == 0
+    assert ctrl.releases.count(out.KeyCode.from_vk(ord(base_key))) == 0
 
     kb.note_off(60)
     # note_off(60) should NOT add another release — pitch 61 is still active
-    assert ctrl.releases.count(base_key) == 0
+    assert ctrl.releases.count(out.KeyCode.from_vk(ord(base_key))) == 0
 
     kb.note_off(61)
     # now release should happen
-    assert ctrl.releases.count(base_key) == 1
+    assert ctrl.releases.count(out.KeyCode.from_vk(ord(base_key))) == 1
 
 
 def test_keyboard_backend_pedal_and_shutdown(monkeypatch):
@@ -115,8 +115,9 @@ def test_keyboard_backend_note_on_off_exact_key_and_modifier_sequence(monkeypatc
     # Modifier is pressed by context manager enter (logged in pressed_modifiers),
     # base key pressed inside, modifier released on context manager exit (not tracked by FakeController).
     assert ctrl.pressed_modifiers == [(out.Key.shift,)]
-    assert ctrl.presses == [base_key]  # only base key explicitly pressed
-    assert ctrl.releases == [base_key]  # only base key released in note_off
+    expected = out.KeyCode.from_vk(ord(base_key))
+    assert ctrl.presses == [expected]  # only base key explicitly pressed
+    assert ctrl.releases == [expected]  # only base key released in note_off
 
 
 def test_output_backend_execute_batch_matches_in_game_event_order(monkeypatch):

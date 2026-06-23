@@ -14,7 +14,7 @@ import traceback
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from pynput.keyboard import Key, Controller
+from pynput.keyboard import Key, KeyCode, Controller
 
 from models import KeyState
 from core import KeyMapper
@@ -318,7 +318,7 @@ class KeyboardBackend(OutputBackend):
                 self._pdi_key_up(base_key)
             elif self._kb is not None:
                 try:
-                    self._kb.release(base_key)
+                    self._kb.release(KeyCode.from_vk(ord(base_key)))
                 except Exception as e:
                     self._log_exception(
                         "KeyboardBackend _release_key_if_unused error", e
@@ -415,7 +415,7 @@ class KeyboardBackend(OutputBackend):
         try:
             if self._kb is not None:
                 with self._kb.pressed(*modifiers):
-                    self._kb.press(base_key)
+                    self._kb.press(KeyCode.from_vk(ord(base_key)))
         except Exception as e:
             self._log_exception("KeyboardBackend note_on error", e)
 
@@ -615,7 +615,7 @@ class KeyboardBackend(OutputBackend):
                     if self._use_pydirectinput and self._pdi is not None:
                         self._pdi_key_up(key_char)
                     elif self._kb is not None:
-                        self._kb.release(key_char)
+                        self._kb.release(KeyCode.from_vk(ord(key_char)))
                 except Exception as e:
                     self._log_exception("KeyboardBackend shutdown note release error", e)
 

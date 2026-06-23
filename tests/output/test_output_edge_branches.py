@@ -591,7 +591,7 @@ def test_shutdown_releases_note_and_pedal_with_keyboard_backend(monkeypatch):
     kb.shutdown()
 
     kb_impl = cast(Any, kb._kb)
-    assert "x" in kb_impl.releases
+    assert any(getattr(r, "vk", None) == ord("x") for r in kb_impl.releases)
     assert Key.space in kb_impl.releases
 
 
