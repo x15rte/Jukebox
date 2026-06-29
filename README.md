@@ -14,8 +14,8 @@ Supports Windows, macOS, and Linux
 
 # 🚀 Usage 
 
-**Do not use IME during playback. Use US-QWERTY direct input only.**  
-**Enable NumLock**
+- **Do not use IME during playback. Use US-QWERTY direct input only.**  
+- **Enable NumLock, Disable Caps Lock**
 
 ## Method 1 (Recommend)
 ```bash
