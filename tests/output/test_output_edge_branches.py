@@ -32,14 +32,21 @@ def test_release_key_if_unused_handles_backend_exception(monkeypatch):
     base = key_data["key"]
     kb._active_pitches[base] = set()
     kb._state_for(base)
+
     class BadKB:
         def release(self, _k):
             raise RuntimeError("release failed")
+
     kb._kb = cast(Any, BadKB())
-    kb._release_key_if_unused(base)
-    # Old code catches the exception and pops the key regardless
-    assert base not in kb._active_pitches
-    assert any("release_key_if_unused" in msg for msg in logs)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_off failed: release failed",
+    ):
+        kb._release_key_if_unused(base)
+
+    assert base in kb._active_pitches
+    assert any("note_off error" in msg for msg in logs)
 
 
 def test_note_on_with_unknown_pitch_noop(monkeypatch):
@@ -117,14 +124,76 @@ def test_numpad_backend_logs_note_and_pedal_exceptions(monkeypatch):
     )
 
     nb = out.NumpadBackend(inter_message_delay=0.0, log_message=logs.append)
-    nb.note_on(60, 100)
-    nb.note_off(60)
-    nb.pedal_on()
-    nb.pedal_off()
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="NumpadBackend note_on failed: note error",
+    ):
+        nb.note_on(60, 100)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="NumpadBackend note_off failed: note error",
+    ):
+        nb.note_off(60)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="NumpadBackend pedal_on failed: pedal error",
+    ):
+        nb.pedal_on()
+
+    nb._pedal_down = True
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="NumpadBackend pedal_off failed: pedal error",
+    ):
+        nb.pedal_off()
 
     assert any("note_on error" in m for m in logs)
     assert any("note_off error" in m for m in logs)
     assert any("pedal_on error" in m for m in logs)
+
+
+def test_numpad_note_off_failure_keeps_active_note_for_shutdown_retry(monkeypatch):
+    logs = []
+
+    def bad_note(*_a, **_k):
+        raise out.rmc.RmcSendError("tap failed")
+
+    monkeypatch.setattr(out.rmc, "send_note_message", bad_note)
+
+    nb = out.NumpadBackend(inter_message_delay=0.0, log_message=logs.append)
+    nb._active_notes = {60}
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="NumpadBackend note_off failed: tap failed",
+    ):
+        nb.note_off(60)
+
+    assert 60 in nb._active_notes
+    assert any("NumpadBackend note_off error" in message for message in logs)
+
+def test_numpad_backend_wraps_rmc_send_error_from_note_on(monkeypatch):
+    logs = []
+
+    def bad_note(*_a, **_k):
+        raise out.rmc.RmcSendError("tap failed")
+
+    monkeypatch.setattr(out.rmc, "send_note_message", bad_note)
+    monkeypatch.setattr(out.jukebox_logger, "error", lambda m, **k: logs.append(m))
+
+    nb = out.NumpadBackend(inter_message_delay=0.0, log_message=logs.append)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="NumpadBackend note_on failed: tap failed",
+    ):
+        nb.note_on(60, 100)
+
+    assert any("note_on error" in m for m in logs)
 
 
 def test_numpad_backend_shutdown_logs_errors(monkeypatch):
@@ -269,6 +338,487 @@ def test_note_on_off_macos_ctrl_alt_and_none_modifier(monkeypatch):
     assert events
 
 
+def test_note_on_macos_cgevent_false_raises_without_tracking_key(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 42)
+    monkeypatch.setattr(out, "post_macos_key_event", lambda *_a: False)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": []}
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: CGEvent send returned False",
+    ):
+        kb.note_on(60, 100)
+
+    assert "x" not in kb._active_pitches
+
+
+def test_note_on_macos_overlap_failure_restores_previous_key_and_unwinds_modifier(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    monkeypatch.setattr(
+        out,
+        "get_macos_vk_for_modifier",
+        lambda modifier: 50 if modifier == Key.shift else None,
+    )
+    events = []
+    call_count = 0
+
+    def _post_macos_key_event(vk, down, flags):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 4:
+            return False
+        events.append((vk, down, flags))
+        return True
+
+    monkeypatch.setattr(out, "post_macos_key_event", _post_macos_key_event)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb.note_on(60, 100)
+    base_key = kb._mapper.get_key_data(60)["key"]
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: CGEvent send returned False",
+    ):
+        kb.note_on(61, 100)
+
+    assert kb._active_pitches[base_key] == {60}
+    assert base_key in kb._states
+    assert kb._states[base_key].is_active is True
+    assert kb._macos_modifiers == (False, False, False)
+    assert kb._macos_modifier_refcount == (0, 0, 0)
+    assert events == [(42, True, 0), (42, False, 0), (50, True, 0), (50, False, 0), (42, True, 0)]
+
+
+def test_note_on_macos_fresh_modified_failure_unwinds_modifier_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    monkeypatch.setattr(
+        out,
+        "get_macos_vk_for_modifier",
+        lambda modifier: 50 if modifier == Key.shift else None,
+    )
+    events = []
+    call_count = 0
+
+    def _post_macos_key_event(vk, down, flags):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            return False
+        events.append((vk, down, flags))
+        return True
+
+    monkeypatch.setattr(out, "post_macos_key_event", _post_macos_key_event)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": [Key.shift]}
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: CGEvent send returned False",
+    ):
+        kb.note_on(60, 100)
+
+    assert kb._active_pitches == {}
+    assert kb._states == {}
+    assert kb._macos_modifiers == (False, False, False)
+    assert kb._macos_modifier_refcount == (0, 0, 0)
+    assert events == [(50, True, 0), (50, False, 0)]
+
+
+def test_note_on_macos_failed_modifier_rollback_restores_all_modifier_snapshots(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    modifier_vks = {Key.shift: 50, Key.alt: 51, Key.ctrl: 52}
+    monkeypatch.setattr(out, "get_macos_vk_for_modifier", lambda modifier: modifier_vks[modifier])
+    events = []
+
+    def _post_macos_key_event(vk, down, flags):
+        events.append((vk, down, flags))
+        if not down:
+            return False
+        return vk != 42
+
+    monkeypatch.setattr(out, "post_macos_key_event", _post_macos_key_event)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {
+        "key": "x",
+        "modifiers": [Key.shift, Key.alt, Key.ctrl],
+    }
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: CGEvent send returned False",
+    ):
+        kb.note_on(60, 100)
+
+    assert kb._macos_modifiers == (True, True, True)
+    assert all(refcount >= 1 for refcount in kb._macos_modifier_refcount)
+    assert "x" not in kb._active_pitches
+    assert events[-3:] == [
+        (52, False, out.MACOS_CGFLAG_SHIFT | out.MACOS_CGFLAG_ALT),
+        (51, False, out.MACOS_CGFLAG_SHIFT | out.MACOS_CGFLAG_CONTROL),
+        (50, False, out.MACOS_CGFLAG_ALT | out.MACOS_CGFLAG_CONTROL),
+    ]
+
+
+def test_note_on_macos_overlap_restore_failure_clears_previous_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    monkeypatch.setattr(
+        out,
+        "get_macos_vk_for_modifier",
+        lambda modifier: 50 if modifier == Key.shift else None,
+    )
+    events = []
+    base_down_attempts = 0
+
+    def _post_macos_key_event(vk, down, flags):
+        nonlocal base_down_attempts
+        events.append((vk, down, flags))
+        if vk == 42 and down:
+            base_down_attempts += 1
+            return base_down_attempts == 1
+        return True
+
+    monkeypatch.setattr(out, "post_macos_key_event", _post_macos_key_event)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {
+        "key": "x",
+        "modifiers": [Key.shift] if pitch == 61 else [],
+    }
+    kb.note_on(60, 100)
+    base_key = "x"
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: CGEvent send returned False",
+    ):
+        kb.note_on(61, 100)
+
+    assert base_key not in kb._active_pitches
+    assert base_key not in kb._states
+    assert events == [
+        (42, True, 0),
+        (42, False, 0),
+        (50, True, 0),
+        (42, True, out.MACOS_CGFLAG_SHIFT),
+        (50, False, 0),
+        (42, True, 0),
+    ]
+
+
+def test_note_on_macos_overlap_release_failure_restores_mapping_without_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    events = []
+    monkeypatch.setattr(
+        out,
+        "post_macos_key_event",
+        lambda vk, down, flags: events.append((vk, down, flags)) or False,
+    )
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._active_pitches["x"] = {60}
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": []}
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: CGEvent send returned False",
+    ):
+        kb.note_on(61, 100)
+
+    assert kb._active_pitches["x"] == {60}
+    assert "x" not in kb._states
+    assert events == [(42, False, 0)]
+
+
+def test_note_on_macos_previous_active_base_down_failure_restores_previous_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    events = []
+    monkeypatch.setattr(
+        out,
+        "post_macos_key_event",
+        lambda vk, down, flags: events.append((vk, down, flags)) or True,
+    )
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": []}
+    kb.note_on(60, 100)
+    base_key = "x"
+    original_state = kb._states[base_key]
+
+    def _raise_state_restore(_key):
+        raise RuntimeError("state restore failed")
+
+    monkeypatch.setattr(kb, "_state_for", _raise_state_restore)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: state restore failed",
+    ):
+        kb.note_on(61, 100)
+
+    assert kb._active_pitches[base_key] == {60}
+    assert kb._states[base_key] is original_state
+    assert original_state.is_active is True
+    assert events == [(42, True, 0), (42, False, 0), (42, True, 0)]
+
+
+def test_note_on_macos_fresh_state_press_failure_releases_base(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    events = []
+    monkeypatch.setattr(
+        out,
+        "post_macos_key_event",
+        lambda vk, down, flags: events.append((vk, down, flags)) or True,
+    )
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": []}
+
+    class FakeState:
+        def __init__(self):
+            self.release_called = False
+
+        def press(self):
+            raise RuntimeError("state press failed")
+
+        def release(self):
+            self.release_called = True
+
+    fake_state = FakeState()
+    monkeypatch.setattr(kb, "_state_for", lambda _key: fake_state)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: state press failed",
+    ):
+        kb.note_on(60, 100)
+
+    assert "x" not in kb._active_pitches
+    assert fake_state.release_called is True
+    assert events == [(42, True, 0), (42, False, 0)]
+
+
+def test_note_on_macos_fresh_state_lookup_failure_keeps_stuck_key_tracked(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    events = []
+
+    def _post_macos_key_event(vk, down, flags):
+        events.append((vk, down, flags))
+        return down is True
+
+    monkeypatch.setattr(out, "post_macos_key_event", _post_macos_key_event)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": []}
+    original_state_for = kb._state_for
+    state_lookup_count = 0
+
+    def _state_for(key):
+        nonlocal state_lookup_count
+        state_lookup_count += 1
+        if state_lookup_count == 1:
+            raise RuntimeError("state lookup failed")
+        return original_state_for(key)
+
+    monkeypatch.setattr(kb, "_state_for", _state_for)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: state lookup failed",
+    ):
+        kb.note_on(60, 100)
+
+    assert kb._active_pitches["x"] == {60}
+    assert kb._states["x"].is_active is True
+    assert events == [(42, True, 0), (42, False, 0)]
+
+def test_note_off_macos_cgevent_false_keeps_key_tracked(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 42)
+    monkeypatch.setattr(out, "post_macos_key_event", lambda *_a: False)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": []}
+    kb._state_for("x").press()
+    kb._active_pitches["x"] = {60}
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_off failed: CGEvent send returned False",
+    ):
+        kb.note_off(60)
+
+    assert kb._active_pitches["x"] == {60}
+
+
+
+def test_note_off_macos_modifier_release_failure_still_releases_base_key(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 42)
+    monkeypatch.setattr(
+        out,
+        "get_macos_vk_for_modifier",
+        lambda modifier: 50 if modifier == Key.shift else None,
+    )
+    events = []
+
+    def _post_macos_key_event(vk, down, flags):
+        events.append((vk, down, flags))
+        return not (vk == 50 and down is False)
+
+    monkeypatch.setattr(out, "post_macos_key_event", _post_macos_key_event)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": [Key.shift]}
+    kb.note_on(60, 100)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_off failed: CGEvent send returned False",
+    ):
+        kb.note_off(60)
+
+    assert events == [
+        (50, True, 0),
+        (42, True, out.MACOS_CGFLAG_SHIFT),
+        (50, False, 0),
+        (42, False, out.MACOS_CGFLAG_SHIFT),
+    ]
+    assert kb._active_pitches["x"] == {60}
+    assert kb._states["x"].is_active is True
+    assert kb._macos_modifiers == (True, False, False)
+    assert kb._macos_modifier_refcount == (1, 0, 0)
+
+
+def test_note_off_macos_base_release_failure_restores_modifier_retry_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 42)
+    monkeypatch.setattr(
+        out,
+        "get_macos_vk_for_modifier",
+        lambda modifier: 50 if modifier == Key.shift else None,
+    )
+    events = []
+
+    def _post_macos_key_event(vk, down, flags):
+        events.append((vk, down, flags))
+        return not (vk == 42 and down is False)
+
+    monkeypatch.setattr(out, "post_macos_key_event", _post_macos_key_event)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": [Key.shift]}
+    kb.note_on(60, 100)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_off failed: CGEvent send returned False",
+    ):
+        kb.note_off(60)
+
+    assert events == [
+        (50, True, 0),
+        (42, True, out.MACOS_CGFLAG_SHIFT),
+        (50, False, 0),
+        (42, False, 0),
+    ]
+    assert kb._active_pitches["x"] == {60}
+    assert kb._states["x"].is_active is True
+    assert kb._macos_modifiers == (True, False, False)
+    assert kb._macos_modifier_refcount == (1, 0, 0)
+
+
+def test_note_off_macos_modifier_failures_with_remaining_pitch_restore_retry_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 42)
+    monkeypatch.setattr(
+        out,
+        "get_macos_vk_for_modifier",
+        lambda modifier: 50 if modifier == Key.shift else 51 if modifier == Key.alt else None,
+    )
+    events = []
+
+    def _post_macos_key_event(vk, down, flags):
+        events.append((vk, down, flags))
+        if vk == 50 and down is False:
+            return False
+        if vk == 51 and down is False:
+            raise RuntimeError("alt release failed")
+        return True
+
+    monkeypatch.setattr(out, "post_macos_key_event", _post_macos_key_event)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {
+        "key": "x",
+        "modifiers": [Key.shift, Key.alt],
+    }
+    kb._state_for("x").press()
+    kb._active_pitches["x"] = {60, 61}
+    kb._macos_modifiers = (True, True, False)
+    kb._macos_modifier_refcount = (1, 1, 0)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_off failed: CGEvent send returned False",
+    ):
+        kb.note_off(60)
+
+    assert events == [
+        (50, False, out.MACOS_CGFLAG_ALT),
+        (51, False, out.MACOS_CGFLAG_SHIFT),
+    ]
+    assert kb._active_pitches["x"] == {60, 61}
+    assert kb._states["x"].is_active is True
+    assert kb._macos_modifiers == (True, True, False)
+    assert kb._macos_modifier_refcount == (1, 1, 0)
+
+def test_pedal_on_macos_cgevent_false_leaves_pedal_up(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 42)
+    monkeypatch.setattr(out, "post_macos_key_event", lambda *_a: False)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend pedal_on failed: CGEvent send returned False",
+    ):
+        kb.pedal_on()
+
+    assert kb._pedal_down is False
+
+
+def test_pedal_off_macos_cgevent_false_keeps_pedal_down(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: 42)
+    monkeypatch.setattr(out, "post_macos_key_event", lambda *_a: False)
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._pedal_down = True
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend pedal_off failed: CGEvent send returned False",
+    ):
+        kb.pedal_off()
+
+    assert kb._pedal_down is True
+
+
 def test_note_on_logs_exception_when_backend_press_fails(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "linux")
 
@@ -284,7 +834,12 @@ def test_note_on_logs_exception_when_backend_press_fails(monkeypatch):
     )
 
     kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
-    kb.note_on(60, 100)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: press boom",
+    ):
+        kb.note_on(60, 100)
 
     assert any("note_on error" in m for m in logs)
 
@@ -317,12 +872,23 @@ def test_pedal_on_off_extra_branches(monkeypatch):
             raise RuntimeError("pedal release boom")
 
     kb._kb = cast(Any, BadKB())
-    kb.pedal_on()
-    kb.pedal_on()
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend pedal_on failed: pedal press boom",
+    ):
+        kb.pedal_on()
+    assert kb._pedal_down is False
+
     kb._pedal_down = True
-    kb.pedal_off()
-    kb._pedal_down = True
-    kb.pedal_off()
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend pedal_off failed: pedal release boom",
+    ):
+        kb.pedal_off()
+
+    assert kb._pedal_down is True
 
     assert any("pedal_on error" in m for m in logs)
     assert any("pedal_off error" in m for m in logs)
@@ -768,23 +1334,34 @@ def test_keyboard_note_off_exception_logged(monkeypatch):
         kb.note_off(60)
 
 
-def test_keyboard_note_off_re_raises_backend_error(monkeypatch):
+def test_keyboard_note_off_raises_send_error_and_keeps_key_active(monkeypatch):
     monkeypatch.setattr(out.sys, "platform", "linux")
     monkeypatch.setattr(out, "Controller", FakeController)
 
-    kb = out.KeyboardBackend(use_88_key_layout=False)
+    logs = []
+    monkeypatch.setattr(out.jukebox_logger, "error", lambda m, **k: logs.append(m))
+
+    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
     key_data = kb._mapper.get_key_data(60)
+    assert key_data is not None
     base_key = key_data["key"]
     kb._active_pitches[base_key] = {60}
-    kb._pedal_down = False
+    kb._state_for(base_key)
 
-    # Make _release_key_if_unused raise OutputBackendError
-    def failing_release(key):
-        raise out.OutputBackendError("release failed")
-    monkeypatch.setattr(kb, "_release_key_if_unused", failing_release)
+    class BadKB:
+        def release(self, _k):
+            raise RuntimeError("release failed")
 
-    with pytest.raises(out.OutputBackendError, match="release failed"):
+    kb._kb = cast(Any, BadKB())
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_off failed: release failed",
+    ):
         kb.note_off(60)
+
+    assert base_key in kb._active_pitches
+    assert any("note_off error" in m for m in logs)
 
 
 # ---------------------------------------------------------------------------
@@ -800,10 +1377,8 @@ def test_numpad_note_on_velocity_zero(monkeypatch):
 
     nb = out.NumpadBackend(inter_message_delay=0.0)
     nb.note_on(60, 0)
-    # Old code does NOT convert velocity=0 to note_off; sends normal note_on
-    assert len(called) >= 1
-    assert called[0][0] == "note"
-
+    assert called == [("note", (60,), {"velocity": 0, "is_note_off": True})]
+    assert 60 not in nb._active_notes
 
 # ---------------------------------------------------------------------------
 # NumpadBackend — note_on / note_off out of range (lines 970, 981)
@@ -853,7 +1428,13 @@ def test_numpad_pedal_off_exception(monkeypatch):
 
     nb = out.NumpadBackend(inter_message_delay=0.0, log_message=logs.append)
     nb._pedal_down = True
-    nb.pedal_off()
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="NumpadBackend pedal_off failed: pedal_off error",
+    ):
+        nb.pedal_off()
+
     assert any("pedal_off error" in m for m in logs)
 
 
@@ -981,3 +1562,320 @@ def test_pedal_off_early_return(monkeypatch):
     kb = out.KeyboardBackend(use_88_key_layout=False)
     kb.pedal_off()
     assert kb._pedal_down is False
+
+
+def test_output_backend_execute_batch_skips_pitchless_note_events():
+    class B(OutputBackend):
+        def __init__(self):
+            self.calls = []
+
+        def note_on(self, pitch, velocity):
+            self.calls.append(("note_on", pitch, velocity))
+
+        def note_off(self, pitch):
+            self.calls.append(("note_off", pitch))
+
+        def pedal_on(self):
+            self.calls.append(("pedal_on",))
+
+        def pedal_off(self):
+            self.calls.append(("pedal_off",))
+
+        def shutdown(self):
+            self.calls.append(("shutdown",))
+
+    b = B()
+    b.execute_batch(
+        [
+            FakeEvent(0.0, 4, "release", pitch=None),
+            FakeEvent(0.0, 2, "press", pitch=None),
+        ]
+    )
+
+    assert b.calls == []
+
+
+def test_keyboard_macos_post_exception_raises_send_error(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    logs = []
+
+    def _raise_post(*_args):
+        raise RuntimeError("cg failed")
+
+    monkeypatch.setattr(out, "post_macos_key_event", _raise_post)
+    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: cg failed",
+    ):
+        kb.note_on(60, 100)
+
+    assert any("note_on error" in message for message in logs)
+
+
+def test_release_key_if_unused_without_controller_clears_logical_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    monkeypatch.setattr(out, "Controller", FakeController)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    key_data = kb._mapper.get_key_data(60)
+    assert key_data is not None
+    base = key_data["key"]
+    state = kb._state_for(base)
+    state.press()
+    kb._active_pitches[base] = set()
+    kb._kb = None
+
+    kb._release_key_if_unused(base)
+
+    assert base not in kb._states
+    assert base not in kb._active_pitches
+
+
+def test_note_on_without_controller_tracks_logical_key(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    monkeypatch.setattr(out, "Controller", FakeController)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._kb = None
+
+    kb.note_on(60, 100)
+
+    key_data = kb._mapper.get_key_data(60)
+    assert key_data is not None
+    assert kb._active_pitches[key_data["key"]] == {60}
+
+
+def test_macos_duplicate_modifiers_update_refcounts_without_reposting(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    monkeypatch.setattr(out, "get_macos_vk_for_modifier", lambda _mod: 50)
+    events = []
+    monkeypatch.setattr(
+        out,
+        "post_macos_key_event",
+        lambda vk, down, flags: events.append((vk, down, flags)) or True,
+    )
+
+    class UnknownModifier:
+        name = "unknown"
+
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {
+        "key": "x",
+        "modifiers": [
+            Key.shift,
+            Key.shift,
+            Key.ctrl,
+            Key.ctrl,
+            Key.alt,
+            Key.alt,
+            UnknownModifier(),
+        ],
+    }
+
+    kb.note_on(60, 100)
+    assert kb._macos_modifier_refcount == (2, 2, 2)
+
+    modifier_downs = [event for event in events if event[0] == 50 and event[1] is True]
+    assert len(modifier_downs) == 3
+
+    kb.note_off(60)
+
+    assert kb._macos_modifier_refcount == (0, 0, 0)
+    assert kb._macos_modifiers == (False, False, False)
+
+
+def test_macos_note_off_without_base_vk_clears_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: None)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": []}
+    kb._state_for("x").press()
+    kb._active_pitches["x"] = {60}
+
+    kb.note_off(60)
+
+    assert kb._active_pitches == {}
+    assert kb._states == {}
+
+
+def test_macos_note_off_without_state_discards_active_pitch(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: 42)
+    monkeypatch.setattr(out, "post_macos_key_event", lambda *_args: True)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": []}
+    kb._active_pitches["x"] = {60}
+
+    kb.note_off(60)
+
+    assert kb._active_pitches == {}
+    assert kb._states == {}
+
+
+def test_macos_note_off_with_remaining_pitch_discards_only_that_pitch(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": []}
+    kb._active_pitches["x"] = {60, 61}
+
+    kb.note_off(60)
+
+    assert kb._active_pitches["x"] == {61}
+
+
+def test_pedal_on_macos_without_space_vk_is_noop(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: None)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    kb.pedal_on()
+
+    assert kb._pedal_down is False
+
+
+def test_pedal_on_without_controller_marks_down(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    monkeypatch.setattr(out, "Controller", FakeController)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._kb = None
+
+    kb.pedal_on()
+
+    assert kb._pedal_down is True
+
+
+def test_pedal_off_keeps_nonempty_active_key_pressed(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    monkeypatch.setattr(out, "Controller", FakeController)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    key_data = kb._mapper.get_key_data(60)
+    assert key_data is not None
+    base = key_data["key"]
+    kb._state_for(base).press()
+    kb._active_pitches[base] = {60}
+    kb._pedal_down = True
+
+    kb.pedal_off()
+
+    controller = cast(Any, kb._kb)
+    assert kb._active_pitches[base] == {60}
+    assert not any(getattr(key, "vk", None) == ord(base) for key in controller.releases)
+    assert Key.space in controller.releases
+
+
+def test_macos_pedal_off_without_space_vk_and_state_clears_empty_key(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: None)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._pedal_down = True
+    kb._active_pitches["x"] = set()
+
+    kb.pedal_off()
+
+    assert kb._pedal_down is False
+    assert kb._active_pitches == {}
+    assert kb._states == {}
+
+
+def test_pedal_off_without_controller_marks_up(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    monkeypatch.setattr(out, "Controller", FakeController)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._kb = None
+    kb._pedal_down = True
+
+    kb.pedal_off()
+
+    assert kb._pedal_down is False
+
+
+def test_windows_execute_batch_skips_pitchless_note_events(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    kb.execute_batch(
+        [
+            FakeEvent(0.0, 4, "release", pitch=None),
+            FakeEvent(0.0, 2, "press", pitch=None),
+        ]
+    )
+
+    assert fake_pdi.sent_batches == []
+
+
+def test_keyboard_shutdown_macos_skips_missing_key_vks(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _key: None)
+    monkeypatch.setattr(out, "get_macos_vk_for_modifier", lambda _key: None)
+    events = []
+    monkeypatch.setattr(
+        out,
+        "post_macos_key_event",
+        lambda vk, down, flags: events.append((vk, down, flags)) or True,
+    )
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._active_pitches["x"] = {60}
+    kb._state_for("x").press()
+    kb._pedal_down = True
+    kb._macos_modifiers = (True, True, True)
+
+    kb.shutdown()
+
+    assert events == []
+    assert kb._pedal_down is False
+    assert kb._macos_modifiers == (False, False, False)
+
+
+def test_keyboard_shutdown_windows_without_pedal_omits_space_release(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._active_pitches["x"] = {60}
+    kb._state_for("x").press()
+    kb._pedal_down = False
+
+    kb.shutdown()
+
+    flattened = [item for batch in fake_pdi.sent_batches for item in batch]
+    assert ("x", False) in flattened
+    assert ("space", False) not in flattened
+
+
+def test_keyboard_shutdown_without_any_transport_clears_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "linux")
+    monkeypatch.setattr(out, "Controller", FakeController)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._use_pydirectinput = True
+    kb._pdi = None
+    kb._kb = None
+    kb._active_pitches["x"] = {60}
+    kb._state_for("x").press()
+    kb._pedal_down = True
+
+    kb.shutdown()
+
+    assert kb._active_pitches == {}
+    assert all(not state.is_active for state in kb._states.values())
+    assert kb._pedal_down is False
+
+
+def test_numpad_log_exception_noops_without_logger():
+    nb = out.NumpadBackend(inter_message_delay=0.0, log_message=None)
+    cast(Any, nb)._log = None
+
+    nb._log_exception("context", RuntimeError("boom"))
+
+
+def test_macos_note_off_with_remaining_without_active_mapping_leaves_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "darwin")
+    monkeypatch.setattr(out, "get_macos_vk_for_key", lambda _k: None)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    kb._mapper.get_key_data = lambda pitch: {"key": "x", "modifiers": []}
+
+    kb.note_off(60)
+
+    assert kb._active_pitches == {}
+    assert kb._states == {}

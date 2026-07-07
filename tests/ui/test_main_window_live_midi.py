@@ -23,6 +23,74 @@ def test_handle_live_midi_message_routes_to_backend(window_factory, monkeypatch,
     assert backend.calls[4] == ("pedal_off",)
 
 
+def test_handle_live_midi_message_rejects_invalid_note_and_velocity(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    backend = FakeLiveBackend()
+    w.live_backend = backend
+
+    w._handle_live_midi_message(SimpleNamespace(type="note_on", note="60", velocity=90))
+    w._handle_live_midi_message(SimpleNamespace(type="note_on", note=60, velocity="90"))
+    w._handle_live_midi_message(SimpleNamespace(type="note_on", note=-1, velocity=90))
+    w._handle_live_midi_message(SimpleNamespace(type="note_on", note=128, velocity=90))
+
+    assert backend.calls == []
+
+
+def test_handle_live_midi_message_rejects_invalid_pedal_values(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    backend = FakeLiveBackend()
+    w.live_backend = backend
+
+    w._handle_live_midi_message(
+        SimpleNamespace(type="control_change", control="64", value=127)
+    )
+    w._handle_live_midi_message(
+        SimpleNamespace(type="control_change", control=64, value="127")
+    )
+    w._handle_live_midi_message(
+        SimpleNamespace(type="control_change", control=1, value=127)
+    )
+    w._handle_live_midi_message(
+        SimpleNamespace(type="control_change", control=64, value=128)
+    )
+
+    assert backend.calls == []
+
+
+def test_handle_live_midi_message_unexpected_backend_exception_is_logged_not_disconnected(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    logs = []
+    disconnects = []
+
+    class BadBackend(FakeLiveBackend):
+        def note_on(self, pitch, velocity):
+            raise RuntimeError("boom")
+
+    backend = BadBackend()
+    w.live_backend = backend
+
+    def record_error(message, *args, exc_info=False, **kwargs):
+        logs.append((message, exc_info))
+
+    monkeypatch.setattr("main_window.jukebox_logger.error", record_error)
+    monkeypatch.setattr(w, "_disconnect_midi_input", lambda: disconnects.append(True))
+
+    w._handle_live_midi_message(SimpleNamespace(type="note_on", note=60, velocity=90))
+
+    assert len(logs) == 1
+    message, exc_info = logs[0]
+    assert "Unexpected live MIDI handling error: boom" in message
+    assert exc_info is True
+    assert disconnects == []
+    assert w.live_backend is backend
+
+
 def test_on_midi_input_finished_resets_state(window_factory, monkeypatch, tmp_path):
     w = window_factory()
     w.midi_input_active = True
@@ -64,6 +132,27 @@ def test_refresh_midi_inputs_populates_combo(window_factory, monkeypatch, tmp_pa
     assert w.midi_input_combo.count() == 2
     assert w.midi_input_combo.itemText(0) == "A"
 
+
+
+def test_refresh_midi_inputs_preserves_existing_selection(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.midi_input_combo.clear()
+    w.midi_input_combo.addItems(["A", "B"])
+    w.midi_input_combo.setCurrentText("B")
+    monkeypatch.setattr("main_window.mido.get_input_names", lambda: ["A", "B"])
+
+    w._refresh_midi_inputs()
+
+    assert w.midi_input_combo.currentText() == "B"
+
+
+def test_refresh_midi_inputs_uses_preferred_device(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    monkeypatch.setattr("main_window.mido.get_input_names", lambda: ["A", "B"])
+
+    w._refresh_midi_inputs(preferred_device="B")
+
+    assert w.midi_input_combo.currentText() == "B"
 
 def test_connect_midi_input_no_device_and_running_playback_stops_first(
     window_factory, monkeypatch, tmp_path
@@ -124,6 +213,316 @@ def test_disconnect_midi_input_handles_worker_stop_exception(
     assert any("Error stopping MIDI input worker" in str(x) for x in logs)
     assert "wait" in logs
     assert "release_all" in logs
+
+
+def test_disconnect_midi_input_timeout_clears_references_and_ui(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    warnings = []
+
+    class Worker:
+        def __init__(self):
+            self.message_received = FakeSignal()
+            self.connected = FakeSignal()
+            self.connection_error = FakeSignal()
+            self.warning = FakeSignal()
+            self.finished = FakeSignal()
+            self.stop_calls = 0
+
+        def stop(self):
+            self.stop_calls += 1
+
+    class Thread:
+        def __init__(self):
+            self.wait_calls = []
+            self.quit_calls = 0
+            self.finished = FakeSignal()
+
+        def isRunning(self):
+            return True
+
+        def quit(self):
+            self.quit_calls += 1
+
+        def wait(self, timeout=None):
+            self.wait_calls.append(timeout)
+            return False
+
+    worker = Worker()
+    thread = Thread()
+    w.midi_input_active = True
+    w.midi_input_worker = worker
+    w.midi_input_thread = thread
+    w.live_backend = FakeLiveBackend()
+    monkeypatch.setattr(
+        "main_window.jukebox_logger.warning", lambda message: warnings.append(message)
+    )
+
+    w._disconnect_midi_input()
+
+    assert w.midi_input_thread is None
+    assert w.midi_input_worker is None
+    assert w.live_backend is None
+    assert w.midi_input_active is False
+    assert w._midi_disconnecting is False
+    assert w.midi_input_connect_btn.isEnabled() is True
+    assert w.midi_input_disconnect_btn.isEnabled() is False
+    assert w.midi_input_status_label.text() == "Piano input disconnected."
+    assert worker.stop_calls == 1
+    assert thread.quit_calls == 1
+    assert thread.wait_calls == [5000]
+    assert any("MIDI input thread did not stop" in message for message in warnings)
+    assert (thread, worker) in w._stale_midi_inputs
+
+
+def test_disconnect_midi_input_timeout_forgets_stale_owner_on_thread_finished(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+
+    class Worker:
+        def __init__(self):
+            self.message_received = FakeSignal()
+            self.connected = FakeSignal()
+            self.connection_error = FakeSignal()
+            self.warning = FakeSignal()
+            self.finished = FakeSignal()
+
+        def stop(self):
+            pass
+
+    class Thread:
+        def __init__(self):
+            self.wait_calls = []
+            self.quit_calls = 0
+            self.finished = FakeSignal()
+            self._running = True
+
+        def isRunning(self):
+            return self._running
+
+        def quit(self):
+            self.quit_calls += 1
+
+        def wait(self, timeout=None):
+            self.wait_calls.append(timeout)
+            return False
+
+    worker = Worker()
+    thread = Thread()
+    w.midi_input_active = True
+    w.midi_input_worker = worker
+    w.midi_input_thread = thread
+
+    w._disconnect_midi_input()
+
+    assert (thread, worker) in w._stale_midi_inputs
+    thread._running = False
+    thread.finished.emit()
+    assert w._stale_midi_inputs == []
+
+
+def test_close_event_retries_stale_midi_thread_cleanup_without_dropping_owner(
+    window_factory, monkeypatch, tmp_path
+):
+    from PyQt6.QtGui import QCloseEvent
+
+    w = window_factory()
+    warnings = []
+
+    class Ctrl:
+        is_running = False
+
+        def stop_and_wait_blocking(self, timeout_ms=None):
+            return None
+
+    class HK:
+        def stop(self):
+            return None
+
+    class Worker:
+        def __init__(self):
+            self.stop_calls = 0
+
+        def stop(self):
+            self.stop_calls += 1
+
+    class Thread:
+        def __init__(self):
+            self.wait_calls = []
+            self.quit_calls = 0
+
+        def quit(self):
+            self.quit_calls += 1
+
+        def wait(self, timeout=None):
+            self.wait_calls.append(timeout)
+            return False
+
+    worker = Worker()
+    thread = Thread()
+    w._stale_midi_inputs = [(thread, worker)]
+    w.playback_controller = Ctrl()
+    w.hotkey_manager = HK()
+    w.midi_input_active = False
+    w._config_dirty = False
+    monkeypatch.setattr(
+        "main_window.jukebox_logger.warning", lambda message: warnings.append(message)
+    )
+
+    w.closeEvent(QCloseEvent())
+
+    assert (thread, worker) in w._stale_midi_inputs
+    assert worker.stop_calls == 1
+    assert thread.quit_calls == 1
+    assert thread.wait_calls == [1000]
+    assert warnings == ["MIDI input thread still running during shutdown"]
+
+
+def test_forget_stale_midi_input_waits_for_unlisted_running_thread(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+
+    class Thread:
+        def __init__(self):
+            self.wait_calls = []
+
+        def isRunning(self):
+            return True
+
+        def wait(self, timeout=None):
+            self.wait_calls.append(timeout)
+            return True
+
+    thread = Thread()
+
+    w._forget_stale_midi_input(thread, object())
+
+    assert thread.wait_calls == [1000]
+
+
+def test_forget_stale_midi_input_logs_cleanup_exception(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    logs = []
+
+    class Thread:
+        @staticmethod
+        def isRunning():
+            raise RuntimeError("running check failed")
+
+        @staticmethod
+        def wait(timeout=None):
+            return True
+
+    monkeypatch.setattr("main_window.jukebox_logger.debug", lambda message: logs.append(message))
+
+    w._forget_stale_midi_input(Thread(), object())
+
+    assert logs == ["Error cleaning stale MIDI input thread: running check failed"]
+
+
+def test_close_event_ignores_stale_midi_pair_without_cleanup_methods(
+    window_factory, monkeypatch, tmp_path
+):
+    from PyQt6.QtGui import QCloseEvent
+
+    w = window_factory()
+    thread = object()
+    worker = object()
+    w._stale_midi_inputs = [(thread, worker)]
+    w.midi_input_active = False
+    w._config_dirty = False
+
+    w.closeEvent(QCloseEvent())
+
+    assert w._stale_midi_inputs == [(thread, worker)]
+
+
+def test_close_event_logs_stale_midi_cleanup_exceptions(
+    window_factory, monkeypatch, tmp_path
+):
+    from PyQt6.QtGui import QCloseEvent
+
+    w = window_factory()
+    debug_logs = []
+    warnings = []
+
+    class Worker:
+        @staticmethod
+        def stop():
+            raise RuntimeError("stop failed")
+
+    class Thread:
+        @staticmethod
+        def quit():
+            raise RuntimeError("quit failed")
+
+        @staticmethod
+        def wait(timeout=None):
+            raise RuntimeError("wait failed")
+
+    worker = Worker()
+    thread = Thread()
+    w._stale_midi_inputs = [(thread, worker)]
+    w.midi_input_active = False
+    w._config_dirty = False
+    monkeypatch.setattr("main_window.jukebox_logger.debug", lambda message: debug_logs.append(message))
+    monkeypatch.setattr(
+        "main_window.jukebox_logger.warning", lambda message: warnings.append(message)
+    )
+
+    w.closeEvent(QCloseEvent())
+
+
+    assert (thread, worker) in w._stale_midi_inputs
+    assert "Error stopping stale MIDI input worker: stop failed" in debug_logs
+    assert "Error quitting stale MIDI input thread: quit failed" in debug_logs
+    assert "Error waiting for stale MIDI input thread: wait failed" in debug_logs
+    assert warnings == ["MIDI input thread still running during shutdown"]
+
+
+def test_close_event_forgets_stopped_stale_midi_thread(
+    window_factory, monkeypatch, tmp_path
+):
+    from PyQt6.QtGui import QCloseEvent
+
+    w = window_factory()
+
+    class Worker:
+        @staticmethod
+        def stop():
+            return None
+
+    class Thread:
+        def __init__(self):
+            self.quit_calls = 0
+            self.wait_calls = []
+
+        def isRunning(self):
+            return False
+
+        def quit(self):
+            self.quit_calls += 1
+
+        def wait(self, timeout=None):
+            self.wait_calls.append(timeout)
+            return True
+
+    worker = Worker()
+    thread = Thread()
+    w._stale_midi_inputs = [(thread, worker)]
+    w.midi_input_active = False
+    w._config_dirty = False
+
+    w.closeEvent(QCloseEvent())
+
+    assert w._stale_midi_inputs == []
+    assert thread.quit_calls == 1
+    assert thread.wait_calls == [1000]
 
 
 def test_on_midi_input_error_and_warning_routes_to_loggers(
@@ -680,3 +1079,68 @@ def test_handle_live_midi_message_disconnect_exception(window_factory, monkeypat
 
     w._handle_live_midi_message(SimpleNamespace(type="note_on", note=60, velocity=90))
     assert any("Error during MIDI disconnect cleanup" in str(m[0]) for m in logs)
+
+
+def test_on_input_mode_changed_file_mode_inactive_without_file_only_widget(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    events = []
+    monkeypatch.delattr(w, "_playback_file_only_widget")
+    monkeypatch.setattr(w, "sender", lambda: None)
+    monkeypatch.setattr(w, "_refresh_midi_inputs", lambda *a, **k: events.append("refresh"))
+    monkeypatch.setattr(w, "_disconnect_midi_input", lambda: events.append("disconnect"))
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append("dirty"))
+    w.midi_input_active = False
+    w.input_mode_file_radio.setChecked(True)
+
+    w._on_input_mode_changed()
+
+    assert events == ["dirty"]
+
+
+def test_on_key_layout_changed_inactive_marks_dirty_only(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    events = []
+    w.live_backend = None
+    w.midi_input_active = False
+    monkeypatch.setattr("main_window.create_backend", lambda *a, **k: events.append("backend"))
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append("dirty"))
+
+    w._on_key_layout_changed()
+
+    assert events == ["dirty"]
+
+
+def test_handle_live_midi_message_unknown_type_is_ignored(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    backend = FakeLiveBackend()
+    w.live_backend = backend
+
+    w._handle_live_midi_message(SimpleNamespace(type="pitchwheel", pitch=10))
+
+    assert backend.calls == []
+
+
+def test_handle_live_midi_message_output_error_after_backend_clears_reference(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    errors = []
+    disconnects = []
+
+    class ClearingBackend(FakeLiveBackend):
+        def note_on(self, _pitch, _velocity):
+            w.live_backend = None
+            raise OutputBackendSendError("send failed")
+
+    backend = ClearingBackend()
+    w.live_backend = backend
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: errors.append((m, k)))
+    monkeypatch.setattr(w, "_disconnect_midi_input", lambda: disconnects.append(True))
+
+    w._handle_live_midi_message(SimpleNamespace(type="note_on", note=60, velocity=90))
+
+    assert backend.calls == []
+    assert any("Live MIDI output failed" in message for message, _ in errors)
+    assert disconnects == [True]

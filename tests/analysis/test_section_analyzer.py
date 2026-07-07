@@ -177,3 +177,25 @@ def test_analyze_by_measures_empty_boundaries_falls_back_to_silence():
     sa = SectionAnalyzer(notes, tm)
     sections = sa._analyze_by_measures()
     assert len(sections) >= 1
+
+
+def test_analyze_by_measures_all_empty_measures_returns_empty(monkeypatch):
+    sa = SectionAnalyzer([make_note(1, 48, 0.0, 0.2, hand="left")], _tempo_map())
+    monkeypatch.setattr(sa.tempo_map, "get_measure_boundaries", lambda _t: [(1.0, 2.0)])
+
+    assert sa._analyze_by_measures() == []
+
+
+def test_analyze_by_measures_style_change_without_current_notes_starts_later(monkeypatch):
+    note = make_note(1, 48, 1.1, 0.2, hand="left")
+    sa = SectionAnalyzer([note], _tempo_map())
+    monkeypatch.setattr(
+        sa.tempo_map,
+        "get_measure_boundaries",
+        lambda _t: [(0.0, 1.0), (1.0, 2.0)],
+    )
+
+    sections = sa._analyze_by_measures()
+
+    assert len(sections) == 1
+    assert sections[0].start_time == 1.0

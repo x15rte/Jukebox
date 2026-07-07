@@ -11,6 +11,13 @@ mc = cast(Any, mc)
 def _fresh_module():
     return cast(Any, importlib.reload(mc))
 
+def test_native_facade_does_not_export_private_macos_init():
+    import native
+
+    assert not hasattr(native, "_init_macos_cgevent")
+    assert hasattr(native, "post_macos_key_event")
+
+
 
 def test_macos_vk_initialized_on_darwin_import(monkeypatch):
     import builtins

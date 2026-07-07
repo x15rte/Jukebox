@@ -98,6 +98,11 @@ def _shared_mem_test(monkeypatch, tmp_path, scenario, expected_events):
             self._call_count += 1
             if self._scenario in ("already_exists", "already_exists_kill_fails"):
                 return False
+            if self._scenario == "already_exists_reclaim_succeeds":
+                if self._call_count == 1:
+                    return False
+                self._attached = True
+                return True
             if self._scenario == "already_exists_reclaim_fails":
                 return self._call_count > 2
             if self._scenario == "other_error":
@@ -156,6 +161,13 @@ def test_main_shared_mem_already_exists_process_alive(monkeypatch, tmp_path):
 def test_main_shared_mem_already_exists_reclaim_fails(monkeypatch, tmp_path):
     """Shared memory AlreadyExists, reclaim fails, continues anyway."""
     _shared_mem_test(monkeypatch, tmp_path, "already_exists_reclaim_fails", [
+        "app_id", "app_init", "window_init", "show",
+    ])
+
+
+def test_main_shared_mem_already_exists_reclaim_succeeds(monkeypatch, tmp_path):
+    """Shared memory AlreadyExists, orphan reclaim succeeds on second create."""
+    _shared_mem_test(monkeypatch, tmp_path, "already_exists_reclaim_succeeds", [
         "app_id", "app_init", "window_init", "show",
     ])
 

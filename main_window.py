@@ -70,6 +70,14 @@ APP_URL = "https://github.com/x15rte/Jukebox"
 MAX_LOG_ENTRIES = 5000
 
 
+
+def _midi_int(value, minimum: int, maximum: int) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if minimum <= value <= maximum:
+        return value
+    return None
+
 class MainWindow(QMainWindow):
     """Tabs: Playback (file, input/output), Humanization (humanization settings), Visualizer (timeline + piano), Settings (hotkey, overlay, playback defaults), Output (log). Saves/loads config.json; optional log to file."""
 
@@ -86,6 +94,7 @@ class MainWindow(QMainWindow):
         self.midi_input_worker = None
         self.midi_input_active = False
         self._midi_disconnecting: bool = False
+        self._stale_midi_inputs: list[tuple[object, object]] = []
         self.config_repo = ConfigRepository()
         self.config_dir = self.config_repo.config_dir
         self.config_path = self.config_repo.config_path
@@ -249,7 +258,7 @@ class MainWindow(QMainWindow):
         copy_btn = QPushButton("Copy")
         log_level_label = QLabel("Level:")
         self.log_level_combo = QComboBox()
-        self.log_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
+        self.log_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
         self.log_level_combo.setCurrentText("INFO")
         self.log_level_combo.setToolTip(
             "Minimum level to show in console and log file."
@@ -1051,7 +1060,7 @@ class MainWindow(QMainWindow):
                 self._disconnect_midi_input()
         self._mark_config_dirty()
 
-    def _refresh_midi_inputs(self, show_dialog: bool = True):
+    def _refresh_midi_inputs(self, show_dialog: bool = True, preferred_device: str | None = None):
         try:
             names = mido.get_input_names()  # type: ignore[attr-defined]
         except Exception as e:
@@ -1062,10 +1071,13 @@ class MainWindow(QMainWindow):
                 exc_info=True,
             )
             return
+        current = preferred_device or self.midi_input_combo.currentText().strip()
         self.midi_input_combo.blockSignals(True)
         try:
             self.midi_input_combo.clear()
             self.midi_input_combo.addItems(names)
+            if current and current in names:
+                self.midi_input_combo.setCurrentText(current)
         finally:
             self.midi_input_combo.blockSignals(False)
 
@@ -1144,11 +1156,26 @@ class MainWindow(QMainWindow):
         if self.live_backend:
             self.live_backend.shutdown()
 
+    def _forget_stale_midi_input(self, thread, worker) -> None:
+        try:
+            try:
+                self._stale_midi_inputs.remove((thread, worker))
+            except ValueError:
+                pass
+            is_running = getattr(thread, "isRunning", None)
+            wait = getattr(thread, "wait", None)
+            if callable(is_running) and callable(wait) and is_running():
+                wait(1000)
+        except Exception as e:
+            jukebox_logger.debug(f"Error cleaning stale MIDI input thread: {e}")
+
     def _disconnect_midi_input(self):
         if not self.midi_input_active:
             return
         self.midi_input_active = False
         self._midi_disconnecting = True
+        worker = self.midi_input_worker
+        thread = self.midi_input_thread
         try:
             try:
                 self._release_all_live_keys()
@@ -1156,33 +1183,46 @@ class MainWindow(QMainWindow):
                 self.add_log_message(f"Error releasing live keys: {e}")
         finally:
             self.live_backend = None
-            if self.midi_input_worker is not None:
+            if worker is not None:
                 try:
-                    self.midi_input_worker.stop()
+                    worker.stop()
                 except Exception as e:
                     self.add_log_message(f"Error stopping MIDI input worker: {e}")
-                for signal_name in ("message_received", "connected", "connection_error", "warning", "finished"):
+                for signal_name in ("message_received", "connected", "connection_error", "warning"):
                     try:
-                        getattr(self.midi_input_worker, signal_name).disconnect()
+                        getattr(worker, signal_name).disconnect()
                     except TypeError:
                         pass
-            if self.midi_input_thread is not None:
+            if thread is not None:
+                self._stale_midi_inputs.append((thread, worker))
+                finished = getattr(thread, "finished", None)
+                connect = getattr(finished, "connect", None)
+                if callable(connect):
+                    connect(
+                        lambda thread=thread, worker=worker: self._forget_stale_midi_input(
+                            thread, worker
+                        )
+                    )
                 # Worker.run() doesn't start a Qt event loop (no exec()),
                 # so quit() is a no-op. The thread stops via worker.stop()
                 # which sets a threading.Event. The quit() call is kept for
                 # defensive compatibility in case run() is refactored later.
-                self.midi_input_thread.quit()
-                if not self.midi_input_thread.wait(5000):
-                    jukebox_logger.warning(
-                        "MIDI input thread did not stop within 5s timeout — continuing with thread reference"
-                    )
+                thread.quit()
+                stopped = thread.wait(5000)
+                if stopped:
+                    self._forget_stale_midi_input(thread, worker)
                 else:
-                    self.midi_input_thread = None
+                    jukebox_logger.warning(
+                        "MIDI input thread did not stop within 5s timeout; leaving worker marked disconnected"
+                    )
+                self.midi_input_thread = None
+            self.midi_input_active = False
             self._midi_disconnecting = False
             self.midi_input_worker = None
             self.live_backend = None
             self.midi_input_connect_btn.setEnabled(True)
             self.midi_input_disconnect_btn.setEnabled(False)
+            self.midi_input_status_label.setText("Piano input disconnected.")
     def _on_midi_input_finished(self):
         if not self.midi_input_active:
             return  # _disconnect_midi_input already handled this
@@ -1193,8 +1233,7 @@ class MainWindow(QMainWindow):
         if self._midi_disconnecting:
             return  # _disconnect_midi_input is handling cleanup
         self.midi_input_active = False
-        if self.midi_input_thread is not None:
-            self.midi_input_thread.wait(1000)
+        self.midi_input_thread.wait(1000)
         self.midi_input_thread = None
         self.midi_input_worker = None
         # Shut down the live backend if it hasn't already been cleaned up
@@ -1276,9 +1315,9 @@ class MainWindow(QMainWindow):
 
         try:
             if msg_type in ("note_on", "note_off"):
-                note = getattr(msg, "note", None)
-                velocity = getattr(msg, "velocity", 0)
-                if note is None:
+                note = _midi_int(getattr(msg, "note", None), 0, 127)
+                velocity = _midi_int(getattr(msg, "velocity", 0), 0, 127)
+                if note is None or velocity is None:
                     return
                 is_off = msg_type == "note_off" or (
                     msg_type == "note_on" and velocity == 0
@@ -1289,8 +1328,11 @@ class MainWindow(QMainWindow):
                     self.live_backend.note_on(note, velocity)
                 return
 
-            if msg_type == "control_change" and getattr(msg, "control", None) == 64:
-                value = getattr(msg, "value", 0)
+            if msg_type == "control_change":
+                control = _midi_int(getattr(msg, "control", None), 0, 127)
+                value = _midi_int(getattr(msg, "value", 0), 0, 127)
+                if control != 64 or value is None:
+                    return
                 if value >= 64:
                     self.live_backend.pedal_on()
                 else:
@@ -1320,6 +1362,10 @@ class MainWindow(QMainWindow):
                 self._disconnect_midi_input()
             except Exception as cleanup_e:
                 self._log_error(f"Error during MIDI disconnect cleanup: {cleanup_e}")
+        except Exception as e:
+            jukebox_logger.error(
+                f"Unexpected live MIDI handling error: {e}", exc_info=True
+            )
 
     def _create_settings_group(self):
         group = QGroupBox("Settings")
@@ -1479,8 +1525,7 @@ class MainWindow(QMainWindow):
             self._toggle_all_humanization
         )
         for check in self.all_humanization_checks.values():
-            if check.text():
-                check.toggled.connect(self._update_select_all_state)
+            check.toggled.connect(self._update_select_all_state)
         self._reset_humanization_group_to_default()
         return group
 
@@ -1607,8 +1652,10 @@ class MainWindow(QMainWindow):
         path = self._get_log_file_path()
         if checked:
             self.config_dir.mkdir(parents=True, exist_ok=True)
-            jukebox_logger.enable_file_logging(str(path))
-            self.add_log_message(f"Log is being saved to: {path}")
+            if jukebox_logger.enable_file_logging(str(path)):
+                self.add_log_message(f"Log is being saved to: {path}")
+            else:
+                self.add_log_message(f"Failed to enable file logging: {path}")
         else:
             jukebox_logger.disable_file_logging()
             self.add_log_message("Log file saving disabled.")
@@ -1752,7 +1799,7 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         clear_action = menu.addAction("Clear")
         assert clear_action is not None  # nosec
-        clear_action.triggered.connect(self.log_output.clear)
+        clear_action.triggered.connect(self._clear_log)
         menu.exec(self.log_output.mapToGlobal(pos))
 
     def set_controls_enabled(self, enabled):
@@ -1840,14 +1887,16 @@ class MainWindow(QMainWindow):
             self._config_dirty = False
             return
         self._loading_config = True
-        self._apply_config_to_ui(config)
-        apply_config_effects(self, config)
-        self._update_enabled_states()
-        self._update_88_key_visibility()
-        self._update_play_stop_labels()
-        self._config_save_timer.stop()
-        self._config_dirty = False  # loading config doesn't count as "dirty"
-        self._loading_config = False
+        try:
+            self._apply_config_to_ui(config)
+            apply_config_effects(self, config)
+            self._update_enabled_states()
+            self._update_88_key_visibility()
+            self._update_play_stop_labels()
+            self._config_save_timer.stop()
+            self._config_dirty = False  # loading config doesn't count as "dirty"
+        finally:
+            self._loading_config = False
 
     def _set_current_file_labels(self, filepath: str | None) -> None:
         if filepath:
@@ -2151,6 +2200,30 @@ class MainWindow(QMainWindow):
                 self._disconnect_midi_input()
         except Exception as e:
             jukebox_logger.error(f"Error disconnecting MIDI: {e}", exc_info=True)
+        for thread, worker in list(self._stale_midi_inputs):
+            stop = getattr(worker, "stop", None)
+            if callable(stop):
+                try:
+                    stop()
+                except Exception as e:
+                    jukebox_logger.debug(f"Error stopping stale MIDI input worker: {e}")
+            quit_thread = getattr(thread, "quit", None)
+            if callable(quit_thread):
+                try:
+                    quit_thread()
+                except Exception as e:
+                    jukebox_logger.debug(f"Error quitting stale MIDI input thread: {e}")
+            wait = getattr(thread, "wait", None)
+            if callable(wait):
+                try:
+                    stopped = wait(1000)
+                except Exception as e:
+                    jukebox_logger.debug(f"Error waiting for stale MIDI input thread: {e}")
+                    stopped = False
+                if stopped:
+                    self._forget_stale_midi_input(thread, worker)
+                else:
+                    jukebox_logger.warning("MIDI input thread still running during shutdown")
         # Save config last (reflects post-playback state)
         try:
             self._flush_config()

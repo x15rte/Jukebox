@@ -622,3 +622,71 @@ def test_handle_play_start_exception(window_factory, monkeypatch, tmp_path):
     assert ("controls", True) in events
     assert w.stop_button.isEnabled() is False
     assert w.play_button.isEnabled() is True
+
+
+def test_toggle_playback_state_running_playing_toggles_without_scrub(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    events = []
+
+    class Ctrl:
+        state = "playing"
+        is_running = True
+
+        def toggle_pause(self):
+            events.append("toggle")
+
+        def stop_and_wait(self, timeout_ms=None):
+            return None
+
+    w.playback_controller = Ctrl()
+    monkeypatch.setattr(w.piano_widget, "clear", lambda: events.append("clear"))
+    monkeypatch.setattr(w, "_on_visual_scrub", lambda _t: events.append("scrub"))
+
+    w.toggle_playback_state()
+
+    assert events == ["clear", "toggle"]
+
+
+def test_update_progress_zero_duration_skips_scroll(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    events = []
+
+    class Ctrl:
+        total_duration = 0.0
+        is_running = False
+
+        def stop_and_wait(self, timeout_ms=None):
+            return None
+
+    w.playback_controller = Ctrl()
+    w.total_song_duration_sec = 0.0
+    w.timeline_widget.is_dragging = False
+    monkeypatch.setattr(w.timeline_widget, "set_position", lambda t: events.append(("pos", t)))
+    monkeypatch.setattr(w, "_update_time_label", lambda c, t: events.append(("label", c, t)))
+    monkeypatch.setattr(w.scroll_area, "horizontalScrollBar", lambda: events.append("scrollbar") or None)
+
+    w.update_progress(1.0)
+
+    assert ("pos", 1.0) in events
+    assert ("label", 1.0, 0.0) in events
+    assert "scrollbar" not in events
+
+
+def test_handle_reset_when_not_running_skips_seek(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    seeks = []
+
+    class Ctrl:
+        is_running = False
+
+        def seek(self, t):
+            seeks.append(t)
+
+        def stop_and_wait(self, timeout_ms=None):
+            return None
+
+    w.playback_controller = Ctrl()
+    w.handle_reset()
+    assert seeks == []

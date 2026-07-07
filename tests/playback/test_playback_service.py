@@ -262,3 +262,51 @@ def test_prepare_playback_real_fixture_remaps_original_pedal_with_humanizer(
         ("pedal", "up", None, 0.55),
         ("release", "", 60, 0.55),
     ]
+
+
+def test_prepare_playback_ignores_unselected_tracks_and_pedals(monkeypatch):
+    selected_note = make_note(1, 60, 0.0, 0.2, hand="unknown")
+    skipped_note = make_note(2, 72, 0.0, 0.2, hand="unknown")
+    selected = MidiTrack(0, "Selected", 0, False, [selected_note], [(0.1, 127)])
+    skipped = MidiTrack(1, "Skipped", 0, False, [skipped_note], [(0.2, 127)])
+    seen = {}
+
+    def fake_compile(notes, _sections, config):
+        seen["note_ids"] = [note.id for note in notes]
+        seen["pedals"] = config["raw_pedal_events"]
+        return []
+
+    monkeypatch.setattr(
+        "playback.playback_service.MidiParser.parse_structure",
+        lambda *_args, **_kwargs: ([selected, skipped], object()),
+    )
+    monkeypatch.setattr("playback.playback_service.EventCompiler.compile", fake_compile)
+    monkeypatch.setattr("playback.playback_service.SectionAnalyzer.analyze", lambda self: [])
+
+    final_notes, _sections, _events, _duration, _tempo = PlaybackService.prepare_playback(
+        "x.mid",
+        [(selected, "Auto-Detect")],
+        {"tempo": 100, "simulate_hands": False},
+    )
+
+    assert [note.id for note in final_notes] == [1]
+    assert seen == {"note_ids": [1], "pedals": [(0.1, 127)]}
+
+
+def test_prepare_playback_total_dur_from_pedal_release_without_extension(monkeypatch):
+    track = MidiTrack(0, "Pedal", 0, False, [], [(0.5, 0)])
+
+    monkeypatch.setattr(
+        "playback.playback_service.MidiParser.parse_structure",
+        lambda *_args, **_kwargs: ([track], object()),
+    )
+    monkeypatch.setattr("playback.playback_service.EventCompiler.compile", lambda _n, _s, _c: [])
+    monkeypatch.setattr("playback.playback_service.SectionAnalyzer.analyze", lambda self: [])
+
+    _notes, _sections, _events, total_dur, _tempo = PlaybackService.prepare_playback(
+        "x.mid",
+        [(track, "Auto-Detect")],
+        {"tempo": 100, "simulate_hands": False},
+    )
+
+    assert total_dur == 0.5

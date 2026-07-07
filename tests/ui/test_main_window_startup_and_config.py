@@ -133,6 +133,23 @@ def test_load_config_success_applies_effects_and_updates(window_factory, monkeyp
     assert ("vis", None) in events
     assert ("labels", None) in events
 
+def test_load_config_resets_loading_flag_when_apply_raises(window_factory, monkeypatch):
+    from config_repository import Config
+
+    w = window_factory()
+    monkeypatch.setattr(w.config_repo, "load", lambda: Config())
+    w._loading_config = False
+    monkeypatch.setattr(
+        w,
+        "_apply_config_to_ui",
+        lambda _config: (_ for _ in ()).throw(RuntimeError("apply failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="apply failed"):
+        w._load_config()
+
+    assert w._loading_config is False
+
 
 @pytest.mark.parametrize(
     ("direct_input", "expected"),

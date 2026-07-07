@@ -429,6 +429,42 @@ def test_loop_body_was_paused_discards_past_releases(monkeypatch):
     assert 67 in note_on_pitches, "pitch 67 should be restored (no release during pause)"
     assert 60 not in note_on_pitches, "pitch 60 should have been discarded (released during pause)"
 
+
+def test_reconcile_active_pitches_single_pass_keeps_latest_velocity():
+    backend = FakeBackend()
+    events = [
+        FakeEvent(0.1, 2, "press", pitch=60, velocity=40),
+        FakeEvent(0.2, 4, "release", pitch=60),
+        FakeEvent(0.3, 2, "press", pitch=60, velocity=90),
+        FakeEvent(0.4, 4, "release", pitch=60),
+    ]
+    p = pmod.Player(cast(list[KeyEvent], events), backend, {}, total_duration=1.0)
+    p.event_index = 3
+    vis = FakeSignal()
+    p.visualizer_updated = cast(Any, vis)
+
+    p._reconcile_active_pitches()
+
+    assert p._active_pitches == {60}
+    assert p._pitch_velocities[60] == 90
+    assert vis.emitted
+    assert set(vis.emitted[-1][0]) == {60}
+
+
+def test_drop_paused_pitches_released_before_discards_only_elapsed_releases():
+    backend = FakeBackend()
+    events = [
+        FakeEvent(0.2, 4, "release", pitch=60),
+        FakeEvent(0.3, 4, "release", pitch=62),
+    ]
+    p = pmod.Player(cast(list[KeyEvent], events), backend, {}, total_duration=1.0)
+    p._paused_pitches = {60, 62}
+
+    p._drop_paused_pitches_released_before(start_index=0, playback_time=0.2)
+
+    assert p._paused_pitches == {62}
+
+
 def test_loop_body_pause_after_sleep_continues(monkeypatch):
     """After precise_sleep, if pause_event is set, the loop continues (line 819)."""
     backend = FakeBackend()
@@ -540,5 +576,45 @@ def test_loop_body_seek_version_changed_during_batch(monkeypatch):
     # detected the mismatch and continued at line 836. No batch executed.
     execute_calls = [c for c in backend.calls if c[0] == "execute_batch"]
     assert not execute_calls
+
+
+def test_loop_body_handles_empty_collected_batch(monkeypatch):
+    backend = FakeBackend()
+    events = [FakeEvent(0.0, 2, "press", pitch=60)]
+    p = pmod.Player(cast(list[KeyEvent], events), backend, {}, total_duration=0.0)
+    p.start_time = 0.0
+    progress = FakeSignal()
+    p.progress_updated = cast(Any, progress)
+    perf = iter([0.0, 0.05, 0.2])
+    monkeypatch.setattr(pmod.time, "perf_counter", lambda: next(perf, 0.2))
+
+    class EmptyBatchLock:
+        def __init__(self, real_lock):
+            self._lock = real_lock
+            self._enters = 0
+
+        def acquire(self, blocking=True, timeout=-1):
+            return self._lock.acquire(blocking, timeout)
+
+        def release(self):
+            self._lock.release()
+
+        def __enter__(self):
+            self.acquire()
+            self._enters += 1
+            if self._enters == 2:
+                p.event_index = len(p.events)
+            return self
+
+        def __exit__(self, _exc_type, _exc_val, _exc_tb):
+            self.release()
+            return False
+
+    p._state_lock = EmptyBatchLock(p._state_lock)
+
+    p._loop_body()
+    execute_calls = [call for call in backend.calls if call[0] == "execute_batch"]
+    assert execute_calls == []
+    assert progress.emitted
 
 

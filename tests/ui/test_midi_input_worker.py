@@ -196,3 +196,55 @@ def test_run_breaks_inner_loop_when_stop_event_set_during_iteration(monkeypatch)
     assert len(received) == 2
     assert received[0].note == 60
     assert received[1].note == 61
+
+
+def test_run_suppresses_oserror_after_stop_event(monkeypatch):
+    worker = MidiInputWorker("ok-port")
+    errors = []
+    worker.connection_error.connect(errors.append)
+
+    class Port:
+        def iter_pending(self):
+            worker._stop_event.set()
+            raise OSError("stopped")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("ui.midi_input_worker.mido.open_input", lambda *_a, **_k: Port())
+    worker.run()
+    assert errors == []
+
+
+def test_run_suppresses_unexpected_error_after_stop_event(monkeypatch):
+    worker = MidiInputWorker("ok-port")
+    errors = []
+    worker.connection_error.connect(errors.append)
+
+    class Port:
+        def iter_pending(self):
+            worker._stop_event.set()
+            raise RuntimeError("stopped")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("ui.midi_input_worker.mido.open_input", lambda *_a, **_k: Port())
+    worker.run()
+    assert errors == []
+
+
+def test_run_finished_when_inport_cleared_before_cleanup(monkeypatch):
+    worker = MidiInputWorker("ok-port")
+    finished = []
+    worker.finished.connect(lambda: finished.append(True))
+
+    class Port:
+        def iter_pending(self):
+            worker._inport = None
+            worker._stop_event.set()
+            return []
+
+    monkeypatch.setattr("ui.midi_input_worker.mido.open_input", lambda *_a, **_k: Port())
+    worker.run()
+    assert finished == [True]

@@ -2,14 +2,13 @@
 
 import sys
 import time
-import copy
-import heapq
 import math
 
 import random
 import bisect
 import threading
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any, Dict, List, Set, Optional, Tuple
 
 from PyQt6.QtCore import QObject, pyqtSignal as Signal
@@ -33,15 +32,19 @@ class EventCompiler:
 
     This is a stateless helper — call :meth:`compile` as a static method.
     """
+    @staticmethod
+    def _clone_notes(notes: List[Note]) -> List[Note]:
+        return [replace(note) for note in notes]
+
 
     @staticmethod
     def compile(
         notes: List[Note], sections: List[MusicalSection], config: Mapping[str, Any]
     ) -> List[KeyEvent]:
-        work = copy.deepcopy(notes)
+        humanization_enabled = EventCompiler._humanization_enabled(config)
+        work = EventCompiler._clone_notes(notes) if humanization_enabled else notes
 
         # --- optional humanization (delegates to analysis.py) ---
-        humanization_enabled = EventCompiler._humanization_enabled(config)
         if humanization_enabled:
             humanizer = Humanizer(config)
             left = [n for n in work if n.hand == "left"]
@@ -84,7 +87,7 @@ class EventCompiler:
             )
 
         # --- build press / release events ---
-        heap: list = []
+        events: List[KeyEvent] = []
         use_mistakes = config.get("enable_mistakes", False)
         raw_mc = config.get("mistake_chance", 0)
         mistake_chance = (raw_mc if isinstance(raw_mc, (int, float)) else 0) / 100.0
@@ -101,6 +104,7 @@ class EventCompiler:
                 played_in_section.clear()
 
             pitch = note.pitch
+            event_pitch = pitch
             did_mistake = False
 
             if (
@@ -108,57 +112,34 @@ class EventCompiler:
                 and pitch not in played_in_section
                 and random.random() < mistake_chance  # nosec B311: non-crypto randomness for musical mistakes only
             ):
-                mp = EventCompiler._mistake_pitch(pitch)
-                if mp is not None:
-                    heapq.heappush(
-                        heap,
-                        KeyEvent(
-                            note.start_time,
-                            2,
-                            "press",
-                            "",
-                            pitch=mp,
-                            velocity=note.velocity,
-                        ),
-                    )
-                    heapq.heappush(
-                        heap,
-                        KeyEvent(note.end_time, 4, "release", "", pitch=mp, velocity=0),
-                    )
+                mistake_pitch = EventCompiler._mistake_pitch(pitch)
+                if mistake_pitch is not None:
+                    event_pitch = mistake_pitch
                     did_mistake = True
 
-            if not did_mistake:
-                heapq.heappush(
-                    heap,
-                    KeyEvent(
-                        note.start_time,
-                        2,
-                        "press",
-                        "",
-                        pitch=pitch,
-                        velocity=note.velocity,
-                    ),
+            events.append(
+                KeyEvent(
+                    note.start_time,
+                    2,
+                    "press",
+                    "",
+                    pitch=event_pitch,
+                    velocity=note.velocity,
                 )
-                heapq.heappush(
-                    heap,
-                    KeyEvent(note.end_time, 4, "release", "", pitch=pitch, velocity=0),
-                )
+            )
+            events.append(
+                KeyEvent(note.end_time, 4, "release", "", pitch=event_pitch, velocity=0)
+            )
+            played_in_section.add(pitch)
             if did_mistake:
-                played_in_section.add(pitch)
-                if mp is not None:
-                    played_in_section.add(mp)
-            else:
-                played_in_section.add(pitch)
+                played_in_section.add(event_pitch)
 
         # --- pedal events (from analysis.py) ---
-        for pe in PedalGenerator.generate_events(
-            pedal_config, pedal_notes, pedal_sections
-        ):
-            heapq.heappush(heap, pe)
+        events.extend(
+            PedalGenerator.generate_events(pedal_config, pedal_notes, pedal_sections)
+        )
 
-        events: List[KeyEvent] = []
-        while heap:
-            events.append(heapq.heappop(heap))
+        events.sort()
         return events
 
     @staticmethod
@@ -193,7 +174,7 @@ class EventCompiler:
         humanized_notes: List[Note],
         effective_pedal_style: Optional[str],
     ) -> List[Note]:
-        pedal_notes = copy.deepcopy(original_notes)
+        pedal_notes = EventCompiler._clone_notes(original_notes)
         humanized_by_id = {note.id: note for note in humanized_notes}
 
         for note in pedal_notes:
@@ -224,9 +205,7 @@ class EventCompiler:
                     remapped_notes.append(pedal_note)
                     continue
 
-                remapped_notes.append(
-                    copy.deepcopy(original_by_id.get(note.id, note))
-                )
+                remapped_notes.append(replace(original_by_id.get(note.id, note)))
             remapped_notes.sort(key=lambda note: note.start_time)
 
             start_time = section.start_time
@@ -702,21 +681,34 @@ class Player(QObject):
     def _reconcile_active_pitches(self) -> None:
         with self._state_lock:
             held: Set[int] = set()
+            velocities: Dict[int, int] = {}
             idx = self.event_index
             for i in range(0, idx):
                 e = self.events[i]
-                if e.action == "press" and e.pitch is not None:
+                if e.pitch is None:
+                    continue
+                if e.action == "press":
                     held.add(e.pitch)
-                elif e.action == "release" and e.pitch is not None:
+                    velocities[e.pitch] = e.velocity
+                elif e.action == "release":
                     held.discard(e.pitch)
+                    velocities.pop(e.pitch, None)
         with self._active_lock:
             self._active_pitches = held
-            self._pitch_velocities.clear()
-            for i in range(0, idx):
-                e = self.events[i]
-                if e.action == "press" and e.pitch is not None:
-                    self._pitch_velocities[e.pitch] = e.velocity
-        self.visualizer_updated.emit(list(self._active_pitches))
+            self._pitch_velocities = velocities
+            active_pitches = list(self._active_pitches)
+        self.visualizer_updated.emit(active_pitches)
+
+    def _drop_paused_pitches_released_before(self, start_index: int, playback_time: float) -> None:
+        if not self._paused_pitches:
+            return
+
+        for i in range(start_index, len(self.events)):
+            e = self.events[i]
+            if e.time > playback_time:
+                break
+            if e.action == "release" and e.pitch is not None and e.pitch in self._paused_pitches:
+                self._paused_pitches.discard(e.pitch)
 
     def _release_all_notes(self) -> None:
         """Release all currently-held notes through the backend without finalizing it."""
@@ -815,14 +807,7 @@ class Player(QObject):
             if was_paused:
                 with self._state_lock:
                     idx = self.event_index
-                if self._paused_pitches:
-                    # Remove pitches whose release event already passed during pause
-                    for i in range(idx, len(self.events)):
-                        e = self.events[i]
-                        if e.time > pt:
-                            break  # Future events — note should be re-pressed
-                        if e.action == "release" and e.pitch is not None and e.pitch in self._paused_pitches:
-                            self._paused_pitches.discard(e.pitch)
+                self._drop_paused_pitches_released_before(idx, pt)
                 self._restore_backend_state()
                 was_paused = False
 

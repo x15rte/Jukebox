@@ -90,8 +90,7 @@ class SectionAnalyzer:
                 new_notes = [n for n in notes_in_measure if n.id not in seen_ids]
                 seen_ids.update(n.id for n in new_notes)
                 if new_notes:
-                    if current_section_start is None:
-                        current_section_start = m_start
+                    current_section_start = m_start
                 current_notes_in_section.extend(new_notes)
                 continue
             if style != prev_style or pace != prev_pace:

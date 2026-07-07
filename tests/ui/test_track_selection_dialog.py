@@ -77,3 +77,19 @@ def test_track_selection_dialog_hand_role_assignment(qtbot):
     dlg.role_combos[0].setCurrentText("Auto-Detect")
     sel = dlg.get_selection()
     assert sel[0][1] == "Auto-Detect"
+
+
+def test_track_selection_dialog_allows_missing_horizontal_header(qtbot, monkeypatch):
+    from PyQt6.QtWidgets import QTableWidget
+    import ui.track_selection_dialog as dialog_module
+
+    class HeaderlessTable(QTableWidget):
+        def horizontalHeader(self):
+            return None
+
+    monkeypatch.setattr(dialog_module, "QTableWidget", HeaderlessTable)
+    dlg = TrackSelectionDialog(
+        [MidiTrack(0, "Piano", 0, False, [make_note(1, 60, 0.0, 0.2)])]
+    )
+    qtbot.addWidget(dlg)
+    assert len(dlg.checkboxes) == 1

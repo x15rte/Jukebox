@@ -130,3 +130,11 @@ def test_musical_section_post_init_fixes_end_time():
 def test_musical_section_post_init_fixes_end_beat():
     s = MusicalSection(start_time=0.0, end_time=2.0, start_beat=5.0, end_beat=3.0, notes=[])
     assert s.end_beat == 5.0
+
+
+def test_key_state_release_when_inactive_is_noop():
+    ks = KeyState("a")
+
+    ks.release()
+
+    assert ks.is_active is False

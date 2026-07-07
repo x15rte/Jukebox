@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -187,3 +187,25 @@ def test_apply_to_hand_invalid_hand_raises():
     hz = Humanizer({})
     with pytest.raises(ValueError, match="Invalid hand"):
         hz.apply_to_hand([], "invalid", set())
+
+
+def test_apply_to_hand_ignores_far_shared_drift_offset():
+    hz = Humanizer(
+        {
+            "enable_drift_correction": True,
+            "drift_shared_factor": 1.0,
+            "drift_noise_sigma": 0.01,
+        }
+    )
+    cast(Any, hz)._rng = type(
+        "FakeRng",
+        (),
+        {"gauss": lambda self, mu, sigma: 0.0, "random": lambda self: 0.5},
+    )()
+    notes = [make_note(1, 60, 1.0, 0.2, hand="right")]
+    hz._shared_drift_offsets = {1.1: 0.2}
+
+    hz.apply_to_hand(notes, "right", set())
+
+    assert notes[0].start_time == 1.0
+    assert hz.right_hand_drift == 0.0

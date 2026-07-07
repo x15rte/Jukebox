@@ -1,11 +1,48 @@
 from typing import Any, cast
 
 from models import KeyEvent
+from output.output import OutputBackendSendError
 import playback.player as pmod
 from tests.helpers.builders import make_section
 from tests.helpers.fakes import FakeBackend, FakeEvent, FakeSignal
 
 pmod = cast(Any, pmod)
+
+
+def test_play_reports_output_backend_send_error_and_cleans_up(monkeypatch):
+    class ExplodingBackend(FakeBackend):
+        def execute_batch(self, events):
+            self.calls.append(("execute_batch", list(events)))
+            raise OutputBackendSendError("send exploded")
+
+    backend = ExplodingBackend()
+    p = pmod.Player(
+        cast(list[KeyEvent], [FakeEvent(0.0, 2, "press", pitch=60)]),
+        backend,
+        {"countdown": False},
+        0.1,
+    )
+    status = FakeSignal()
+    vis = FakeSignal()
+    finished = FakeSignal()
+    p.status_updated = cast(Any, status)
+    p.visualizer_updated = cast(Any, vis)
+    p.playback_finished = cast(Any, finished)
+
+    monkeypatch.setattr(pmod.sys, "getswitchinterval", lambda: 0.01)
+    monkeypatch.setattr(pmod.sys, "setswitchinterval", lambda _v: None)
+    monkeypatch.setattr(pmod, "set_timer_resolution", lambda _v: None)
+    monkeypatch.setattr(pmod, "restore_timer_resolution", lambda _v: None)
+    monkeypatch.setattr(pmod.time, "perf_counter", lambda: 0.0)
+    monkeypatch.setattr(pmod, "precise_sleep", lambda _s, _e=None, _p=None: None)
+    monkeypatch.setattr(pmod.time, "sleep", lambda _s: None)
+
+    p.play()
+
+    assert [call[0] for call in backend.calls] == ["execute_batch", "shutdown"]
+    assert status.emitted[-1][0].startswith("Error: send exploded")
+    assert vis.emitted == [([],)]
+    assert finished.emitted == [()]
 
 
 def test_stop_sets_stop_and_clears_pause():
@@ -179,3 +216,184 @@ def test_execute_batch_ignores_events_without_pitch_values():
         "Pitch-less events should not generate note_on/note_off backend calls"
     assert p._active_pitches == {60}
     assert vis.emitted == []
+
+
+def test_event_compiler_falls_back_to_original_note_when_mistake_pitch_missing(monkeypatch):
+    note = pmod.Note(1, 60, 90, 0.0, 0.2, hand="right")
+    monkeypatch.setattr(pmod.random, "random", lambda: 0.0)
+    monkeypatch.setattr(pmod.EventCompiler, "_mistake_pitch", lambda _pitch: None)
+    monkeypatch.setattr(pmod.PedalGenerator, "generate_events", lambda *_args, **_kwargs: [])
+
+    events = pmod.EventCompiler.compile(
+        [note],
+        [],
+        {"enable_mistakes": True, "mistake_chance": 100},
+    )
+
+    assert [event.pitch for event in events if event.action == "press"] == [60]
+
+
+def test_event_compiler_records_mistake_pitch_before_next_note(monkeypatch):
+    notes = [
+        pmod.Note(1, 60, 90, 0.0, 0.2, hand="right"),
+        pmod.Note(2, 62, 90, 0.1, 0.2, hand="right"),
+    ]
+    monkeypatch.setattr(pmod.random, "random", lambda: 0.0)
+    monkeypatch.setattr(pmod.EventCompiler, "_mistake_pitch", lambda pitch: pitch + 1)
+    monkeypatch.setattr(pmod.PedalGenerator, "generate_events", lambda *_args, **_kwargs: [])
+
+    events = pmod.EventCompiler.compile(
+        notes,
+        [make_section(0.0, 1.0, notes)],
+        {"enable_mistakes": True, "mistake_chance": 100},
+    )
+
+    assert [event.pitch for event in events if event.action == "press"] == [61, 63]
+
+
+def test_build_pedal_notes_leaves_notes_without_humanized_match_unchanged():
+    original = [
+        pmod.Note(1, 60, 90, 0.0, 0.2, hand="right"),
+        pmod.Note(2, 64, 90, 1.0, 0.3, hand="right"),
+    ]
+    humanized = [pmod.Note(1, 60, 90, 0.5, 0.4, hand="right")]
+
+    pedal_notes = pmod.EventCompiler._build_pedal_notes(
+        original,
+        humanized,
+        "rhythmic",
+    )
+
+    assert [(note.id, note.start_time, note.duration) for note in pedal_notes] == [
+        (1, 0.5, 0.4),
+        (2, 1.0, 0.3),
+    ]
+
+
+def test_build_pedal_sections_preserves_empty_section_bounds():
+    section = pmod.MusicalSection(start_time=1.0, end_time=2.0, notes=[])
+
+    remapped = pmod.EventCompiler._build_pedal_sections([section], [], [])
+
+    assert len(remapped) == 1
+    assert remapped[0].start_time == 1.0
+    assert remapped[0].end_time == 2.0
+    assert remapped[0].notes == []
+
+
+def test_play_while_initially_paused_suppresses_playing_status(monkeypatch):
+    backend = FakeBackend()
+    p = pmod.Player([], backend, {"countdown": False}, 1.0)
+    status = FakeSignal()
+    p.status_updated = cast(Any, status)
+    p.pause_event.set()
+    monkeypatch.setattr(p, "_run_loop", lambda: None)
+
+    p.play()
+
+    assert ("Playing!",) not in status.emitted
+    assert backend.calls[-1][0] == "shutdown"
+
+
+def test_stop_when_already_stopped_emits_no_status():
+    p = pmod.Player([], FakeBackend(), {}, 1.0)
+    status = FakeSignal()
+    p.status_updated = cast(Any, status)
+    p.stop_event.set()
+
+    p.stop()
+
+    assert status.emitted == []
+
+
+def test_toggle_pause_resume_at_end_seeks_to_start(monkeypatch):
+    p = pmod.Player([FakeEvent(0.1, 2, "press", pitch=60)], FakeBackend(), {}, 1.0)
+    p.pause_event.set()
+    p.event_index = len(p.events)
+    p._pause_ts = 5.0
+    seeks = []
+    status = FakeSignal()
+    p.status_updated = cast(Any, status)
+    monkeypatch.setattr(pmod.time, "perf_counter", lambda: 7.0)
+    monkeypatch.setattr(p, "seek", lambda target: seeks.append(target))
+
+    p.toggle_pause()
+
+    assert seeks == [0.0]
+    assert p.pause_event.is_set() is False
+    assert status.emitted[-1] == ("Resuming...",)
+
+
+def test_reconcile_active_pitches_ignores_pitchless_and_non_note_events():
+    events = [
+        FakeEvent(0.0, 2, "press", pitch=None),
+        FakeEvent(0.1, 0, "pedal", key_char="down", pitch=None),
+        FakeEvent(0.2, 2, "press", pitch=60, velocity=80),
+    ]
+    p = pmod.Player(cast(list[KeyEvent], events), FakeBackend(), {}, 1.0)
+    p.event_index = len(events)
+    vis = FakeSignal()
+    p.visualizer_updated = cast(Any, vis)
+
+    p._reconcile_active_pitches()
+
+    assert p._active_pitches == {60}
+    assert p._pitch_velocities == {60: 80}
+    assert vis.emitted[-1] == ([60],)
+
+
+def test_drop_paused_pitches_returns_when_empty():
+    p = pmod.Player([FakeEvent(0.1, 4, "release", pitch=60)], FakeBackend(), {}, 1.0)
+    p._paused_pitches = set()
+
+    p._drop_paused_pitches_released_before(start_index=0, playback_time=1.0)
+
+    assert p._paused_pitches == set()
+
+
+def test_build_pedal_notes_non_rhythmic_keeps_original_duration():
+    original = [pmod.Note(1, 60, 90, 0.0, 0.2, hand="right")]
+    humanized = [pmod.Note(1, 60, 90, 0.5, 0.4, hand="right")]
+
+    pedal_notes = pmod.EventCompiler._build_pedal_notes(
+        original,
+        humanized,
+        "hybrid",
+    )
+
+    assert pedal_notes[0].start_time == 0.5
+    assert pedal_notes[0].duration == 0.2
+
+
+def test_toggle_pause_resume_before_end_does_not_seek(monkeypatch):
+    p = pmod.Player([FakeEvent(0.1, 2, "press", pitch=60)], FakeBackend(), {}, 1.0)
+    p.pause_event.set()
+    p.event_index = 0
+    p._pause_ts = 5.0
+    status = FakeSignal()
+    p.status_updated = cast(Any, status)
+    monkeypatch.setattr(pmod.time, "perf_counter", lambda: 7.0)
+    monkeypatch.setattr(
+        p,
+        "seek",
+        lambda _target: (_ for _ in ()).throw(AssertionError("seek should not run")),
+    )
+
+    p.toggle_pause()
+
+    assert p.pause_event.is_set() is False
+    assert status.emitted[-1] == ("Resuming...",)
+
+
+def test_reconcile_active_pitches_ignores_unknown_action_with_pitch():
+    events = [
+        FakeEvent(0.0, 2, "press", pitch=60, velocity=80),
+        FakeEvent(0.1, 3, "noop", pitch=62, velocity=90),
+    ]
+    p = pmod.Player(cast(list[KeyEvent], events), FakeBackend(), {}, 1.0)
+    p.event_index = len(events)
+
+    p._reconcile_active_pitches()
+
+    assert p._active_pitches == {60}
+    assert p._pitch_velocities == {60: 80}

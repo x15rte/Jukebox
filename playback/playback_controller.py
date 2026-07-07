@@ -151,7 +151,27 @@ class PlaybackController(QObject):
             thread.start()
             self._set_state("playing")
         except Exception:
-            backend.shutdown()
+            try:
+                backend.shutdown()
+            except Exception as shutdown_error:
+                jukebox_logger.error(
+                    f"Error shutting down backend after playback start failure: {shutdown_error}",
+                    exc_info=True,
+                )
+            try:
+                player.playback_finished.disconnect(self._on_playback_finished_internal)
+            except (TypeError, AttributeError):
+                pass
+            for sig_name in ("status_updated", "progress_updated", "visualizer_updated"):
+                try:
+                    getattr(player, sig_name).disconnect()
+                except (TypeError, AttributeError):
+                    pass
+            self._backend = None
+            self._thread = None
+            self._player = None
+            self._stopping = False
+            self._set_state("stopped")
             raise
         return True
 

@@ -180,8 +180,8 @@ class DummyWidget:
     def _update_88_key_visibility(self):
         return None
 
-    def _refresh_midi_inputs(self, show_dialog=False):
-        self.refresh_calls.append(show_dialog)
+    def _refresh_midi_inputs(self, show_dialog=False, **kwargs):
+        self.refresh_calls.append({"show_dialog": show_dialog, **kwargs})
 
     def _disconnect_midi_input(self):
         self.disconnected += 1
@@ -270,12 +270,22 @@ def test_apply_input_mode_refresh_and_disconnect_paths():
     cb._apply_input_mode(w, "piano")
     assert w.tabs.cur == 0
     assert w.tabs.enabled[1] is False
-    assert w.refresh_calls == [False]
+    assert w.refresh_calls == [{"show_dialog": False, "preferred_device": None}]
 
     w.midi_input_active = True
     cb._apply_input_mode(w, "file")
     assert w.tabs.enabled[1] is True
     assert w.disconnected == 1
+
+
+def test_apply_config_effects_passes_saved_midi_device_to_refresh(monkeypatch):
+    w = DummyWidget()
+    monkeypatch.setattr(cb, "_set_save_log_to_file", lambda *a, **k: None)
+    monkeypatch.setattr(cb, "_set_log_level", lambda *a, **k: None)
+
+    cb.apply_config_effects(w, Config(input_mode="piano", midi_input_device="B"))
+
+    assert {"show_dialog": False, "preferred_device": "B"} in w.refresh_calls
 
 
 def test_set_output_mode_combo_no_match_still_updates_visibility(monkeypatch):
@@ -366,7 +376,7 @@ def test_set_save_log_to_file_and_set_log_level(monkeypatch):
     w = DummyWidget()
     events = []
 
-    monkeypatch.setattr(cb.jukebox_logger, "enable_file_logging", lambda p: events.append(("enable", p)))
+    monkeypatch.setattr(cb.jukebox_logger, "enable_file_logging", lambda p: events.append(("enable", p)) or True)
     monkeypatch.setattr(cb.jukebox_logger, "disable_file_logging", lambda: events.append(("disable", None)))
     monkeypatch.setattr(cb.jukebox_logger, "set_level", lambda l: events.append(("level", l)))
 
@@ -429,11 +439,11 @@ def test_set_save_log_to_file_enable_failure_logs_message(monkeypatch):
     monkeypatch.setattr(w, "add_log_message", lambda msg, level="INFO": messages.append(msg))
 
     def failing_enable(*a, **kw):
-        raise RuntimeError("enable failed")
+        return False
     monkeypatch.setattr(cb.jukebox_logger, "enable_file_logging", failing_enable)
 
     cb._set_save_log_to_file(w, True)
-    assert any("Failed to enable" in m for m in messages)
+    assert any("Failed to enable file logging: log.txt" in m for m in messages)
 
 
 def test_set_log_level_fallback_when_combo_differs(monkeypatch):
@@ -446,3 +456,90 @@ def test_set_log_level_fallback_when_combo_differs(monkeypatch):
     monkeypatch.setattr(cb.jukebox_logger, "set_level", lambda v: None)
     cb._set_log_level(w, "DEBUG")
     assert any("not available" in e for e in events)
+
+
+class MinimalInputModeWidget:
+    def __init__(self):
+        self.input_mode_file_radio = DummyRadio()
+        self.input_mode_piano_radio = DummyRadio()
+        self.midi_input_active = False
+
+
+class MinimalFileSubmodeWidget:
+    def __init__(self):
+        self.input_mode_single_radio = DummyRadio()
+        self.input_mode_playlist_radio = DummyRadio()
+        self.input_mode_piano_radio = DummyRadio()
+
+
+def test_apply_input_mode_without_optional_widgets_or_handlers_noops():
+    w = MinimalInputModeWidget()
+
+    cb._apply_input_mode(w, "piano")
+
+    w.midi_input_active = True
+    cb._apply_input_mode(w, "file")
+
+    assert w.input_mode_file_radio.isChecked() is True
+    assert w.input_mode_piano_radio.isChecked() is False
+
+
+def test_set_file_submode_skips_update_when_piano_or_handler_missing():
+    w = MinimalFileSubmodeWidget()
+    w.input_mode_piano_radio.setChecked(True)
+    cb._set_file_submode(w, True)
+
+    w.input_mode_piano_radio.setChecked(False)
+    cb._set_file_submode(w, False)
+
+    assert w.input_mode_single_radio.isChecked() is True
+    assert w.input_mode_playlist_radio.isChecked() is False
+
+
+def test_set_output_mode_combo_without_visibility_hook():
+    w = type("Widget", (), {"output_mode_combo": DummyCombo(items=[("Key", "key")])})()
+
+    cb._set_output_mode_combo(w, "key")
+
+    assert w.output_mode_combo.currentText() == "Key"
+
+
+def test_set_window_geometry_valid_restore_and_no_screen_fallback(monkeypatch):
+    w = DummyWidget()
+    monkeypatch.setattr(w, "restoreGeometry", lambda _data: True)
+    cb._set_window_geometry(w, "QUJD")
+    assert w.restore_calls == []
+
+    w2 = DummyWidget()
+    moved = []
+    monkeypatch.setattr(w2, "restoreGeometry", lambda _data: False)
+    monkeypatch.setattr(w2, "move", lambda *args: moved.append(args))
+    monkeypatch.setattr(cb.QApplication, "primaryScreen", lambda: None)
+    cb._set_window_geometry(w2, "QUJD")
+    assert moved == []
+
+
+def test_set_save_log_to_file_no_config_dir_false_returns_without_warning(monkeypatch):
+    w = DummyWidget()
+    w.config_dir = None
+    warnings = []
+    monkeypatch.setattr(cb.jukebox_logger, "warning", lambda msg: warnings.append(str(msg)))
+
+    cb._set_save_log_to_file(w, False)
+
+    assert warnings == []
+
+
+def test_set_save_log_to_file_enable_exception_logs_message(monkeypatch):
+    w = DummyWidget()
+    messages = []
+    monkeypatch.setattr(w, "add_log_message", lambda msg, level="INFO": messages.append(msg))
+    monkeypatch.setattr(
+        cb.jukebox_logger,
+        "enable_file_logging",
+        lambda _path: (_ for _ in ()).throw(RuntimeError("disk full")),
+    )
+
+    cb._set_save_log_to_file(w, True)
+
+    assert messages == ["Failed to enable file logging: disk full"]

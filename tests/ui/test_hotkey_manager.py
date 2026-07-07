@@ -302,6 +302,28 @@ def test_hotkey_manager_on_app_state_changed_already_inactive(qtbot: Any) -> Non
     assert mgr._app_focused is False
 
 
+def test_hotkey_manager_poll_focus_other_state_noop(monkeypatch: Any, qtbot: Any) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._app_focused = True
+    monkeypatch.setattr(
+        "ui.hotkey_manager.QApplication.applicationState",
+        lambda self: Qt.ApplicationState.ApplicationSuspended,
+    )
+    mgr._poll_focus_state()
+    assert mgr._app_focused is True
+
+
+def test_hotkey_manager_on_app_state_changed_other_state_noop(qtbot: Any) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    mgr = HotkeyManager(parent)
+    mgr._app_focused = True
+    mgr._on_app_state_changed(Qt.ApplicationState.ApplicationSuspended)
+    assert mgr._app_focused is True
+
+
 def test_hotkey_manager_on_app_state_changed_exception(monkeypatch: Any, qtbot: Any) -> None:
     """_on_app_state_changed swallows exceptions."""
     from PyQt6.QtCore import Qt

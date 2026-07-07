@@ -100,6 +100,20 @@ def test_encode_and_send_message_falls_back_when_batched_send_fails(monkeypatch)
     assert tapped[1:5] == ["numpad1", "numpad2", "numpad3", "numpad4"]
 
 
+def test_encode_and_send_message_fallback_tap_failure_raises(monkeypatch):
+    monkeypatch.setattr(rmc, "ensure_numlock_on", lambda: None)
+    monkeypatch.setattr(rmc, "_use_batched_sendinput", True)
+    monkeypatch.setattr(rmc, "_send_frame_batched", lambda *a, **k: False)
+
+    def fail_tap(_name):
+        raise rmc.RmcSendError("tap failed")
+
+    monkeypatch.setattr(rmc, "_tap_key", fail_tap)
+
+    with pytest.raises(rmc.RmcSendError, match="tap failed"):
+        rmc.encode_and_send_message(1, 2, 3, 4)
+
+
 def test_encode_and_send_message_returns_after_successful_batch(monkeypatch):
     tapped = []
     monkeypatch.setattr(rmc, "ensure_numlock_on", lambda: None)
@@ -243,7 +257,8 @@ def test_tap_key_windows_without_pydirectinput_does_not_use_pynput(monkeypatch):
 
     monkeypatch.setattr(rmc, "_keyboard", _KBCtrl())
 
-    rmc._tap_key("numpad1")
+    with pytest.raises(rmc.RmcSendError, match="pydirectinput is unavailable"):
+        rmc._tap_key("numpad1")
 
     assert presses == []
     assert any("pydirectinput is unavailable" in m for m in logs)
@@ -329,7 +344,8 @@ def test_tap_key_handles_pydirectinput_exception(monkeypatch):
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
     monkeypatch.setattr(rmc, "pydirectinput", _PDI, raising=False)
 
-    rmc._tap_key("numpad1")
+    with pytest.raises(rmc.RmcSendError, match="pydirectinput key send failed"):
+        rmc._tap_key("numpad1")
     assert any("pydirectinput key send failed" in m for m in logs)
 
 
@@ -338,9 +354,44 @@ def test_tap_key_macos_cgevent_paths(monkeypatch):
     monkeypatch.setattr(rmc, "_use_pydirectinput", False)
     monkeypatch.setattr(rmc, "_platform", "Darwin")
     monkeypatch.setattr(rmc, "_platform_map", {"numpad1": 42})
-    monkeypatch.setattr(rmc, "_pmke", lambda vk, down, flags: events.append((vk, down, flags)))
+    monkeypatch.setattr(rmc, "_pmke", lambda vk, down, flags: events.append((vk, down, flags)) or True)
     rmc._tap_key("numpad1")
     assert events == [(42, True, 0), (42, False, 0)]
+
+
+def test_tap_key_macos_cgevent_keydown_false_raises(monkeypatch):
+    logs = []
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
+    monkeypatch.setattr(rmc, "_use_pydirectinput", False)
+    monkeypatch.setattr(rmc, "_platform", "Darwin")
+    monkeypatch.setattr(rmc, "_platform_map", {"numpad1": 42})
+    monkeypatch.setattr(rmc, "_pmke", lambda _vk, down, _flags: not down)
+
+    with pytest.raises(rmc.RmcSendError, match="macOS CGEvent keyDown failed"):
+        rmc._tap_key("numpad1")
+
+    assert any("macOS CGEvent keyDown failed" in m for m in logs)
+
+
+def test_tap_key_macos_cgevent_keyup_false_raises(monkeypatch):
+    logs = []
+    events = []
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
+    monkeypatch.setattr(rmc, "_use_pydirectinput", False)
+    monkeypatch.setattr(rmc, "_platform", "Darwin")
+    monkeypatch.setattr(rmc, "_platform_map", {"numpad1": 42})
+
+    def send_event(vk, down, flags):
+        events.append((vk, down, flags))
+        return down
+
+    monkeypatch.setattr(rmc, "_pmke", send_event)
+
+    with pytest.raises(rmc.RmcSendError, match="macOS CGEvent keyUp failed"):
+        rmc._tap_key("numpad1")
+
+    assert events == [(42, True, 0), (42, False, 0)]
+    assert any("macOS CGEvent keyUp failed" in m for m in logs)
 
 
 def test_tap_key_macos_cgevent_logs_on_exception(monkeypatch):
@@ -354,7 +405,8 @@ def test_tap_key_macos_cgevent_logs_on_exception(monkeypatch):
         raise RuntimeError("cg boom")
 
     monkeypatch.setattr(rmc, "_pmke", _raise)
-    rmc._tap_key("numpad1")
+    with pytest.raises(rmc.RmcSendError, match="macOS CGEvent key send failed"):
+        rmc._tap_key("numpad1")
     assert any("macOS CGEvent key send failed" in m for m in logs)
 
 
@@ -373,7 +425,8 @@ def test_tap_key_pynput_exception_branch(monkeypatch):
             return None
 
     monkeypatch.setattr(rmc, "_keyboard", _KBCtrl())
-    rmc._tap_key("numpad2")
+    with pytest.raises(rmc.RmcSendError, match="pynput key send failed"):
+        rmc._tap_key("numpad2")
 
     assert any("pynput key send failed" in m for m in logs)
 
@@ -691,6 +744,8 @@ def test_ensure_numlock_windows_pydirectinput_exception(monkeypatch):
 
 def test_tap_key_windows_pydirectinput_keyup_exception(monkeypatch):
     """Cover pydirectinput keyUp exception in _tap_key (lines 265-266)."""
+    logs = []
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
     calls = []
@@ -704,26 +759,36 @@ def test_tap_key_windows_pydirectinput_keyup_exception(monkeypatch):
         keyUp=_failing_keyup,
     ))
 
-    rmc._tap_key("numpad5")
+    with pytest.raises(rmc.RmcSendError, match="pydirectinput keyUp failed"):
+        rmc._tap_key("numpad5")
     assert calls == [("down", "numpad5"), ("up_fail", "numpad5")]
+    assert any("pydirectinput keyUp failed" in m for m in logs)
 
 
 def test_tap_key_linux_key_not_in_precomputed(monkeypatch):
     """Cover missing key in precomputed mappings (lines 286-287)."""
+    logs = []
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
     monkeypatch.setattr(rmc, "_platform", "Linux")
     monkeypatch.setattr(rmc, "_precomputed_keys", {"otherkey": "KC1"})
     monkeypatch.setattr(rmc, "_keyboard", SimpleNamespace(press=lambda k: None, release=lambda k: None))
 
-    rmc._tap_key("numpad5")
+    with pytest.raises(rmc.RmcSendError, match="key not found in precomputed mappings"):
+        rmc._tap_key("numpad5")
+    assert any("key not found in precomputed mappings" in m for m in logs)
 
 
 def test_tap_key_linux_keyboard_none(monkeypatch):
     """Cover pynput keyboard controller None branch (lines 290-291)."""
+    logs = []
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
     monkeypatch.setattr(rmc, "_platform", "Linux")
     monkeypatch.setattr(rmc, "_precomputed_keys", {"numpad5": "KC5"})
     monkeypatch.setattr(rmc, "_keyboard", None)
 
-    rmc._tap_key("numpad5")
+    with pytest.raises(rmc.RmcSendError, match="pynput keyboard controller not available"):
+        rmc._tap_key("numpad5")
+    assert any("pynput keyboard controller not available" in m for m in logs)
 
 
 def test_send_key_up_early_return_non_windows(monkeypatch):
@@ -757,6 +822,8 @@ def test_send_key_up_early_return_pydirectinput_none(monkeypatch):
 
 def test_send_key_up_sendinput_failure_warning(monkeypatch):
     """Cover _send_key_up SendInput failure warning (lines 315-317)."""
+    logs = []
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
     monkeypatch.setattr(rmc, "pydirectinput", _PDIModule())
@@ -767,7 +834,9 @@ def test_send_key_up_sendinput_failure_warning(monkeypatch):
             return 0  # failure
 
     monkeypatch.setattr(rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False)
-    rmc._send_key_up(42)
+    with pytest.raises(rmc.RmcSendError, match="SendInput KEYUP for scancode 0x2a returned 0"):
+        rmc._send_key_up(42)
+    assert any("SendInput KEYUP for scancode 0x2a returned 0" in m for m in logs)
 
 
 def test_send_key_down_early_return_non_windows(monkeypatch):
@@ -801,6 +870,8 @@ def test_send_key_down_early_return_pydirectinput_none(monkeypatch):
 
 def test_send_key_down_sendinput_failure_warning(monkeypatch):
     """Cover _send_key_down SendInput failure warning (lines 332-334)."""
+    logs = []
+    monkeypatch.setattr(rmc.jukebox_logger, "warning", lambda m, **k: logs.append(m))
     monkeypatch.setattr(rmc, "_platform", "Windows")
     monkeypatch.setattr(rmc, "_use_pydirectinput", True)
     monkeypatch.setattr(rmc, "pydirectinput", _PDIModule())
@@ -811,7 +882,9 @@ def test_send_key_down_sendinput_failure_warning(monkeypatch):
             return 0  # failure
 
     monkeypatch.setattr(rmc.ctypes, "windll", SimpleNamespace(user32=_User32()), raising=False)
-    rmc._send_key_down(42)
+    with pytest.raises(rmc.RmcSendError, match="SendInput KEYDOWN for scancode 0x2a returned 0"):
+        rmc._send_key_down(42)
+    assert any("SendInput KEYDOWN for scancode 0x2a returned 0" in m for m in logs)
 
 
 def test_send_frame_batched_returns_false_when_batched_disabled(monkeypatch):
@@ -837,3 +910,59 @@ def test_send_frame_batched_returns_false_when_sendinput_fails(monkeypatch):
 
     ok = rmc._send_frame_batched(1, 2, 3, 4, 5)
     assert ok is False
+
+
+def test_ensure_numlock_windows_without_pydirectinput_leaves_unensured(monkeypatch):
+    monkeypatch.setattr(rmc, "_numlock_ensured", False)
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", False)
+    monkeypatch.setattr(
+        rmc,
+        "_get_windll",
+        lambda: SimpleNamespace(user32=SimpleNamespace(GetKeyState=lambda _key: 0)),
+    )
+
+    rmc.ensure_numlock_on()
+
+    assert rmc._numlock_ensured is False
+
+
+def test_tap_key_macos_missing_mapping_is_noop(monkeypatch):
+    monkeypatch.setattr(rmc, "_platform", "Darwin")
+    monkeypatch.setattr(rmc, "_platform_map", {})
+    monkeypatch.setattr(
+        rmc,
+        "_pmke",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("CGEvent should not be sent")),
+    )
+
+    rmc._tap_key("numpad1")
+
+
+def test_send_key_down_and_up_success(monkeypatch):
+    calls = []
+    monkeypatch.setattr(rmc, "_platform", "Windows")
+    monkeypatch.setattr(rmc, "_use_pydirectinput", True)
+    monkeypatch.setattr(rmc, "pydirectinput", _PDIModule())
+
+    class _User32:
+        @staticmethod
+        def SendInput(n, inputs, size):
+            calls.append((n, int(inputs[0].ii.ki.wScan), int(inputs[0].ii.ki.dwFlags), size))
+            return n
+
+    monkeypatch.setattr(
+        rmc,
+        "_get_windll",
+        lambda: SimpleNamespace(user32=_User32()),
+    )
+
+    rmc._send_key_up(0x2A)
+    rmc._send_key_down(0x1D)
+
+    assert calls[0][0:3] == (
+        1,
+        0x2A,
+        rmc._KEYEVENTF_SCANCODE | rmc._KEYEVENTF_KEYUP,
+    )
+    assert calls[1][0:3] == (1, 0x1D, rmc._KEYEVENTF_SCANCODE)

@@ -282,6 +282,33 @@ class KeyboardBackend(OutputBackend):
             f |= MACOS_CGFLAG_CONTROL
         return f
 
+    def _set_macos_modifier_state(self, index: int, active: bool) -> None:
+        shift_active, alt_active, ctrl_active = self._macos_modifiers
+        if index == 0:
+            self._macos_modifiers = (active, alt_active, ctrl_active)
+        elif index == 1:
+            self._macos_modifiers = (shift_active, active, ctrl_active)
+        else:
+            self._macos_modifiers = (shift_active, alt_active, active)
+
+    def _post_macos_key_event_or_raise(
+        self,
+        vk: int,
+        is_down: bool,
+        flags: int,
+        log_context: str,
+        user_message: str,
+    ) -> None:
+        try:
+            sent = post_macos_key_event(vk, is_down, flags)
+        except Exception as e:
+            self._log_exception(log_context, e)
+            raise OutputBackendSendError(f"{user_message}: {e}") from e
+        if sent is False:
+            e = RuntimeError("CGEvent send returned False")
+            self._log_exception(log_context, e)
+            raise OutputBackendSendError(f"{user_message}: {e}") from e
+
     def _state_for(self, key_char: str) -> KeyState:
         if key_char not in self._states:
             self._states[key_char] = KeyState(key_char)
@@ -311,17 +338,18 @@ class KeyboardBackend(OutputBackend):
     def _release_key_if_unused(self, base_key: str) -> None:
         if not self._active_pitches.get(base_key):
             state = self._states.get(base_key)
+            try:
+                if self._use_pydirectinput and self._pdi is not None:
+                    self._pdi_key_up(base_key)
+                elif self._kb is not None:
+                    self._kb.release(KeyCode.from_vk(ord(base_key)))
+            except Exception as e:
+                self._log_exception("KeyboardBackend note_off error", e)
+                raise OutputBackendSendError(
+                    f"KeyboardBackend note_off failed: {e}"
+                ) from e
             if state:
                 state.release()
-            if self._use_pydirectinput and self._pdi is not None:
-                self._pdi_key_up(base_key)
-            elif self._kb is not None:
-                try:
-                    self._kb.release(KeyCode.from_vk(ord(base_key)))
-                except Exception as e:
-                    self._log_exception(
-                        "KeyboardBackend _release_key_if_unused error", e
-                    )
             self._active_pitches.pop(base_key, None)
             self._states.pop(base_key, None)
 
@@ -344,76 +372,289 @@ class KeyboardBackend(OutputBackend):
             vk = get_macos_vk_for_key(base_key)
             if vk is None:
                 return
-            if was_active:
-                # Release key first so CGEvent registers a new key-down event
-                post_macos_key_event(vk, False, self._macos_flags())
-                time.sleep(0.001)
-            state = self._state_for(base_key)
-            state.press()
-            self._active_pitches.setdefault(base_key, set()).add(pitch)
-            shift_rc, alt_rc, ctrl_rc = self._macos_modifier_refcount
-            for mod in modifiers:
-                mod_vk = get_macos_vk_for_modifier(mod)
-                if mod_vk is None:
-                    continue
-                if mod in (Key.shift,) or getattr(mod, "name", None) == "shift":
-                    shift_rc += 1
-                    if shift_rc == 1:
-                        post_macos_key_event(mod_vk, True, self._macos_flags())
-                        self._macos_modifiers = (
-                            True,
-                            self._macos_modifiers[1],
-                            self._macos_modifiers[2],
+
+            previous_active = set(self._active_pitches.get(base_key, set()))
+            previous_state = self._states.get(base_key)
+            previous_macos_modifiers = self._macos_modifiers
+            previous_macos_modifier_refcount = self._macos_modifier_refcount
+            previous_flags = self._macos_flags()
+            pressed_macos_modifiers: list[tuple[int, int, int]] = []
+            base_released_for_overlap = False
+            base_down_succeeded = False
+            state = None
+
+            def set_macos_modifier_active(index: int, active: bool) -> None:
+                shift_active, alt_active, ctrl_active = self._macos_modifiers
+                if index == 0:
+                    self._macos_modifiers = (active, alt_active, ctrl_active)
+                elif index == 1:
+                    self._macos_modifiers = (shift_active, active, ctrl_active)
+                else:
+                    self._macos_modifiers = (shift_active, alt_active, active)
+
+            def restore_macos_modifier_snapshot(
+                failed_modifier_indices: set[int],
+            ) -> None:
+                self._macos_modifiers = previous_macos_modifiers
+                self._macos_modifier_refcount = previous_macos_modifier_refcount
+                for index in failed_modifier_indices:
+                    set_macos_modifier_active(index, True)
+                    shift_rc, alt_rc, ctrl_rc = self._macos_modifier_refcount
+                    if index == 0:
+                        self._macos_modifier_refcount = (
+                            max(shift_rc, 1),
+                            alt_rc,
+                            ctrl_rc,
                         )
-                elif mod in (Key.ctrl,) or getattr(mod, "name", None) in (
-                    "ctrl",
-                    "control",
-                ):
-                    ctrl_rc += 1
-                    if ctrl_rc == 1:
-                        post_macos_key_event(mod_vk, True, self._macos_flags())
-                        self._macos_modifiers = (
-                            self._macos_modifiers[0],
-                            self._macos_modifiers[1],
-                            True,
+                    elif index == 1:
+                        self._macos_modifier_refcount = (
+                            shift_rc,
+                            max(alt_rc, 1),
+                            ctrl_rc,
                         )
-                elif mod == Key.alt or getattr(mod, "name", None) == "alt":
-                    alt_rc += 1
-                    if alt_rc == 1:
-                        post_macos_key_event(mod_vk, True, self._macos_flags())
-                        self._macos_modifiers = (
-                            self._macos_modifiers[0],
-                            True,
-                            self._macos_modifiers[2],
+                    else:
+                        self._macos_modifier_refcount = (
+                            shift_rc,
+                            alt_rc,
+                            max(ctrl_rc, 1),
                         )
-            self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
-            post_macos_key_event(vk, True, self._macos_flags())
+
+            def restore_previous_base_logical_state() -> None:
+                self._active_pitches[base_key] = previous_active
+                if previous_state is not None:
+                    self._states[base_key] = previous_state
+                    previous_state.press()
+                else:
+                    self._states.pop(base_key, None)
+
+            def clear_base_logical_state() -> None:
+                self._active_pitches.pop(base_key, None)
+                if state is not None:
+                    state.release()
+                elif previous_state is not None:
+                    previous_state.release()
+                self._states.pop(base_key, None)
+
+            try:
+                if was_active:
+                    # Release key first so CGEvent registers a new key-down event.
+                    self._post_macos_key_event_or_raise(
+                        vk,
+                        False,
+                        self._macos_flags(),
+                        "KeyboardBackend note_on error",
+                        "KeyboardBackend note_on failed",
+                    )
+                    base_released_for_overlap = True
+                    time.sleep(0.001)
+
+                shift_rc, alt_rc, ctrl_rc = self._macos_modifier_refcount
+                for mod in modifiers:
+                    mod_vk = get_macos_vk_for_modifier(mod)
+                    if mod_vk is None:
+                        continue
+                    if mod in (Key.shift,) or getattr(mod, "name", None) == "shift":
+                        next_shift_rc = shift_rc + 1
+                        if next_shift_rc == 1:
+                            self._post_macos_key_event_or_raise(
+                                mod_vk,
+                                True,
+                                self._macos_flags(),
+                                "KeyboardBackend note_on error",
+                                "KeyboardBackend note_on failed",
+                            )
+                            set_macos_modifier_active(0, True)
+                            pressed_macos_modifiers.append(
+                                (0, mod_vk, MACOS_CGFLAG_SHIFT)
+                            )
+                        shift_rc = next_shift_rc
+                    elif mod in (Key.ctrl,) or getattr(mod, "name", None) in (
+                        "ctrl",
+                        "control",
+                    ):
+                        next_ctrl_rc = ctrl_rc + 1
+                        if next_ctrl_rc == 1:
+                            self._post_macos_key_event_or_raise(
+                                mod_vk,
+                                True,
+                                self._macos_flags(),
+                                "KeyboardBackend note_on error",
+                                "KeyboardBackend note_on failed",
+                            )
+                            set_macos_modifier_active(2, True)
+                            pressed_macos_modifiers.append(
+                                (2, mod_vk, MACOS_CGFLAG_CONTROL)
+                            )
+                        ctrl_rc = next_ctrl_rc
+                    elif mod == Key.alt or getattr(mod, "name", None) == "alt":
+                        next_alt_rc = alt_rc + 1
+                        if next_alt_rc == 1:
+                            self._post_macos_key_event_or_raise(
+                                mod_vk,
+                                True,
+                                self._macos_flags(),
+                                "KeyboardBackend note_on error",
+                                "KeyboardBackend note_on failed",
+                            )
+                            set_macos_modifier_active(1, True)
+                            pressed_macos_modifiers.append(
+                                (1, mod_vk, MACOS_CGFLAG_ALT)
+                            )
+                        alt_rc = next_alt_rc
+                    self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
+
+                self._post_macos_key_event_or_raise(
+                    vk,
+                    True,
+                    self._macos_flags(),
+                    "KeyboardBackend note_on error",
+                    "KeyboardBackend note_on failed",
+                )
+                base_down_succeeded = True
+                state = self._state_for(base_key)
+                state.press()
+                self._active_pitches.setdefault(base_key, set()).add(pitch)
+            except Exception as e:
+                failed_modifier_indices: set[int] = set()
+                for index, mod_vk, flag_bit in reversed(pressed_macos_modifiers):
+                    try:
+                        self._post_macos_key_event_or_raise(
+                            mod_vk,
+                            False,
+                            self._macos_flags() & ~flag_bit,
+                            "KeyboardBackend note_on rollback release error",
+                            "KeyboardBackend note_on failed",
+                        )
+                        set_macos_modifier_active(index, False)
+                    except Exception:
+                        failed_modifier_indices.add(index)
+                restore_macos_modifier_snapshot(failed_modifier_indices)
+
+                if previous_active and base_down_succeeded:
+                    restore_previous_base_logical_state()
+                elif previous_active and base_released_for_overlap:
+                    try:
+                        self._post_macos_key_event_or_raise(
+                            vk,
+                            True,
+                            previous_flags,
+                            "KeyboardBackend note_on rollback restore error",
+                            "KeyboardBackend note_on failed",
+                        )
+                        restore_previous_base_logical_state()
+                    except Exception:
+                        clear_base_logical_state()
+                elif previous_active:
+                    restore_previous_base_logical_state()
+                elif base_down_succeeded:
+                    try:
+                        self._post_macos_key_event_or_raise(
+                            vk,
+                            False,
+                            self._macos_flags(),
+                            "KeyboardBackend note_on rollback release error",
+                            "KeyboardBackend note_on failed",
+                        )
+                        clear_base_logical_state()
+                    except Exception:
+                        state = state or self._state_for(base_key)
+                        state.press()
+                        self._active_pitches.setdefault(base_key, set()).add(pitch)
+                else:
+                    clear_base_logical_state()
+                if isinstance(e, OutputBackendSendError):
+                    raise
+                raise OutputBackendSendError(f"KeyboardBackend note_on failed: {e}") from e
             return
 
-        state = self._state_for(base_key)
-        state.press()
-        self._active_pitches.setdefault(base_key, set()).add(pitch)
-
         if self._windows_transport is not None:
-            if was_active:
-                # Release key first so the new key-down event registers.
-                # No delay needed — individual SendInput calls are queued in order.
-                self._windows_transport.key_up(base_key)
             modifier_names = [
                 mod_name
                 for mod in modifiers
                 if (mod_name := self._modifier_name(mod)) is not None
             ]
-            # Send each event separately (press modifiers, press key, release modifiers)
-            # so the game's input polling can observe the intermediate modifier-held state.
-            for mod_name in modifier_names:
-                self._windows_transport.send_batch([(mod_name, True)])
-            self._windows_transport.send_batch([(base_key, True)])
-            for mod_name in reversed(modifier_names):
-                self._windows_transport.send_batch([(mod_name, False)])
+            previous_active = set(self._active_pitches.get(base_key, set()))
+            previous_state = self._states.get(base_key)
+            pressed_modifiers: list[str] = []
+            base_released_for_overlap = False
+            base_down_succeeded = False
+            state = None
+
+            def restore_previous_logical_state() -> None:
+                self._active_pitches[base_key] = previous_active
+                if previous_state is not None:
+                    self._states[base_key] = previous_state
+                    previous_state.press()
+                else:
+                    self._states.pop(base_key, None)
+
+            def clear_base_logical_state() -> None:
+                self._active_pitches.pop(base_key, None)
+                if state is not None:
+                    state.release()
+                self._states.pop(base_key, None)
+
+            try:
+                if was_active:
+                    # Release key first so the new key-down event registers.
+                    # No delay needed — individual SendInput calls are queued in order.
+                    self._windows_transport.key_up(base_key)
+                    base_released_for_overlap = True
+                # Send each event separately (press modifiers, press key, release modifiers)
+                # so the game's input polling can observe the intermediate modifier-held state.
+                for mod_name in modifier_names:
+                    pressed_modifiers.append(mod_name)
+                    self._windows_transport.send_batch([(mod_name, True)])
+                self._windows_transport.send_batch([(base_key, True)])
+                base_down_succeeded = True
+                state = self._state_for(base_key)
+                state.press()
+                self._active_pitches.setdefault(base_key, set()).add(pitch)
+                for mod_name in reversed(modifier_names):
+                    self._windows_transport.send_batch([(mod_name, False)])
+                    pressed_modifiers.remove(mod_name)
+            except Exception as e:
+                for mod_name in reversed(pressed_modifiers):
+                    try:
+                        self._windows_transport.send_batch([(mod_name, False)])
+                    except Exception as release_e:
+                        self._log_exception(
+                            "KeyboardBackend note_on rollback release error", release_e
+                        )
+                if previous_active and base_down_succeeded:
+                    restore_previous_logical_state()
+                elif previous_active and base_released_for_overlap:
+                    try:
+                        self._windows_transport.send_batch([(base_key, True)])
+                        restore_previous_logical_state()
+                    except Exception as restore_e:
+                        self._log_exception(
+                            "KeyboardBackend note_on rollback restore error", restore_e
+                        )
+                        clear_base_logical_state()
+                elif previous_active:
+                    restore_previous_logical_state()
+                elif base_down_succeeded:
+                    try:
+                        self._windows_transport.send_batch([(base_key, False)])
+                        clear_base_logical_state()
+                    except Exception as release_e:
+                        self._log_exception(
+                            "KeyboardBackend note_on rollback release error", release_e
+                        )
+                        state = state or self._state_for(base_key)
+                        state.press()
+                        self._active_pitches.setdefault(base_key, set()).add(pitch)
+                else:
+                    clear_base_logical_state()
+                if isinstance(e, OutputBackendSendError):
+                    raise
+                raise OutputBackendSendError(f"KeyboardBackend note_on failed: {e}") from e
             return
 
-
+        state = self._state_for(base_key)
+        state.press()
+        self._active_pitches.setdefault(base_key, set()).add(pitch)
         try:
             if self._kb is not None:
                 if was_active:
@@ -424,6 +665,7 @@ class KeyboardBackend(OutputBackend):
                     self._kb.press(KeyCode.from_vk(ord(base_key)))
         except Exception as e:
             self._log_exception("KeyboardBackend note_on error", e)
+            raise OutputBackendSendError(f"KeyboardBackend note_on failed: {e}") from e
 
     def note_off(self, pitch: int) -> None:
         data = self._mapper.get_key_data(pitch)
@@ -434,69 +676,134 @@ class KeyboardBackend(OutputBackend):
         modifiers = data["modifiers"]
 
         active = self._active_pitches.get(base_key)
-        if active:
-            active.discard(pitch)
+        remaining = set(active) if active else set()
+        remaining.discard(pitch)
 
         if self._use_macos_cgevent:
+            previous_macos_modifiers = self._macos_modifiers
+            previous_macos_modifier_refcount = self._macos_modifier_refcount
+            modifier_error: Optional[OutputBackendSendError] = None
             shift_rc, alt_rc, ctrl_rc = self._macos_modifier_refcount
+
+            def restore_macos_modifier_snapshot() -> None:
+                self._macos_modifiers = previous_macos_modifiers
+                self._macos_modifier_refcount = previous_macos_modifier_refcount
+
+            def get_modifier_refcount(index: int) -> int:
+                if index == 0:
+                    return shift_rc
+                if index == 1:
+                    return alt_rc
+                return ctrl_rc
+
+            def set_modifier_refcount(index: int, value: int) -> None:
+                nonlocal shift_rc, alt_rc, ctrl_rc
+                if index == 0:
+                    shift_rc = value
+                elif index == 1:
+                    alt_rc = value
+                else:
+                    ctrl_rc = value
+
             for mod in modifiers:
                 mod_vk = get_macos_vk_for_modifier(mod)
                 if mod_vk is None:
                     continue
-                if mod in (Key.shift,) or getattr(mod, "name", None) == "shift":
-                    shift_rc = max(0, shift_rc - 1)
-                    if shift_rc == 0 and self._macos_modifiers[0]:
-                        self._macos_modifiers = (
-                            False,
-                            self._macos_modifiers[1],
-                            self._macos_modifiers[2],
-                        )
-                        post_macos_key_event(mod_vk, False, self._macos_flags())
-                elif mod in (Key.ctrl,) or getattr(mod, "name", None) in (
-                    "ctrl",
-                    "control",
-                ):
-                    ctrl_rc = max(0, ctrl_rc - 1)
-                    if ctrl_rc == 0 and self._macos_modifiers[2]:
-                        self._macos_modifiers = (
-                            self._macos_modifiers[0],
-                            self._macos_modifiers[1],
-                            False,
-                        )
-                        post_macos_key_event(mod_vk, False, self._macos_flags())
-                elif mod == Key.alt or getattr(mod, "name", None) == "alt":
-                    alt_rc = max(0, alt_rc - 1)
-                    if alt_rc == 0 and self._macos_modifiers[1]:
-                        self._macos_modifiers = (
-                            self._macos_modifiers[0],
-                            False,
-                            self._macos_modifiers[2],
-                        )
-                        post_macos_key_event(mod_vk, False, self._macos_flags())
+
+                mod_name = getattr(mod, "name", None)
+                modifier_specs = (
+                    (
+                        mod in (Key.shift,) or mod_name == "shift",
+                        0,
+                        MACOS_CGFLAG_SHIFT,
+                    ),
+                    (
+                        mod in (Key.ctrl,) or mod_name in ("ctrl", "control"),
+                        2,
+                        MACOS_CGFLAG_CONTROL,
+                    ),
+                    (
+                        mod == Key.alt or mod_name == "alt",
+                        1,
+                        MACOS_CGFLAG_ALT,
+                    ),
+                )
+
+                for is_match, index, flag_bit in modifier_specs:
+                    if not is_match:
+                        continue
+
+                    next_refcount = max(0, get_modifier_refcount(index) - 1)
+                    if next_refcount == 0 and self._macos_modifiers[index]:
+                        next_flags = self._macos_flags() & ~flag_bit
+                        try:
+                            self._post_macos_key_event_or_raise(
+                                mod_vk,
+                                False,
+                                next_flags,
+                                "KeyboardBackend note_off error",
+                                "KeyboardBackend note_off failed",
+                            )
+                        except OutputBackendSendError as e:
+                            if modifier_error is None:
+                                modifier_error = e
+                            break
+                        self._set_macos_modifier_state(index, False)
+                    set_modifier_refcount(index, next_refcount)
+                    break
+
             self._macos_modifier_refcount = (shift_rc, alt_rc, ctrl_rc)
 
-            if not self._active_pitches.get(base_key):
+            if not remaining:
                 state = self._states.get(base_key)
                 vk = get_macos_vk_for_key(base_key)
+                if vk is not None:
+                    try:
+                        self._post_macos_key_event_or_raise(
+                            vk,
+                            False,
+                            self._macos_flags(),
+                            "KeyboardBackend note_off error",
+                            "KeyboardBackend note_off failed",
+                        )
+                    except OutputBackendSendError:
+                        restore_macos_modifier_snapshot()
+                        raise
+                if modifier_error is not None:
+                    restore_macos_modifier_snapshot()
+                    raise modifier_error
                 if state:
                     state.release()
-                if vk is not None:
-                    post_macos_key_event(vk, False, self._macos_flags())
                 self._active_pitches.pop(base_key, None)
                 self._states.pop(base_key, None)
+            else:
+                if modifier_error is not None:
+                    restore_macos_modifier_snapshot()
+                    raise modifier_error
+                active.discard(pitch)  # pyright: ignore[reportOptionalMemberAccess]
             return
 
+        if active:
+            active.discard(pitch)
         self._release_key_if_unused(base_key)
 
     def pedal_on(self) -> None:
         if self._pedal_down:
             return
-        self._pedal_down = True
 
         if self._use_macos_cgevent:
             space_vk = get_macos_vk_for_key(Key.space)
-            if space_vk is not None and post_macos_key_event(space_vk, True, 0):
+            if space_vk is None:
                 return
+            self._post_macos_key_event_or_raise(
+                space_vk,
+                True,
+                0,
+                "KeyboardBackend pedal_on error",
+                "KeyboardBackend pedal_on failed",
+            )
+            self._pedal_down = True
+            return
 
         try:
             if self._use_pydirectinput and self._pdi is not None:
@@ -507,21 +814,28 @@ class KeyboardBackend(OutputBackend):
             if self._use_pydirectinput:
                 raise
             self._log_exception("KeyboardBackend pedal_on error", e)
+            raise OutputBackendSendError(f"KeyboardBackend pedal_on failed: {e}") from e
+        self._pedal_down = True
 
     def pedal_off(self) -> None:
         if not self._pedal_down:
             return
-        self._pedal_down = False
 
         for key_char in list(self._active_pitches.keys()):
             if not self._active_pitches[key_char]:
                 if self._use_macos_cgevent:
                     state = self._states.get(key_char)
-                    if state:
-                        state.release()
                     vk = get_macos_vk_for_key(key_char)
                     if vk is not None:
-                        post_macos_key_event(vk, False, 0)
+                        self._post_macos_key_event_or_raise(
+                            vk,
+                            False,
+                            0,
+                            "KeyboardBackend note_off error",
+                            "KeyboardBackend note_off failed",
+                        )
+                    if state:
+                        state.release()
                     self._active_pitches.pop(key_char, None)
                     self._states.pop(key_char, None)
                 else:
@@ -529,8 +843,16 @@ class KeyboardBackend(OutputBackend):
 
         if self._use_macos_cgevent:
             space_vk = get_macos_vk_for_key(Key.space)
-            if space_vk is not None and post_macos_key_event(space_vk, False, 0):
-                return
+            if space_vk is not None:
+                self._post_macos_key_event_or_raise(
+                    space_vk,
+                    False,
+                    0,
+                    "KeyboardBackend pedal_off error",
+                    "KeyboardBackend pedal_off failed",
+                )
+            self._pedal_down = False
+            return
 
         try:
             if self._use_pydirectinput and self._pdi is not None:
@@ -541,6 +863,9 @@ class KeyboardBackend(OutputBackend):
             if self._use_pydirectinput:
                 raise
             self._log_exception("KeyboardBackend pedal_off error", e)
+            raise OutputBackendSendError(f"KeyboardBackend pedal_off failed: {e}") from e
+        self._pedal_down = False
+
 
     def execute_batch(self, events: List[Any]) -> None:
         if not events:
@@ -698,6 +1023,7 @@ class NumpadBackend(OutputBackend):
             self._active_notes.add(pitch)
         except Exception as e:
             self._log_exception("NumpadBackend note_on error", e)
+            raise OutputBackendSendError(f"NumpadBackend note_on failed: {e}") from e
         self._post_delay()
 
     def note_off(self, pitch: int) -> None:
@@ -706,6 +1032,7 @@ class NumpadBackend(OutputBackend):
             self._active_notes.discard(pitch)
         except Exception as e:
             self._log_exception("NumpadBackend note_off error", e)
+            raise OutputBackendSendError(f"NumpadBackend note_off failed: {e}") from e
         self._post_delay()
 
     # -- pedal --
@@ -716,7 +1043,9 @@ class NumpadBackend(OutputBackend):
                 self._pedal_down = True
                 rmc.send_pedal(127)
             except Exception as e:
+                self._pedal_down = False
                 self._log_exception("NumpadBackend pedal_on error", e)
+                raise OutputBackendSendError(f"NumpadBackend pedal_on failed: {e}") from e
             self._post_delay()
 
     def pedal_off(self) -> None:
@@ -725,7 +1054,9 @@ class NumpadBackend(OutputBackend):
                 self._pedal_down = False
                 rmc.send_pedal(0)
             except Exception as e:
+                self._pedal_down = True
                 self._log_exception("NumpadBackend pedal_off error", e)
+                raise OutputBackendSendError(f"NumpadBackend pedal_off failed: {e}") from e
             self._post_delay()
 
     # -- shutdown --

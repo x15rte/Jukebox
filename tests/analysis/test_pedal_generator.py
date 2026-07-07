@@ -341,3 +341,51 @@ def test_adaptive_driver_trailing_silence_early_release():
     # Should have early release at last_end (1.0)
     ups = [e for e in out if e.key_char == "up"]
     assert any(abs(e.time - 1.0) < 1e-9 for e in ups)
+
+
+def test_merge_section_intervals_drops_interval_fully_covered_by_later_section():
+    intervals = [(0.9, 0.95)]
+
+    PedalGenerator._merge_section_intervals(intervals, [(0.8, 1.0)])
+
+    assert intervals == [(0.8, 1.0)]
+
+
+def test_events_to_intervals_ignores_up_without_active_down():
+    events = [
+        KeyEvent(0.0, 0, "pedal", "up"),
+        KeyEvent(0.1, 1, "pedal", "down"),
+        KeyEvent(0.3, 0, "pedal", "up"),
+    ]
+
+    assert PedalGenerator._events_to_intervals(events) == [(0.1, 0.3)]
+
+
+def test_adaptive_driver_safe_window_and_no_all_notes_use_final_release():
+    driver_notes = [
+        make_note(1, 40, 0.0, 0.2, hand="left"),
+        make_note(2, 44, 0.25, 0.2, hand="left"),
+    ]
+    all_notes = driver_notes + [make_note(3, 47, 0.25, 0.1, hand="right")]
+
+    safe_window = PedalGenerator._generate_adaptive_pedal_driver(driver_notes, all_notes)
+    no_all_notes = PedalGenerator._generate_adaptive_pedal_driver(driver_notes, [])
+
+    assert (0.25, "up") not in [(event.time, event.key_char) for event in safe_window]
+    assert no_all_notes[-1].key_char == "up"
+    assert no_all_notes[-1].time == pytest.approx(0.45)
+
+
+def test_harmonic_pedal_same_harmony_overlap_does_not_repedal():
+    events: list[KeyEvent] = []
+    notes = [
+        make_note(1, 40, 0.0, 0.5, hand="left"),
+        make_note(2, 40, 0.4, 0.4, hand="left"),
+    ]
+
+    PedalGenerator._generate_harmonic_pedal(events, notes)
+
+    assert [(event.time, event.key_char) for event in events] == [
+        (0.0, "down"),
+        (0.8, "up"),
+    ]

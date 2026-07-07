@@ -1043,3 +1043,72 @@ def test_on_playback_finished_advance_highlight(window_factory, monkeypatch, tmp
     monkeypatch.setattr(w, "_update_autoplay_highlight", lambda: events.append(("highlight",)))
     w.on_playback_finished()
     assert ("highlight",) in events
+
+
+def test_autoplay_scan_folder_deduplicates_casefolded_paths(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    w.autoplay_folder = "fake-folder"
+    monkeypatch.setattr(w, "add_log_message", lambda _m: None)
+
+    class FakeFile:
+        def __init__(self, path):
+            self.path = path
+
+        def __str__(self):
+            return self.path
+
+        def resolve(self):
+            return self.path
+
+    class FakePath:
+        def glob(self, pattern):
+            if pattern == "*.mid":
+                return [FakeFile("C:/Music/Song.mid"), FakeFile("c:/music/song.mid")]
+            return []
+
+    monkeypatch.setattr("main_window.Path", lambda _folder: FakePath())
+
+    w._autoplay_scan_folder()
+
+    assert w.autoplay_file_list == ["C:/Music/Song.mid"]
+    assert w.autoplay_file_listbox.count() == 1
+
+
+def test_do_autoplay_jump_select_tracks_false_skips_preview(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    w.autoplay_file_list = ["song.mid"]
+    events = []
+    monkeypatch.setattr(w, "_autoplay_select_tracks", lambda _path: False)
+    monkeypatch.setattr(w, "_build_preview_notes", lambda _tempo_map: events.append("preview"))
+    monkeypatch.setattr(w, "add_log_message", lambda _m: events.append("log"))
+
+    w._do_autoplay_jump(0)
+
+    assert "preview" not in events
+    assert "log" not in events
+
+
+def test_update_autoplay_highlight_handles_none_items(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    calls = []
+
+    class ListBox:
+        def count(self):
+            return 1
+
+        def item(self, _index):
+            return None
+
+        def scrollToItem(self, *_args):
+            calls.append("scroll")
+
+    w.autoplay_file_listbox = ListBox()
+    w.autoplay_current_index = 0
+
+    w._update_autoplay_highlight()
+
+    assert calls == []

@@ -2,6 +2,7 @@ import math
 
 import pytest
 
+from models import Note
 from playback.player import EventCompiler
 from tests.helpers.builders import make_note, make_section
 
@@ -59,6 +60,41 @@ def test_compile_produces_press_release_pairs_sorted():
     assert all(events[i].time <= events[i + 1].time for i in range(len(events) - 1))
     assert [e.action for e in events].count("press") == 2
     assert [e.action for e in events].count("release") == 2
+
+def test_compile_without_humanization_reuses_note_objects_without_mutation(monkeypatch):
+    class NoDeepcopyNote(Note):
+        def __deepcopy__(self, memo):
+            raise AssertionError("compile should not deepcopy notes without humanization")
+
+    monkeypatch.setattr(
+        EventCompiler,
+        "_clone_notes",
+        lambda _notes: pytest.fail(
+            "compile should reuse note objects without humanization"
+        ),
+    )
+
+    notes: list[Note] = [
+        NoDeepcopyNote(1, 64, 100, 0.3, 0.2, "right", -1, -1),
+        NoDeepcopyNote(2, 60, 100, 0.1, 0.4, "left", -1, -1),
+    ]
+    original_timings = [(note.start_time, note.duration) for note in notes]
+
+    events = EventCompiler.compile(
+        notes,
+        _section_for(notes),
+        {
+            "pedal_style": "none",
+            "enable_vary_timing": False,
+            "enable_vary_articulation": False,
+            "enable_drift_correction": False,
+            "enable_chord_roll": False,
+            "enable_tempo_sway": False,
+        },
+    )
+
+    assert [(note.start_time, note.duration) for note in notes] == original_timings
+    assert events == sorted(events)
 
 
 def test_compile_can_emit_mistake_notes(monkeypatch):
@@ -876,8 +912,8 @@ def test_build_pedal_sections_reuses_existing_pedal_notes_without_deepcopy(
     sections = [make_section(0.0, 0.2, [original_note])]
 
     monkeypatch.setattr(
-        "playback.player.copy.deepcopy",
-        lambda _value: pytest.fail("deepcopy should not run for remapped section notes"),
+        "playback.player.replace",
+        lambda _value: pytest.fail("replace should not run for remapped section notes"),
     )
 
     pedal_sections = EventCompiler._build_pedal_sections(
@@ -891,7 +927,7 @@ def test_build_pedal_sections_reuses_existing_pedal_notes_without_deepcopy(
     assert pedal_sections[0].end_time == pytest.approx(0.3)
 
 
-def test_build_pedal_sections_falls_back_to_deepcopied_original_note():
+def test_build_pedal_sections_falls_back_to_copied_original_note():
     original_note = make_note(1, 40, 0.4, 0.6, hand="left")
     section_note = make_note(1, 40, 1.5, 0.1, hand="left")
     sections = [make_section(0.0, 2.0, [section_note])]
@@ -907,5 +943,8 @@ def test_build_pedal_sections_falls_back_to_deepcopied_original_note():
     assert remapped_note == original_note
     assert remapped_note is not original_note
     assert remapped_note is not section_note
+    assert remapped_note.start_time == pytest.approx(original_note.start_time)
+    assert remapped_note.duration == pytest.approx(original_note.duration)
+    assert remapped_note.end_time == pytest.approx(original_note.end_time)
     assert pedal_sections[0].start_time == pytest.approx(0.4)
     assert pedal_sections[0].end_time == pytest.approx(1.0)

@@ -1,4 +1,5 @@
 from typing import Any, cast
+import pytest
 
 from playback.playback_controller import PlaybackController
 from output import OutputBackendUnavailableError
@@ -74,3 +75,27 @@ def test_controller_start_backend_unavailable_returns_false(monkeypatch):
     assert ctrl.player is None
     assert ctrl._thread is None
     assert any("Playback could not start" in m for m in logs)
+
+
+
+def test_controller_start_thread_start_failure_cleans_refs(monkeypatch):
+    ctrl = PlaybackController()
+    backend = FakeBackend()
+
+    class FailingThread(FakeThread):
+        def start(self):
+            raise RuntimeError("start failed")
+
+    thread = FailingThread()
+    monkeypatch.setattr("playback.playback_controller.create_backend", lambda *a, **k: backend)
+    monkeypatch.setattr("playback.playback_controller.QThread", lambda: thread)
+    monkeypatch.setattr("playback.playback_controller.Player", FakePlaybackPlayer)
+
+    with pytest.raises(RuntimeError, match="start failed"):
+        ctrl.start([], {}, 1.0, "key", False)
+
+    assert ("shutdown", None) in backend.calls
+    assert ctrl.player is None
+    assert ctrl._thread is None
+    assert ctrl._backend is None
+    assert ctrl.state == "stopped"

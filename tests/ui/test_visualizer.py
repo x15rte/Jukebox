@@ -288,3 +288,37 @@ def test_timeline_resize_event_invalidates_background_cache(qtbot):
 
     tw.resizeEvent(QResizeEvent(QSize(220, 80), QSize(200, 80)))
     assert tw._cached_background is None
+
+
+def test_timeline_mouse_release_ignores_non_left_or_none(qtbot):
+    tw = TimelineWidget()
+    qtbot.addWidget(tw)
+    emitted = []
+    tw.seek_requested.connect(emitted.append)
+    tw.is_dragging = True
+
+    tw.mouseReleaseEvent(cast(Any, None))
+    tw.mouseReleaseEvent(
+        cast(Any, SimpleNamespace(button=lambda: Qt.MouseButton.RightButton))
+    )
+
+    assert tw.is_dragging is True
+    assert emitted == []
+
+
+def test_timeline_ensure_background_without_boundaries_or_notes(qtbot, monkeypatch):
+    FakePainter.instances = []
+    monkeypatch.setattr(visualizer, "QPainter", FakePainter)
+    tw = TimelineWidget()
+    qtbot.addWidget(tw)
+    tw.resize(200, 80)
+    tw.total_duration = 5.0
+    tw._cached_boundaries = None
+    tw.notes = []
+
+    tw._ensure_background()
+
+    assert tw._cached_background is not None
+    calls = _flatten_calls()
+    assert ("line",) not in calls
+    assert ("rect",) not in calls

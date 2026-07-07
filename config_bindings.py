@@ -252,7 +252,7 @@ def validate_config_ui_bindings(bindings: Iterable[ConfigBinding] = CONFIG_UI_BI
 
 
 def apply_config_effects(widget, config) -> None:
-    _apply_input_mode(widget, config.input_mode)
+    _apply_input_mode(widget, config)
     _set_save_log_to_file(widget, config.save_log_to_file)
     _set_log_level(widget, config.log_level)
 
@@ -268,8 +268,15 @@ def _set_input_mode(widget, value):
         widget.input_mode_piano_radio.blockSignals(False)
 
 
-def _apply_input_mode(widget, value):
+def _apply_input_mode(widget, config_or_value):
     """Set input mode radios and trigger visibility updates without calling private methods."""
+    if hasattr(config_or_value, "input_mode"):
+        value = config_or_value.input_mode
+        preferred_device = getattr(config_or_value, "midi_input_device", None)
+    else:
+        value = config_or_value
+        preferred_device = None
+
     _set_input_mode(widget, value)
     use_piano = value == "piano"
     if hasattr(widget, "file_input_widget"):
@@ -284,7 +291,7 @@ def _apply_input_mode(widget, value):
         if use_piano and widget.tabs.currentIndex() in (1, 2):
             widget.tabs.setCurrentIndex(0)
     if use_piano and hasattr(widget, "_refresh_midi_inputs"):
-        widget._refresh_midi_inputs(show_dialog=False)
+        widget._refresh_midi_inputs(show_dialog=False, preferred_device=preferred_device)
     elif not use_piano and getattr(widget, "midi_input_active", False):
         if hasattr(widget, "_disconnect_midi_input"):
             widget._disconnect_midi_input()
@@ -385,8 +392,10 @@ def _set_save_log_to_file(widget, value):
     if value:
         log_dir.mkdir(parents=True, exist_ok=True)
         try:
-            jukebox_logger.enable_file_logging(str(log_path))
-            widget.add_log_message(f"Log is being saved to: {log_path}")
+            if jukebox_logger.enable_file_logging(str(log_path)):
+                widget.add_log_message(f"Log is being saved to: {log_path}")
+            else:
+                widget.add_log_message(f"Failed to enable file logging: {log_path}")
         except Exception as e:
             widget.add_log_message(f"Failed to enable file logging: {e}")
     else:

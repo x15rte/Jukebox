@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import math
 import threading
 from collections.abc import Mapping
@@ -723,20 +722,7 @@ class ConfigRepository:
             try:
                 with open(tmp_path, "w", encoding="utf-8") as f:
                     json.dump(config.to_dict(), f, indent=4)
-                try:
-                    os.replace(str(tmp_path), str(self.config_path))
-                except OSError:
-                    # Fall back to copy2 for cross-device / permission scenarios
-                    try:
-                        shutil.copy2(str(tmp_path), str(self.config_path))
-                    except OSError as e2:
-                        jukebox_logger.warning(f"Failed to save config: {e2}")
-                        raise
-                    # copy2 succeeded but is non-atomic — warn
-                    jukebox_logger.warning(
-                        "Config file write used non-atomic copy2 fallback; "
-                        "concurrent readers may see partial content."
-                    )
+                os.replace(str(tmp_path), str(self.config_path))
             finally:
                 if os.path.exists(tmp_path):
                     try:

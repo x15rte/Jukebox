@@ -403,31 +403,241 @@ def test_windows_key_backend_missing_pydirectinput_is_unavailable(monkeypatch):
         out.KeyboardBackend(use_88_key_layout=False)
 
 
+class _FailingSendPydirectInput(pydirectinput_stub.FakePydirectInput):
+    def __init__(self, fail_calls: set[int]):
+        super().__init__()
+        self.fail_calls = fail_calls
+        self.send_calls = 0
+
+    def SendInput(self, n, inputs, size):  # noqa: N802
+        self.send_calls += 1
+        if self.send_calls in self.fail_calls:
+            raise RuntimeError("send failed")
+        return super().SendInput(n, inputs, size)
+
+
 def test_windows_key_backend_send_failure_handled(monkeypatch):
-    """Send failure — old code leaves pitch in active_pitches (added before send)."""
     monkeypatch.setattr(out.sys, "platform", "win32")
     fake_pdi = pydirectinput_stub.install(monkeypatch)
     kb = out.KeyboardBackend(use_88_key_layout=False)
 
     fake_pdi.send_exception = RuntimeError("send failed")
 
-    # Error propagates as OutputBackendSendError; state is NOT rolled back
-    # because active_pitches is updated before send_batch
     with pytest.raises(out.OutputBackendSendError):
         kb.note_on(60, 100)
-    # Pitch remains in active_pitches after send failure
-    assert kb._active_pitches != {}
+
+    assert kb._active_pitches == {}
+    assert kb._states == {}
+    assert fake_pdi.down == []
+    assert fake_pdi.up == []
+    assert fake_pdi.sent_batches == []
 
 
 def test_windows_key_backend_partial_send_handled(monkeypatch):
-    """Partial send (result=0) — old code raises and leaves pitch in active_pitches."""
     monkeypatch.setattr(out.sys, "platform", "win32")
     fake_pdi = pydirectinput_stub.install(monkeypatch)
     kb = out.KeyboardBackend(use_88_key_layout=False)
 
     fake_pdi.send_result = 0
 
-    # Error propagates; state is NOT rolled back
     with pytest.raises(out.OutputBackendSendError):
         kb.note_on(60, 100)
-    assert kb._active_pitches != {}
+
+    assert kb._active_pitches == {}
+    assert kb._states == {}
+
+
+def test_windows_key_backend_overlapping_failure_keeps_existing_logical_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    kb.note_on(60, 100)
+    key_data = kb._mapper.get_key_data(60)
+    assert key_data is not None
+    base_key = key_data["key"]
+
+    fake_pdi.send_exception = RuntimeError("send failed")
+
+    with pytest.raises(out.OutputBackendSendError):
+        kb.note_on(60, 100)
+
+    assert kb._active_pitches[base_key] == {60}
+    assert len(kb._states) == 1
+    assert base_key in kb._states
+
+
+def test_windows_key_backend_overlap_failure_restores_previous_physical_key(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = _FailingSendPydirectInput({3})
+    pydirectinput_stub.install(monkeypatch, fake_pdi)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    kb.note_on(60, 100)
+    key_data = kb._mapper.get_key_data(60)
+    assert key_data is not None
+    base_key = key_data["key"]
+
+    with pytest.raises(out.OutputBackendSendError):
+        kb.note_on(61, 100)
+
+    assert kb._active_pitches[base_key] == {60}
+    assert base_key in kb._states
+    assert kb._states[base_key].is_active is True
+    assert fake_pdi.up.count(base_key) == 1
+    assert fake_pdi.down.count(base_key) == 2
+
+
+def test_windows_key_backend_overlap_failure_clears_state_when_restore_fails(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = _FailingSendPydirectInput({3, 5})
+    pydirectinput_stub.install(monkeypatch, fake_pdi)
+    logs = []
+    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+
+    kb.note_on(60, 100)
+    key_data = kb._mapper.get_key_data(60)
+    assert key_data is not None
+    base_key = key_data["key"]
+
+    with pytest.raises(out.OutputBackendSendError):
+        kb.note_on(61, 100)
+
+    assert base_key not in kb._active_pitches
+    assert base_key not in kb._states
+    assert any(
+        "KeyboardBackend note_on rollback restore error" in message
+        for message in logs
+    )
+
+def test_windows_key_backend_modified_failure_after_base_releases_base_and_rolls_back_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = _FailingSendPydirectInput({3})
+    pydirectinput_stub.install(monkeypatch, fake_pdi)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    key_data = kb._mapper.get_key_data(61)
+    assert key_data is not None
+    base_key = key_data["key"]
+
+    with pytest.raises(out.OutputBackendSendError):
+        kb.note_on(61, 100)
+
+    assert kb._active_pitches == {}
+    assert kb._states == {}
+    assert fake_pdi.sent_batches[:2] == [
+        [("shiftleft", True)],
+        [(base_key, True)],
+    ]
+    assert [(base_key, False)] in fake_pdi.sent_batches[2:]
+    assert fake_pdi.up.count(base_key) >= 1
+
+
+def test_windows_key_backend_modified_failure_tracks_base_when_rollback_release_fails(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = _FailingSendPydirectInput({3, 5})
+    pydirectinput_stub.install(monkeypatch, fake_pdi)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    key_data = kb._mapper.get_key_data(61)
+    assert key_data is not None
+    base_key = key_data["key"]
+
+    with pytest.raises(out.OutputBackendSendError):
+        kb.note_on(61, 100)
+
+    assert kb._active_pitches[base_key] == {61}
+    assert base_key in kb._states
+
+    fake_pdi.fail_calls.clear()
+    kb.shutdown()
+
+    assert (base_key, False) in fake_pdi.sent_batches[-1]
+
+
+def test_windows_key_backend_modified_failure_logs_modifier_rollback_error(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = _FailingSendPydirectInput({3, 4})
+    pydirectinput_stub.install(monkeypatch, fake_pdi)
+    logs = []
+    kb = out.KeyboardBackend(use_88_key_layout=False, log_message=logs.append)
+
+    with pytest.raises(out.OutputBackendSendError):
+        kb.note_on(61, 100)
+
+    assert kb._active_pitches == {}
+    assert kb._states == {}
+    assert any("KeyboardBackend note_on rollback release error" in message for message in logs)
+
+
+def test_windows_key_backend_modified_failure_restores_previous_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = _FailingSendPydirectInput({5})
+    pydirectinput_stub.install(monkeypatch, fake_pdi)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    key_data = kb._mapper.get_key_data(61)
+    assert key_data is not None
+    base_key = key_data["key"]
+
+    kb.note_on(60, 100)
+    previous_state = kb._states[base_key]
+
+    with pytest.raises(out.OutputBackendSendError):
+        kb.note_on(61, 100)
+
+    assert kb._active_pitches[base_key] == {60}
+    assert kb._states[base_key] is previous_state
+    assert previous_state.is_active is True
+    assert fake_pdi.up.count(base_key) == 1
+    assert fake_pdi.down.count(base_key) == 2
+
+
+def test_windows_key_backend_modified_failure_restores_active_without_prior_state(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = _FailingSendPydirectInput({4})
+    pydirectinput_stub.install(monkeypatch, fake_pdi)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+    key_data = kb._mapper.get_key_data(61)
+    assert key_data is not None
+    base_key = key_data["key"]
+    kb._active_pitches[base_key] = {60}
+
+    with pytest.raises(out.OutputBackendSendError):
+        kb.note_on(61, 100)
+    assert kb._active_pitches[base_key] == {60}
+    assert base_key not in kb._states
+
+
+
+def test_windows_key_backend_modified_failure_reraises_send_error(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    fake_pdi = pydirectinput_stub.install(monkeypatch)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    fake_pdi.send_result = 0
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="Windows KEY mode SendInput sent 0 of 1 input events.",
+    ):
+        kb.note_on(60, 100)
+
+
+def test_windows_key_backend_modified_failure_wraps_unexpected_transport_error(monkeypatch):
+    monkeypatch.setattr(out.sys, "platform", "win32")
+    pydirectinput_stub.install(monkeypatch)
+    kb = out.KeyboardBackend(use_88_key_layout=False)
+
+    def fail_send(actions: list[tuple[str, bool]]) -> None:
+        assert actions == [("t", True)]
+        raise RuntimeError("transport boom")
+
+    assert kb._windows_transport is not None
+    monkeypatch.setattr(kb._windows_transport, "send_batch", fail_send)
+
+    with pytest.raises(
+        out.OutputBackendSendError,
+        match="KeyboardBackend note_on failed: transport boom",
+    ):
+        kb.note_on(60, 100)
+
+    assert kb._active_pitches == {}
+    assert kb._states == {}

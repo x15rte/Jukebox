@@ -93,6 +93,41 @@ def test_restore_timer_resolution_when_zero(monkeypatch):
     assert tu._timer_resolution_refs == 0
 
 
+
+
+def test_import_skips_winmm_on_non_windows(monkeypatch):
+    monkeypatch.setattr(tu.sys, "platform", "linux")
+    mod = importlib.reload(tu)
+    try:
+        assert mod._winmm is None
+    finally:
+        monkeypatch.undo()
+        importlib.reload(mod)
+
+
+def test_restore_timer_resolution_keeps_active_when_refs_remain(monkeypatch):
+    calls = []
+
+    class Winmm:
+        def timeEndPeriod(self, ms):
+            calls.append(ms)
+
+    monkeypatch.setattr(tu, "_winmm", Winmm())
+    monkeypatch.setattr(tu, "_timer_resolution_refs", 2)
+    tu.restore_timer_resolution(1)
+    assert tu._timer_resolution_refs == 1
+    assert calls == []
+
+
+def test_precise_sleep_short_duration_skips_coarse_sleep(monkeypatch):
+    seq = [0.0, 0.002]
+    sleeps = []
+    monkeypatch.setattr(tu.time, "perf_counter", lambda: seq.pop(0) if seq else 0.002)
+    monkeypatch.setattr(tu.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    tu.precise_sleep(0.001)
+
+    assert sleeps == []
 _RAMP_STEP = 0.0005
 
 
@@ -187,4 +222,5 @@ def test_import_sets_winmm_none_on_ctypes_failure(monkeypatch):
     try:
         assert mod._winmm is None
     finally:
+        monkeypatch.undo()
         importlib.reload(mod)

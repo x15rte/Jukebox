@@ -23,7 +23,7 @@ jobs:
         # - Windows: windows-latest (x64)
         # - macOS:  macos-latest  (arm64, Apple Silicon)
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.14']
+        python-version: ['3.12']
         include:
           - os: ubuntu-latest
             arch: x64
@@ -99,6 +99,7 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: |
           cd artifacts
+          : > SHA256SUMS.txt
           for dir in Jukebox-*; do
             # Expect artifact directory name: Jukebox-${os}-${arch}-${tag}
             base="${dir#Jukebox-}"      # ${os}-${arch}-${tag}
@@ -112,23 +113,37 @@ jobs:
               continue
             fi
 
-            # Find main executable in this artifact (assumed to start with Jukebox)
-            exe_path="$(find "$dir" -maxdepth 5 -type f -name 'Jukebox*' | head -n 1)"
-            if [ -z "$exe_path" ]; then
-              echo "No Jukebox binary found in $dir, skip."
-              continue
+            mapfile -t matches < <(
+              find "$dir" -maxdepth 5 \
+                \( -type d -name 'Jukebox.app' -prune -print \) -o \
+                \( -type f \( -name 'Jukebox' -o -name 'Jukebox.exe' \) -print \)
+            )
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "Expected exactly one Jukebox executable in $dir, found ${#matches[@]}"
+              exit 1
             fi
 
-            ext=""
-            case "$exe_path" in
-              *.exe) ext=".exe" ;;
-            esac
+            exe_path="${matches[0]}"
 
-            # Final release asset filename:
-            #   Jukebox-${TAG_NAME}-${os}-${arch}[.exe]
-            target="Jukebox-${TAG_NAME}-${os}-${arch}${ext}"
-            echo "Copy $exe_path -> $target"
-            cp "$exe_path" "$target"
+            if [ -d "$exe_path" ]; then
+              target="Jukebox-${TAG_NAME}-${os}-${arch}.zip"
+              target_path="$PWD/$target"
+              echo "Zip $exe_path -> $target"
+              (cd "$(dirname "$exe_path")" && zip -qr "$target_path" "$(basename "$exe_path")")
+            else
+              ext=""
+              case "$exe_path" in
+                *.exe) ext=".exe" ;;
+              esac
+
+              # Final release asset filename:
+              #   Jukebox-${TAG_NAME}-${os}-${arch}[.exe]
+              target="Jukebox-${TAG_NAME}-${os}-${arch}${ext}"
+              echo "Copy $exe_path -> $target"
+              cp "$exe_path" "$target"
+            fi
+
+            sha256sum "$target" >> SHA256SUMS.txt
           done
 
       - name: Create GitHub Release
@@ -144,6 +159,8 @@ jobs:
 
           ### Frozen executables
 
+          - SHA-256 checksums are attached as SHA256SUMS.txt.
+
           These frozen executables are automatically produced by the CI workflow for each tagged release.
           The recommended way to run Jukebox is to use Python and run it from source at the latest commit on the default branch.
           When filing issues, please test and confirm the problem using the latest source version (run with Python) rather than a previously frozen release.
@@ -157,6 +174,9 @@ jobs:
             echo "Error: no release assets found"
             exit 1
           fi
+
+          [ -f artifacts/SHA256SUMS.txt ] || { echo "Missing artifacts/SHA256SUMS.txt"; exit 1; }
+          assets+=("artifacts/SHA256SUMS.txt")
 
           if gh release view "$TAG_NAME" &>/dev/null; then
             gh release edit "$TAG_NAME" --notes-file /tmp/release-notes.md

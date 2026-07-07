@@ -145,7 +145,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
+          python-version: "3.12"
       - name: Install bandit
         run: |
           python -m pip install --upgrade pip
@@ -167,7 +167,8 @@ jobs:
           sarif_file: bandit-tests-results.sarif
           category: bandit-tests
 
-  compat:
+  compat_314_advisory:
+    name: compat_314_advisory
     runs-on: ubuntu-latest
     continue-on-error: true
     needs: test
@@ -196,5 +197,5 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-test.txt
-      - name: Run compatibility tests
+      - name: Run advisory Python 3.14 compatibility tests
         run: xvfb-run python -m pytest -q --durations=10

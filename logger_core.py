@@ -154,11 +154,14 @@ class JukeboxLogger:
         path: str | Path,
         max_bytes: int = 5 * 1024 * 1024,
         backup_count: int = 2,
-    ) -> None:
+    ) -> bool:
         """Enable rotating file logging to *path*.
 
-        If a file handler is already active for the same *path*, this is a no-op.
+        Returns ``True`` when file logging is active after the call, or ``False``
+        when no usable file handler could be enabled.
         """
+        if not str(path):
+            return False
         abs_path = Path(path).resolve()
         # Directory creation outside the lock to avoid blocking on I/O
         try:
@@ -177,7 +180,7 @@ class JukeboxLogger:
                 and self._file_handler.stream is not None
                 and not self._file_handler.stream.closed
             ):
-                return
+                return True
             # Remember the old handler for disposal outside the lock
             old_handler = self._file_handler
             self._file_handler = None
@@ -202,7 +205,7 @@ class JukeboxLogger:
                         old_handler.close()
                     except Exception as ce:
                         self._logger.debug("Error closing previous file handler: %s", ce)
-            return
+            return False
 
         with self._lock:
             if self._file_handler is not None:
@@ -214,7 +217,7 @@ class JukeboxLogger:
                     except Exception as e:
                         self._logger.debug("Error closing previous file handler: %s", e)
                 handler.close()  # pragma: no cover
-                return  # pragma: no cover
+                return True  # pragma: no cover
             handler.setFormatter(logging.Formatter(_FORMAT))
             self._logger.addHandler(handler)
             self._file_handler = handler
@@ -226,6 +229,8 @@ class JukeboxLogger:
                 old_handler.close()
             except Exception as e:
                 self._logger.debug("Error closing previous file handler: %s", e)
+
+        return True
 
     def disable_file_logging(self) -> None:
         """Disable file logging and close the current file handler, if any."""

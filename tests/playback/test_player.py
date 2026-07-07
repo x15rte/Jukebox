@@ -235,11 +235,10 @@ def test_restore_backend_state_default_velocity():
 
 
 def test_reconcile_active_pitches_tracks_press_and_release():
-    """_reconcile_active_pitches computes held pitches from past events (lines 700-704, 709-711).
+    """_reconcile_active_pitches computes held pitches and velocities from past events.
 
-    Note: _pitch_velocities keeps entries for all pressed pitches (the velocity
-    is needed if the note is later re-pressed after seek/resume), even if the
-    pitch has been released from _active_pitches.
+    Note: _pitch_velocities tracks currently held pitches only; released
+    pitches are removed so resume/seek restores only active notes.
     """
     backend = FakeBackend()
     events = [
@@ -256,6 +255,5 @@ def test_reconcile_active_pitches_tracks_press_and_release():
 
     # 60 was pressed then released, 64 is still held
     assert p._active_pitches == {64}
-    # _pitch_velocities retains velocity for ALL pressed pitches
-    assert p._pitch_velocities == {60: 100, 64: 90}
+    assert p._pitch_velocities == {64: 90}
     assert set(rec.values[-1]) == {64}

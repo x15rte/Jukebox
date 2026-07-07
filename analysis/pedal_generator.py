@@ -188,45 +188,43 @@ class PedalGenerator:
             if i == 0:
                 events.append(KeyEvent(curr.start_time, 1, "pedal", "down"))
 
-            gap = 0.0
             if next_n:
                 gap = next_n.start_time - curr.end_time
-
-            if gap > 0.35:
-                events.append(KeyEvent(curr.end_time, 0, "pedal", "up"))
-                if next_n:
+                if gap > 0.35:
+                    events.append(KeyEvent(curr.end_time, 0, "pedal", "up"))
                     events.append(KeyEvent(next_n.start_time, 1, "pedal", "down"))
-            else:
-                should_repedal = False
+                    continue
 
-                if next_n:
-                    linear_interval = abs(next_n.pitch - curr.pitch) % 12
-                    if linear_interval in UNSAFE_INTERVALS:
-                        should_repedal = True
+            should_repedal = False
 
-                    if not should_repedal and all_notes:
-                        window_notes = [
-                            n
-                            for n in all_notes
-                            if abs(n.start_time - next_n.start_time) <= 0.05
-                        ]
+            if next_n:
+                linear_interval = abs(next_n.pitch - curr.pitch) % 12
+                if linear_interval in UNSAFE_INTERVALS:
+                    should_repedal = True
 
-                    # Full pairwise interval check for all notes in the window
-                    if not should_repedal and window_notes:
-                        for j in range(len(window_notes)):
-                            for k in range(j + 1, len(window_notes)):
-                                interval = abs(window_notes[j].pitch - window_notes[k].pitch) % 12
-                                if interval in UNSAFE_INTERVALS:
-                                    should_repedal = True
-                                    break
-                            if should_repedal:
+                if not should_repedal and all_notes:
+                    window_notes = [
+                        n
+                        for n in all_notes
+                        if abs(n.start_time - next_n.start_time) <= 0.05
+                    ]
+
+                # Full pairwise interval check for all notes in the window
+                if not should_repedal and window_notes:
+                    for j in range(len(window_notes)):
+                        for k in range(j + 1, len(window_notes)):
+                            interval = abs(window_notes[j].pitch - window_notes[k].pitch) % 12
+                            if interval in UNSAFE_INTERVALS:
+                                should_repedal = True
                                 break
+                        if should_repedal:
+                            break
 
-                if should_repedal and next_n:
-                    events.append(KeyEvent(next_n.start_time, 0, "pedal", "up"))
-                    events.append(
-                        KeyEvent(next_n.start_time + PEDAL_LAG, 1, "pedal", "down")
-                    )
+            if should_repedal and next_n:
+                events.append(KeyEvent(next_n.start_time, 0, "pedal", "up"))
+                events.append(
+                    KeyEvent(next_n.start_time + PEDAL_LAG, 1, "pedal", "down")
+                )
 
         # Pedal-up early if trailing silence > 0.35s after the last driver note.
         last_end = max(n.end_time for n in driver_notes)

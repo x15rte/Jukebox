@@ -129,6 +129,7 @@ class GlobalTickMap:
         self._entries: List[Tuple[int, float, int]] = []
         self.time_signatures: List[Tuple[float, int, int]] = []
         self._build(midi_file)
+        self._entry_ticks: List[int] = [entry[0] for entry in self._entries]
 
     def _build(self, midi_file: mido.MidiFile):
         merged = mido.merge_tracks(midi_file.tracks)
@@ -150,12 +151,10 @@ class GlobalTickMap:
 
     def tick_to_time(self, target_tick: int) -> float:
         target_tick = max(0, target_tick)
-        last_tick, last_time, tempo = self._entries[0]
-        for e_tick, e_time, e_tempo in self._entries:
-            if target_tick >= e_tick:
-                last_tick, last_time, tempo = e_tick, e_time, e_tempo
-            else:
-                break
+        idx = bisect.bisect_right(self._entry_ticks, target_tick) - 1
+        if idx < 0:
+            idx = 0
+        last_tick, last_time, tempo = self._entries[idx]
         return last_time + mido.tick2second(
             target_tick - last_tick, self.ticks_per_beat, tempo
         )

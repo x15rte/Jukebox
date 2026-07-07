@@ -11,7 +11,9 @@ from config_repository import (
     ConfigLoadError,
     ConfigRepository,
     PlaybackConfig,
+    _FieldMeta,
     _coerce_bool,
+    _coerce_field,
     _coerce_float,
     _coerce_int,
     _coerce_optional_str,
@@ -664,77 +666,80 @@ def test_save_handles_tmp_unlink_oserror(monkeypatch, tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# Edge-case coverage: save falls back to shutil.copy2 when os.replace fails (lines 723-734)
+# Edge-case coverage: save propagates os.replace failure without fallback
 # ---------------------------------------------------------------------------
 
 
-def test_save_falls_back_to_copy2(monkeypatch, tmp_path: Path):
-    """save uses copy2 fallback when os.replace fails (lines 723-734)."""
+def test_save_replace_failure_raises_without_touching_existing_config(
+    monkeypatch, tmp_path: Path
+):
+    """save preserves existing config when os.replace fails."""
     import os
-    import shutil
     repo = ConfigRepository(config_dir=tmp_path)
+
+    repo.save(Config(tempo=100.0))
+    original_text = repo.config_path.read_text(encoding="utf-8")
 
     monkeypatch.setattr(
         os, "replace",
         lambda src, dst: (_ for _ in ()).throw(OSError("Cross-device link")),
     )
 
-    repo.save(Config(tempo=120.0))
-    assert repo.config_path.exists()
-    data = json.loads(repo.config_path.read_text(encoding="utf-8"))
-    assert data["tempo"] == 120.0
+    with pytest.raises(OSError, match="Cross-device link"):
+        repo.save(Config(tempo=120.0))
+
+    assert repo.config_path.read_text(encoding="utf-8") == original_text
+    assert not repo.config_path.with_suffix(".json.tmp").exists()
 
 
 # ---------------------------------------------------------------------------
-# Edge-case coverage: save raises when both os.replace and shutil.copy2 fail (lines 727-729)
+# Edge-case coverage: save propagates os.replace failure with no existing config
 # ---------------------------------------------------------------------------
 
 
-def test_save_raises_when_copy2_also_fails(monkeypatch, tmp_path: Path):
-    """save raises OSError when both os.replace and shutil.copy2 fail (lines 727-729)."""
+def test_save_replace_failure_raises_when_no_existing_config(monkeypatch, tmp_path: Path):
+    """save leaves no destination config when os.replace fails without one."""
     import os
-    import shutil
     repo = ConfigRepository(config_dir=tmp_path)
 
     monkeypatch.setattr(
         os, "replace",
         lambda src, dst: (_ for _ in ()).throw(OSError("Replace failed")),
     )
-    monkeypatch.setattr(
-        shutil, "copy2",
-        lambda src, dst: (_ for _ in ()).throw(OSError("Copy2 failed")),
-    )
 
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="Replace failed"):
         repo.save(Config(tempo=120.0))
+
+    assert not repo.config_path.exists()
 
 
 # ---------------------------------------------------------------------------
-# Edge-case coverage: save silently ignores cleanup unlink failure (lines 737-740)
+# Edge-case coverage: save preserves replace failure despite cleanup unlink failure
 # ---------------------------------------------------------------------------
 
 
 def test_save_handles_cleanup_unlink_oserror(monkeypatch, tmp_path: Path):
-    """save silently ignores os.unlink error in finally block (lines 737-740)."""
+    """save raises the replace error even when tmp cleanup unlink also fails."""
     import os
     repo = ConfigRepository(config_dir=tmp_path)
 
-    # Force os.replace to fail so the tmp file remains un-renamed
     monkeypatch.setattr(
         os, "replace",
         lambda src, dst: (_ for _ in ()).throw(OSError("Replace failed")),
     )
 
     original_unlink = os.unlink
+
     def mock_unlink(path, *args, **kwargs):
         path_str = str(path)
         if path_str.endswith(".json.tmp"):
             raise OSError("Cleanup failed")
         return original_unlink(path, *args, **kwargs)
+
     monkeypatch.setattr(os, "unlink", mock_unlink)
 
-    repo.save(Config(tempo=120.0))
-    assert repo.config_path.exists()
+    with pytest.raises(OSError, match="Replace failed"):
+        repo.save(Config(tempo=120.0))
 
 
 # ---------------------------------------------------------------------------
@@ -758,3 +763,19 @@ def test_playback_config_iter_yields_extra_keys():
     pc = PlaybackConfig(tempo=120.0, extra_key="hello")
     keys = list(pc)
     assert "extra_key" in keys
+
+
+def test_coerce_field_float_and_int_without_range_return_values():
+    float_meta = _FieldMeta(cls_type=float)
+    int_meta = _FieldMeta(cls_type=int)
+
+    assert _coerce_field("12.5", float_meta, 1.0, field_name="float_field") == 12.5
+    assert _coerce_field("12", int_meta, 1, field_name="int_field") == 12
+
+
+def test_playback_config_preserves_explicit_raw_pedal_events_list():
+    raw = [(0.0, 127)]
+
+    cfg = PlaybackConfig(raw_pedal_events=raw)
+
+    assert cfg.raw_pedal_events is raw

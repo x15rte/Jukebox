@@ -407,3 +407,110 @@ def test_toggle_pause_when_player_ignores_toggle(monkeypatch):
     ctrl.toggle_pause()
     assert pause_event.is_set() == was_paused
     assert ctrl.state == "playing"
+
+
+def test_start_guard_branches_allow_missing_log_callback(monkeypatch):
+    ctrl = _setup(monkeypatch)
+    ctrl._stopping = True
+    assert ctrl.start([], {}, 1.0, "key", False) is False
+
+    ctrl._stopping = False
+    assert ctrl.start([], {}, 1.0, "key", False) is True
+    assert ctrl.start([], {}, 1.0, "key", False) is False
+
+
+def test_start_backend_value_error_without_log_callback(monkeypatch):
+    ctrl = PlaybackController()
+
+    def unavailable(*_args, **_kwargs):
+        raise ValueError("bad output mode")
+
+    monkeypatch.setattr("playback.playback_controller.create_backend", unavailable)
+
+    assert ctrl.start([], {}, 1.0, "bad", False) is False
+    assert ctrl._backend is None
+
+
+def test_start_thread_failure_logs_shutdown_and_ignores_disconnect_errors(monkeypatch):
+    ctrl = PlaybackController()
+
+    class BadBackend(FakeBackend):
+        def shutdown(self):
+            raise RuntimeError("shutdown exploded")
+
+    class BadSignal:
+        def connect(self, *_args):
+            return None
+
+        def disconnect(self, *_args):
+            raise AttributeError("disconnect failed")
+
+    class PlayerWithBadDisconnects(FakePlaybackPlayer):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.playback_finished = BadSignal()
+            self.status_updated = BadSignal()
+            self.progress_updated = BadSignal()
+            self.visualizer_updated = BadSignal()
+
+    class FailingThread(FakeThread):
+        def start(self):
+            raise RuntimeError("thread start failure")
+
+    errors = []
+    monkeypatch.setattr(
+        "playback.playback_controller.create_backend",
+        lambda *_args, **_kwargs: BadBackend(),
+    )
+    monkeypatch.setattr("playback.playback_controller.Player", PlayerWithBadDisconnects)
+    monkeypatch.setattr("playback.playback_controller.QThread", FailingThread)
+    monkeypatch.setattr(
+        "playback.playback_controller.jukebox_logger.error",
+        lambda message, **kwargs: errors.append((message, kwargs)),
+    )
+
+    with pytest.raises(RuntimeError, match="thread start failure"):
+        ctrl.start([], {}, 1.0, "key", False)
+
+    assert any("shutdown exploded" in message for message, _kwargs in errors)
+    assert ctrl._backend is None
+    assert ctrl._thread is None
+    assert ctrl._player is None
+    assert ctrl.state == "stopped"
+
+
+def test_stop_without_player_is_noop():
+    ctrl = PlaybackController()
+
+    ctrl.stop()
+
+    assert ctrl._stopping is False
+
+
+def test_toggle_pause_skips_state_change_when_player_stops_during_toggle(monkeypatch):
+    ctrl = _setup(monkeypatch)
+    ctrl.start([], {}, 1.0, "key", False)
+    player = ctrl._player
+    assert player is not None
+
+    def stop_during_toggle():
+        player.pause_event.set()
+        player.stop_event.set()
+
+    monkeypatch.setattr(player, "toggle_pause", stop_during_toggle)
+
+    ctrl.toggle_pause()
+
+    assert ctrl.state == "playing"
+
+
+def test_seek_ignores_stale_running_thread_without_player():
+    ctrl = PlaybackController()
+    thread = FakeThread()
+    thread.start()
+    ctrl._thread = thread
+    ctrl._player = None
+
+    ctrl.seek(2.0)
+
+    assert ctrl._seek_offset == 0.0

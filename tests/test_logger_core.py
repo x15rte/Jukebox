@@ -73,6 +73,28 @@ def test_callback_count():
     assert lg.callback_count == 0
 
 
+def test_remove_gui_callback_absent_is_noop():
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
+
+    def cb(level, msg):
+        pass
+
+    lg.remove_gui_callback(cb)
+    assert lg.callback_count == 0
+
+
+def test_init_reuses_existing_logger_handler():
+    name = f"jukebox_test_{uuid.uuid4().hex[:8]}"
+    logger = logging.getLogger(name)
+    handler = logging.NullHandler()
+    logger.addHandler(handler)
+    try:
+        lg = JukeboxLogger(logger_name=name)
+        assert handler in lg._logger.handlers
+    finally:
+        logger.removeHandler(handler)
+
+
 def test_current_level_name_default():
     lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     assert lg.current_level_name == "INFO"
@@ -90,7 +112,7 @@ def test_is_file_logging_enabled(tmp_path):
     lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     assert lg.is_file_logging_enabled is False
     p = tmp_path / "x" / "log.txt"
-    lg.enable_file_logging(str(p))
+    assert lg.enable_file_logging(str(p)) is True
     assert lg.is_file_logging_enabled is True
     lg.disable_file_logging()
     assert lg.is_file_logging_enabled is False
@@ -104,17 +126,36 @@ def test_set_level_with_unknown_name_defaults_info():
 
 def test_enable_file_logging_empty_path_is_noop():
     lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
-    lg.enable_file_logging("")
+    assert lg.enable_file_logging("") is False
     assert lg._file_handler is None
+
+
+def test_enable_file_logging_handler_creation_failure_returns_false(monkeypatch, tmp_path):
+    lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
+    warnings = []
+
+    def bad_handler(*_args, **_kwargs):
+        raise OSError("open failed")
+
+    monkeypatch.setattr(logger_core, "RotatingFileHandler", bad_handler)
+    monkeypatch.setattr(
+        lg._logger,
+        "warning",
+        lambda msg, *args: warnings.append(msg % args),
+    )
+
+    assert lg.enable_file_logging(str(tmp_path / "log.txt")) is False
+    assert lg._file_handler is None
+    assert any("Could not enable file logging: open failed" in warning for warning in warnings)
 
 
 def test_enable_file_logging_noop_when_same_handler(tmp_path):
     lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     p = tmp_path / "a" / "log.txt"
 
-    lg.enable_file_logging(str(p), max_bytes=111, backup_count=2)
+    assert lg.enable_file_logging(str(p), max_bytes=111, backup_count=2) is True
     h1 = lg._file_handler
-    lg.enable_file_logging(str(p), max_bytes=111, backup_count=2)
+    assert lg.enable_file_logging(str(p), max_bytes=111, backup_count=2) is True
 
     assert lg._file_handler is h1
 
@@ -124,13 +165,13 @@ def test_enable_file_logging_replaces_old_handler_even_if_close_fails(tmp_path, 
     p1 = tmp_path / "x" / "log1.txt"
     p2 = tmp_path / "x" / "log2.txt"
 
-    lg.enable_file_logging(str(p1))
+    assert lg.enable_file_logging(str(p1)) is True
 
     def bad_close():
         raise RuntimeError("close failed")
 
     monkeypatch.setattr(lg._file_handler, "close", bad_close)
-    lg.enable_file_logging(str(p2))
+    assert lg.enable_file_logging(str(p2)) is True
 
     assert lg._file_handler is not None
     assert lg._file_handler.baseFilename.endswith("log2.txt")
@@ -144,7 +185,7 @@ def test_disable_file_logging_no_handler_noop():
 def test_disable_file_logging_close_exception_is_swallowed(tmp_path, monkeypatch):
     lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
     p = tmp_path / "x" / "log.txt"
-    lg.enable_file_logging(str(p))
+    assert lg.enable_file_logging(str(p)) is True
 
     def bad_close():
         raise RuntimeError("boom")
@@ -316,7 +357,7 @@ def test_enable_file_logging_makedirs_oserror_swallowed(tmp_path, monkeypatch):
         raise OSError("makedirs failed")
     monkeypatch.setattr(os, "makedirs", bad_makedirs)
     lg = JukeboxLogger(logger_name=f"jukebox_test_{uuid.uuid4().hex[:8]}")
-    lg.enable_file_logging(str(tmp_path / "test.log"))  # should not raise
+    assert lg.enable_file_logging(str(tmp_path / "test.log")) is True  # should not raise
 
 
 def test_global_singleton_has_expected_type():

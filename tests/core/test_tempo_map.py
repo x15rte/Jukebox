@@ -62,6 +62,26 @@ def test_global_tick_map_tick_to_time_with_tempo_change():
     assert abs(t2 - 1.5) < 1e-6
 
 
+def test_global_tick_map_tick_to_time_uses_last_matching_tempo_entry():
+    mid = mido.MidiFile(ticks_per_beat=480)
+    tr = mido.MidiTrack()
+    mid.tracks.append(tr)
+    tr.append(mido.MetaMessage("set_tempo", tempo=500000, time=0))
+    tr.append(mido.MetaMessage("set_tempo", tempo=400000, time=240))
+    tr.append(mido.MetaMessage("set_tempo", tempo=750000, time=480))
+    tr.append(mido.MetaMessage("set_tempo", tempo=1000000, time=480))
+
+    gmap = GlobalTickMap(mid)
+    target_tick = 1680
+    expected = (
+        mido.tick2second(240, 480, 500000)
+        + mido.tick2second(480, 480, 400000)
+        + mido.tick2second(480, 480, 750000)
+        + mido.tick2second(480, 480, 1000000)
+    )
+
+    assert gmap.tick_to_time(target_tick) == pytest.approx(expected)
+
 def test_tempo_map_negative_time_and_beat_return_zero():
     tm = TempoMap([(0.0, 500000)], [(0.0, 4, 4)])
     assert tm.time_to_beat(-1.0) == 0.0
@@ -136,3 +156,13 @@ def test_tempo_map_measure_boundaries_breaks_on_zero_beats():
     tm = TempoMap([(0.0, 500000)], [(0.0, 0, 4)])
     measures = tm.get_measure_boundaries(total_duration=4.0)
     assert measures == []
+
+
+
+def test_global_tick_map_tick_to_time_defensive_empty_entry_ticks():
+    mid = mido.MidiFile(ticks_per_beat=480)
+    mid.tracks.append(mido.MidiTrack())
+    gmap = GlobalTickMap(mid)
+    gmap._entry_ticks = []
+
+    assert gmap.tick_to_time(0) == 0.0

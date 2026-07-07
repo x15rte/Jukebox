@@ -342,3 +342,42 @@ def test_parse_structure_unclosed_note_flush(monkeypatch):
     tracks, _ = MidiParser.parse_structure("x.mid")
     assert len(tracks) == 1
     assert len(tracks[0].notes) == 1
+
+
+def test_parse_structure_legato_restrike_skips_too_short_prior(monkeypatch):
+    mid = mido.MidiFile(ticks_per_beat=480)
+    tr = mido.MidiTrack()
+    mid.tracks.append(tr)
+    tr.append(mido.Message("note_on", note=60, velocity=90, channel=0, time=0))
+    tr.append(mido.Message("note_on", note=60, velocity=100, channel=0, time=1))
+    tr.append(mido.Message("note_off", note=60, velocity=0, channel=0, time=480))
+    monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda *a, **k: mid)
+
+    tracks, _ = MidiParser.parse_structure("ok.mid")
+
+    assert len(tracks[0].notes) == 1
+    assert tracks[0].notes[0].velocity == 100
+
+
+def test_parse_structure_flush_skips_unclosed_zero_duration_note(monkeypatch):
+    mid = mido.MidiFile(ticks_per_beat=480)
+    tr = mido.MidiTrack()
+    mid.tracks.append(tr)
+    tr.append(mido.Message("note_on", note=60, velocity=90, channel=0, time=0))
+    monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda *a, **k: mid)
+
+    tracks, _ = MidiParser.parse_structure("ok.mid")
+    assert tracks == []
+
+
+def test_parse_structure_keeps_pedal_only_track_without_sorting_notes(monkeypatch):
+    mid = mido.MidiFile(ticks_per_beat=480)
+    tr = mido.MidiTrack()
+    mid.tracks.append(tr)
+    tr.append(mido.Message("control_change", control=64, value=127, channel=0, time=120))
+    monkeypatch.setattr("core.midi_parser.mido.MidiFile", lambda *a, **k: mid)
+
+    tracks, _ = MidiParser.parse_structure("ok.mid")
+    assert len(tracks) == 1
+    assert tracks[0].notes == []
+    assert tracks[0].pedal_events

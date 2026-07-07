@@ -166,7 +166,7 @@ def test_on_log_save_to_file_toggled_enables_and_disables(window_factory, monkey
     w = window_factory()
     events = []
 
-    monkeypatch.setattr("main_window.jukebox_logger.enable_file_logging", lambda p: events.append(("enable", p)))
+    monkeypatch.setattr("main_window.jukebox_logger.enable_file_logging", lambda p: events.append(("enable", p)) or True)
     monkeypatch.setattr("main_window.jukebox_logger.disable_file_logging", lambda: events.append(("disable", None)))
     monkeypatch.setattr(w, "add_log_message", lambda m: events.append(("log", m)))
     monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append(("dirty", None)))
@@ -177,6 +177,26 @@ def test_on_log_save_to_file_toggled_enables_and_disables(window_factory, monkey
     assert any(e[0] == "enable" for e in events)
     assert any(e[0] == "disable" for e in events)
     assert [e for e in events if e[0] == "dirty"]
+
+
+def test_on_log_save_to_file_toggled_logs_failure_when_logger_returns_false(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    events = []
+
+    monkeypatch.setattr("main_window.jukebox_logger.enable_file_logging", lambda p: False)
+    monkeypatch.setattr(w, "add_log_message", lambda m: events.append(("log", m)))
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append(("dirty", None)))
+
+    w._on_log_save_to_file_toggled(True)
+
+    assert any(e[0] == "log" and "Failed to enable file logging" in e[1] for e in events)
+    assert ("dirty", None) in events
+
+
+def test_log_level_combo_includes_critical(window_factory):
+    w = window_factory()
+
+    assert w.log_level_combo.findText("CRITICAL") >= 0
 
 
 def test_on_status_updated_routes_levels(window_factory, monkeypatch, tmp_path):
@@ -405,8 +425,14 @@ def test_update_enabled_states_ignores_non_text_check(window_factory, monkeypatc
 def test_clear_log_clears_entries(window_factory, monkeypatch, tmp_path):
     w = window_factory()
     w._log_entries.append({"level": "INFO", "plain": "test", "html": "<span>test</span>"})
+    w.log_output.setPlainText("test")
+    w.log_filter_status.setText("1/1")
+
     w._clear_log()
+
     assert w._log_entries == []
+    assert w.log_output.toPlainText() == ""
+    assert w.log_filter_status.text() == ""
 
 
 def test_on_log_filter_text_changed_starts_timer(window_factory, monkeypatch, tmp_path):
@@ -658,3 +684,259 @@ def test_show_log_context_menu_with_selection(window_factory, monkeypatch, qtbot
     assert "Copy" in action_texts
     assert "Select All" in action_texts
     assert "Clear" in action_texts
+
+
+def test_show_log_context_menu_clear_action_clears_backing_state(window_factory, monkeypatch):
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtWidgets import QMenu
+
+    w = window_factory()
+    w._log_entries.append({"level": "INFO", "plain": "test", "html": "<span>test</span>"})
+    w.log_output.setPlainText("test")
+    w.log_filter_status.setText("1/1")
+
+    def exec_and_trigger_clear(menu, _pos):
+        for action in menu.actions():
+            if action.text() == "Clear":
+                action.trigger()
+                return True
+        raise AssertionError("Clear action not found")
+
+    monkeypatch.setattr(QMenu, "exec", exec_and_trigger_clear)
+
+    w._show_log_context_menu(QPoint(0, 0))
+
+    assert w._log_entries == []
+    assert w.log_output.toPlainText() == ""
+    assert w.log_filter_status.text() == ""
+
+
+def test_copy_log_to_clipboard_handles_missing_clipboard_and_statusbar(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    monkeypatch.setattr("main_window.QApplication.clipboard", lambda: None)
+    monkeypatch.setattr(w, "statusBar", lambda: None)
+
+    w._copy_log_to_clipboard()
+
+
+def test_current_output_mode_falsy_data_falls_back(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    monkeypatch.setattr(
+        w,
+        "output_mode_combo",
+        SimpleNamespace(currentData=lambda: ""),
+    )
+    assert w._current_output_mode() == "key"
+
+
+def test_update_88_key_visibility_without_checkbox_noop(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    monkeypatch.delattr(w, "use_88_key_check")
+    w._update_88_key_visibility()
+
+
+def test_reset_playback_group_ignores_missing_output_mode(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    events = []
+
+    class Combo:
+        def findData(self, _data):
+            return -1
+
+        def setCurrentIndex(self, index):
+            events.append(("set", index))
+
+    monkeypatch.setattr(w, "output_mode_combo", Combo())
+    monkeypatch.setattr(w, "_update_88_key_visibility", lambda: events.append(("vis", None)))
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append(("dirty", None)))
+
+    w._reset_playback_group_to_default()
+
+    assert all(event[0] != "set" for event in events)
+    assert ("vis", None) in events
+
+
+def test_humanization_helpers_skip_blank_text_checks(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    events = []
+
+    class BlankCheck:
+        def text(self):
+            return ""
+
+        def blockSignals(self, blocked):
+            events.append(("block", blocked))
+
+        def setChecked(self, checked):
+            events.append(("checked", checked))
+
+        def isChecked(self):
+            return False
+
+    w.all_humanization_checks["blank"] = BlankCheck()
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append(("dirty", None)))
+
+    w._reset_humanization_group_to_default()
+    w._toggle_all_humanization(True)
+
+    assert not any(event[0] in {"block", "checked"} for event in events)
+    assert ("dirty", None) in events
+
+
+def test_log_startup_capabilities_non_windows_skips_direct_input(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    logs = []
+    monkeypatch.setattr(
+        "main_window.get_capabilities",
+        lambda: {"platform": "linux", "high_res_timer": False, "direct_input": True},
+    )
+    monkeypatch.setattr("main_window.jukebox_logger.info", lambda m: logs.append(m))
+
+    w._log_startup_capabilities()
+
+    assert logs == [
+        "Platform: linux; high-resolution timer: not available (using standard timing)."
+    ]
+
+
+def test_check_macos_accessibility_ok_button_does_not_open(
+    window_factory, monkeypatch, tmp_path
+):
+    w = window_factory()
+    opened = []
+    monkeypatch.setattr("main_window.sys.platform", "darwin")
+    monkeypatch.setattr("main_window.is_macos_accessibility_trusted", lambda: False)
+    monkeypatch.setattr(
+        "main_window.open_macos_accessibility_preferences", lambda: opened.append(True)
+    )
+
+    class FakeMessageBox:
+        class ButtonRole:
+            ActionRole = 1
+            AcceptRole = 2
+
+        def __init__(self, *_a, **_k):
+            self._open = object()
+            self._ok = object()
+
+        def setWindowTitle(self, *_a):
+            return None
+
+        def setText(self, *_a):
+            return None
+
+        def addButton(self, text, _role):
+            return self._open if text == "Open System Settings" else self._ok
+
+        def exec(self):
+            return None
+
+        def clickedButton(self):
+            return self._ok
+
+    monkeypatch.setattr("main_window.QMessageBox", FakeMessageBox)
+
+    w._check_macos_accessibility()
+
+    assert opened == []
+
+
+def test_on_log_level_changed_empty_level_noop(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    events = []
+    monkeypatch.setattr("main_window.jukebox_logger.set_level", lambda level: events.append(level))
+    monkeypatch.setattr(w, "_mark_config_dirty", lambda: events.append("dirty"))
+
+    w._on_log_level_changed("")
+
+    assert events == []
+
+
+def test_append_html_auto_scroll_branches(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w.log_auto_scroll_check.setChecked(False)
+    w._append_html("<span>one</span>")
+
+    w.log_auto_scroll_check.setChecked(True)
+    monkeypatch.setattr(w.log_output, "verticalScrollBar", lambda: None)
+    w._append_html("<span>two</span>")
+
+
+def test_render_log_auto_scroll_without_scrollbar(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._log_entries = [{"level": "INFO", "plain": "needle", "html": "<span>needle</span>"}]
+    w.log_auto_scroll_check.setChecked(True)
+    monkeypatch.setattr(w.log_output, "verticalScrollBar", lambda: None)
+
+    w._render_log()
+
+    assert "needle" in w.log_output.toPlainText()
+
+
+def test_set_controls_enabled_ignores_unmarked_groupbox(window_factory, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QGroupBox
+
+    w = window_factory()
+    unmarked = QGroupBox(w)
+    unmarked.setEnabled(True)
+
+    w.set_controls_enabled(False)
+
+    assert unmarked.isEnabled() is True
+
+
+def test_save_config_closing_error_does_not_retry(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    errors = []
+    starts = []
+    w._closing = True
+    monkeypatch.setattr(w, "_config_from_ui", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(w, "_log_error", lambda m, **k: errors.append((m, k)))
+    monkeypatch.setattr(w, "_config_save_timer", SimpleNamespace(start=lambda ms: starts.append(ms), stop=lambda: None))
+
+    w._save_config()
+
+    assert starts == []
+
+
+def test_save_config_generation_changed_keeps_dirty(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    w._config_dirty = True
+    w._dirty_gen = 1
+    monkeypatch.setattr(w, "_config_from_ui", lambda: object())
+
+    def save(_config):
+        w._dirty_gen = 2
+
+    monkeypatch.setattr(w.config_repo, "save", save)
+
+    w._save_config()
+
+    assert w._config_dirty is True
+
+
+def test_apply_config_to_ui_ignores_missing_config_attr(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    called = []
+    binding = SimpleNamespace(key="missing_config_attr", getter=lambda _w: None, setter=lambda *_a: called.append(True))
+    monkeypatch.setattr("main_window.CONFIG_UI_BINDINGS", [binding])
+
+    w._apply_config_to_ui(Config())
+
+
+    assert called == []
+
+
+def test_select_file_cancelled_is_noop(window_factory, monkeypatch, tmp_path):
+    w = window_factory()
+    events = []
+    monkeypatch.setattr("main_window.QFileDialog.getOpenFileName", lambda *a, **k: ("", ""))
+    monkeypatch.setattr(w, "_parse_and_select_tracks", lambda path: events.append(path))
+
+    w.select_file()
+
+    assert events == []

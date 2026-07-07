@@ -222,6 +222,11 @@ _MULTIPLY_SCAN = _SCAN_CODES["multiply"]
 # ---------------------------------------------------------------------------
 
 
+
+class RmcSendError(RuntimeError):
+    """Raised when the RMC keyboard transport cannot send a protocol key."""
+
+
 def ensure_numlock_on() -> None:
     """Activate NumLock once per session (Windows only)."""
     global _numlock_ensured
@@ -251,19 +256,21 @@ def _tap_key(name: str) -> None:
     """Press and release a single numpad key with the platform transport."""
     if _platform == "Windows":
         if not _use_pydirectinput:
-            jukebox_logger.warning(
-                f"pydirectinput is unavailable; cannot send numpad key '{name}'."
-            )
-            return
+            message = f"pydirectinput is unavailable; cannot send numpad key '{name}'."
+            jukebox_logger.warning(message)
+            raise RmcSendError(message)
         try:
             pydirectinput.keyDown(name, _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
         except Exception as e:
-            jukebox_logger.warning(f"pydirectinput key send failed for '{name}': {e}", exc_info=True)
-            return
+            message = f"pydirectinput key send failed for '{name}': {e}"
+            jukebox_logger.warning(message, exc_info=True)
+            raise RmcSendError(message) from e
         try:
             pydirectinput.keyUp(name, _pause=False)  # type: ignore[reportPossiblyUnboundVariable]
         except Exception as e:
-            jukebox_logger.warning(f"pydirectinput keyUp failed for '{name}': {e}", exc_info=True)
+            message = f"pydirectinput keyUp failed for '{name}': {e}"
+            jukebox_logger.warning(message, exc_info=True)
+            raise RmcSendError(message) from e
         return
 
     if _platform == "Darwin":
@@ -271,32 +278,38 @@ def _tap_key(name: str) -> None:
         if vk is not None and _pmke is not None:
             try:
                 if not _pmke(vk, True, 0):
-                    jukebox_logger.warning(f"macOS CGEvent keyDown failed for '{name}'")
+                    message = f"macOS CGEvent keyDown failed for '{name}'"
+                    jukebox_logger.warning(message)
+                    raise RmcSendError(message)
                 if not _pmke(vk, False, 0):
-                    jukebox_logger.warning(f"macOS CGEvent keyUp failed for '{name}'")
+                    message = f"macOS CGEvent keyUp failed for '{name}'"
+                    jukebox_logger.warning(message)
+                    raise RmcSendError(message)
+            except RmcSendError:
+                raise
             except Exception as e:
-                jukebox_logger.warning(
-                    f"macOS CGEvent key send failed for '{name}': {e}",
-                    exc_info=True,
-                )
+                message = f"macOS CGEvent key send failed for '{name}': {e}"
+                jukebox_logger.warning(message, exc_info=True)
+                raise RmcSendError(message) from e
         return
 
     kc = _precomputed_keys.get(name)
     if kc is None:
-        jukebox_logger.warning(f"Cannot send key '{name}': key not found in precomputed mappings")
-        return
+        message = f"Cannot send key '{name}': key not found in precomputed mappings"
+        jukebox_logger.warning(message)
+        raise RmcSendError(message)
     kb = _keyboard
     if kb is None:
-        jukebox_logger.warning(f"Cannot send key '{name}': pynput keyboard controller not available")
-        return
+        message = f"Cannot send key '{name}': pynput keyboard controller not available"
+        jukebox_logger.warning(message)
+        raise RmcSendError(message)
     try:
         kb.press(kc)
         kb.release(kc)
     except Exception as e:
-        jukebox_logger.warning(
-            f"pynput key send failed for '{name}': {e}",
-            exc_info=True,
-        )
+        message = f"pynput key send failed for '{name}': {e}"
+        jukebox_logger.warning(message, exc_info=True)
+        raise RmcSendError(message) from e
 
 
 def _send_key_up(scancode: int) -> None:
@@ -316,7 +329,9 @@ def _send_key_up(scancode: int) -> None:
     up[0].ii.ki.time = 0
     sent = windll.user32.SendInput(1, up, ctypes.sizeof(pydirectinput.Input))  # type: ignore[union-attr]
     if sent != 1:
-        jukebox_logger.warning(f"SendInput KEYUP for scancode {scancode:#x} returned {sent}")
+        message = f"SendInput KEYUP for scancode {scancode:#x} returned {sent}"
+        jukebox_logger.warning(message)
+        raise RmcSendError(message)
 
 def _send_key_down(scancode: int) -> None:
     """Send a single KEYDOWN INPUT event via SendInput."""
@@ -335,7 +350,9 @@ def _send_key_down(scancode: int) -> None:
     down[0].ii.ki.time = 0
     sent = windll.user32.SendInput(1, down, ctypes.sizeof(pydirectinput.Input))  # type: ignore[union-attr]
     if sent != 1:
-        jukebox_logger.warning(f"SendInput KEYDOWN for scancode {scancode:#x} returned {sent}")
+        message = f"SendInput KEYDOWN for scancode {scancode:#x} returned {sent}"
+        jukebox_logger.warning(message)
+        raise RmcSendError(message)
 
 
 def _send_frame_batched(sc0, sc1, sc2, sc3, sc4) -> bool:

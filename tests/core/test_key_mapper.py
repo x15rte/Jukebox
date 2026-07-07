@@ -67,3 +67,13 @@ def test_is_black_key_boundaries():
     assert KeyMapper.is_black_key(8) is True
     assert KeyMapper.is_black_key(10) is True
 
+
+
+def test_build_preserves_existing_middle_key_mapping():
+    km = KeyMapper.__new__(KeyMapper)
+    km.use_88_key_layout = False
+    km.key_map = {36: {"key": "existing", "modifiers": [Key.ctrl]}}
+
+    km._build()
+
+    assert km.key_map[36] == {"key": "existing", "modifiers": [Key.ctrl]}
