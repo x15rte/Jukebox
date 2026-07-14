@@ -5,7 +5,7 @@
 [![Discord](https://img.shields.io/discord/1475355729056764066)](https://discord.gg/jaxgETk5Em)  
 MIDI to Roblox Piano!  
 
-Supports Windows, macOS, and Linux 
+Supports Windows, macOS, and Linux (Full tested on windows)
 
 <img width="874" height="627" alt="Jukebox-v260614-Windows-x64_OumhVDd733" src="https://github.com/user-attachments/assets/47843548-dc95-42d3-97a6-cb303838519a" />
 
