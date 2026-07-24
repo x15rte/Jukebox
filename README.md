@@ -1,6 +1,6 @@
 # Jukebox 🎹 
 [![Python Version](https://img.shields.io/badge/python-3.12-blue.svg)](https://python.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/x15rte/Jukebox/blob/main/LICENSE) 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/x15rte/Jukebox/blob/main/LICENSE)   
 MIDI to Roblox Piano!  
 
 Supports Windows, macOS, and Linux (Full tested on windows)
